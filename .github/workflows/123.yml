@@ -1,0 +1,141 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Prepare build files
+        run: |
+          # 解码base64编码的keystore文件
+          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > app/app.key
+          
+          # 写入签名配置到local.properties
+          echo "${{ secrets.SIGNING_CONFIG }}" > local.properties
+
+      - name: Modify package name
+        run: |
+          # 自动修改包名：lastchat.rikkafork.cocolal → lastchat.ll3
+          find . -type f \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.gradle" \) -exec sed -i 's/lastchat\.rikkafork\.cocolal/lastchat.ll3/g' {} +
+          
+          # 更新 AndroidManifest.xml 中的 package 属性（如果存在）
+          if [ -f "app/src/main/AndroidManifest.xml" ]; then
+            sed -i 's/package="lastchat\.rikkafork\.cocolal"/package="lastchat.ll3"/g' app/src/main/AndroidManifest.xml
+          fi
+          
+          # 更新 build.gradle 中的 applicationId
+          if [ -f "app/build.gradle" ]; then
+            sed -i 's/applicationId "lastchat\.rikkafork\.cocolal"/applicationId "lastchat.ll3"/g' app/build.gradle
+            sed -i "s/applicationId 'lastchat\.rikkafork\.cocolal'/applicationId 'lastchat.ll3'/g" app/build.gradle
+          fi
+          
+          echo "Package name modified to lastchat.ll3"
+
+      - name: Create Firebase Stub
+        run: |
+          # 创建零依赖的 Firebase Stub 目录结构
+          mkdir -p app/src/main/java/com/google/firebase
+          
+          # 创建 FirebaseApp stub
+          cat > app/src/main/java/com/google/firebase/FirebaseApp.java << 'EOF'
+          package com.google.firebase;
+          import android.content.Context;
+          public class FirebaseApp {
+              public static FirebaseApp getInstance() { return new FirebaseApp(); }
+              public static FirebaseApp initializeApp(Context context) { return new FirebaseApp(); }
+          }
+          EOF
+          
+          # 创建 FirebaseAnalytics stub
+          cat > app/src/main/java/com/google/firebase/analytics/FirebaseAnalytics.java << 'EOF'
+          package com.google.firebase.analytics;
+          import android.content.Context;
+          import android.os.Bundle;
+          public class FirebaseAnalytics {
+              private static FirebaseAnalytics instance;
+              public static FirebaseAnalytics getInstance(Context context) {
+                  if (instance == null) instance = new FirebaseAnalytics();
+                  return instance;
+              }
+              public void logEvent(String name, Bundle params) {}
+              public void setUserProperty(String name, String value) {}
+              public void setUserId(String id) {}
+          }
+          EOF
+          
+          # 创建 FirebaseMessaging stub
+          cat > app/src/main/java/com/google/firebase/messaging/FirebaseMessaging.java << 'EOF'
+          package com.google.firebase.messaging;
+          import com.google.android.gms.tasks.Task;
+          public class FirebaseMessaging {
+              private static FirebaseMessaging instance;
+              public static FirebaseMessaging getInstance() {
+                  if (instance == null) instance = new FirebaseMessaging();
+                  return instance;
+              }
+              public Task<String> getToken() {
+                  return com.google.android.gms.tasks.Tasks.forResult("");
+              }
+          }
+          EOF
+          
+          echo "Firebase stub classes created"
+
+      - name: Disable Google Services Plugin
+        run: |
+          # 注释掉或移除 build.gradle 中的 google-services 插件
+          if [ -f "app/build.gradle" ]; then
+            # 注释掉 apply plugin: 'com.google.gms.google-services'
+            sed -i "s/apply plugin: 'com.google.gms.google-services'/\\/\\/ apply plugin: 'com.google.gms.google-services'/g" app/build.gradle
+            sed -i 's/apply plugin: "com.google.gms.google-services"/\/\/ apply plugin: "com.google.gms.google-services"/g' app/build.gradle
+            
+            # 注释掉 implementation platform('com.google.firebase:firebase-bom
+            sed -i "s/implementation platform('com.google.firebase:firebase-bom/\\/\\/ implementation platform('com.google.firebase:firebase-bom/g" app/build.gradle
+            sed -i 's/implementation platform("com.google.firebase:firebase-bom/\/\/ implementation platform("com.google.firebase:firebase-bom/g' app/build.gradle
+            
+            # 注释掉 firebase 相关依赖
+            sed -i "s/implementation 'com.google.firebase:firebase-/\\/\\/ implementation 'com.google.firebase:firebase-/g" app/build.gradle
+            sed -i 's/implementation "com.google.firebase:firebase-/\/\/ implementation "com.google.firebase:firebase-/g' app/build.gradle
+          fi
+          
+          # 同样处理项目级 build.gradle
+          if [ -f "build.gradle" ]; then
+            sed -i "s/classpath 'com.google.gms:google-services/\\/\\/ classpath 'com.google.gms:google-services/g" build.gradle
+            sed -i 's/classpath "com.google.gms:google-services/\/\/ classpath "com.google.gms:google-services/g' build.gradle
+          fi
+          
+          echo "Google Services plugin disabled"
+
+      - name: Gradle Build
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: artifacts
+          path: app/build/outputs/apk/release/*.apk
+
