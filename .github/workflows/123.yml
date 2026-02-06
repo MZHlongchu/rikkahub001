@@ -1,8 +1,12 @@
 name: Release Build
 
 on:
-  workflow_dispatch:
-
+  push:
+    tags:
+      - "*plus*"
+      
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
