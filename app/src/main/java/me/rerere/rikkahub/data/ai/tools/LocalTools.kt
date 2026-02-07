@@ -461,6 +461,60 @@ class LocalTools(
     }
 
     /**
+     * 容器运行时 Python 执行工具（PRoot）
+     * 仅当容器运行时启用且就绪时暴露
+     */
+    fun createContainerPythonTool(sandboxId: Uuid): Tool {
+        return Tool(
+            name = "container_python",
+            description = """使用 Chaquopy 在容器内执行 Python 代码（PRoot）。
+通过 pip 安装额外的 Python 包。
+代码中通过 print() 输出结果。""".trimIndent(),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("code", buildJsonObject {
+                            put("type", "string")
+                            put("description", "要执行的 Python 代码，使用 print() 输出结果")
+                        })
+                    },
+                    required = listOf("code")
+                )
+            },
+            execute = { args ->
+                val code = args.jsonObject["code"]?.jsonPrimitive?.contentOrNull
+                    ?: return@Tool listOf(UIMessagePart.Text(buildJsonObject {
+                        put("success", JsonPrimitive(false))
+                        put("error", JsonPrimitive("Missing required parameter: code"))
+                        put("exitCode", -1)
+                        put("stdout", "")
+                        put("stderr", "")
+                    }.toString()))
+
+                // 安全检查
+                val securityCheck = checkContainerCommandSecurity(code)
+                if (!securityCheck.isAllowed) {
+                    return@Tool listOf(UIMessagePart.Text(buildJsonObject {
+                        put("success", JsonPrimitive(false))
+                        put("error", JsonPrimitive("Security violation: ${securityCheck.errorMessage}"))
+                        put("exitCode", -1)
+                        put("stdout", "")
+                        put("stderr", "")
+                    }.toString()))
+                }
+
+                // 使用 python3 -c 执行代码
+                val command = "python3 - << 'PYTHONEOF'\n${code}\nPYTHONEOF"
+                val result = prootManager.executeShell(
+                    sandboxId = sandboxId.toString(),
+                    command = command
+                )
+                listOf(UIMessagePart.Text(result.toString()))
+            }
+        )
+    }
+
+    /**
      * 通用沙箱工具创建函数
      */
     private fun createSandboxTool(
