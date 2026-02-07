@@ -295,7 +295,7 @@ class SubAgentExecutor(
 
         // 容器运行时工具（仅当容器启用且正在运行）
         if (toolSet.enableContainer && containerEnabled) {
-            tools.add(localTools.createContainerPythonTool(sandboxId))
+            // tools.add(localTools.createContainerPythonTool(sandboxId))
             tools.add(localTools.createContainerShellTool(sandboxId))
         }
 
