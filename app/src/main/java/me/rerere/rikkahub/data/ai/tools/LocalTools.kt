@@ -1713,11 +1713,23 @@ private data class ContainerSecurityResult(
 /**
  * 系统关键路径列表 - 禁止删除或修改
  */
+/**
+ * 用户数据路径 - 完全放开，不做任何限制
+ */
+private val USER_DATA_PATHS = setOf(
+    "/workspace",   // 沙箱工作区
+    "/home",        // 用户主目录
+    "/root",        // root 用户目录
+    "/usr/local",   // 用户安装的开发工具
+    "/tmp",         // 临时目录
+    "/var/tmp"      // 临时目录
+)
+
 private val PROTECTED_SYSTEM_PATHS = setOf(
     "/bin", "/sbin", "/usr/bin", "/usr/sbin",
     "/lib", "/lib64", "/usr/lib", "/usr/lib64",
-    "/etc", "/dev", "/proc", "/sys", "/run", "/tmp"
-    // 移除 /usr/local/bin 和 /usr/local/sbin 的保护
+    "/etc", "/dev", "/proc", "/sys", "/run"
+    // /tmp 已移除保护，允许用户自由操作临时文件
     // 允许用户自由管理开发工具（Python, Node.js, Go 等）
 )
 
@@ -1754,19 +1766,27 @@ private fun checkContainerCommandSecurity(command: String): ContainerSecurityRes
         return ContainerSecurityResult(isAllowed = true)
     }
 
-    // 检查是否操作受保护路径
+    // 检查每个路径
     for (path in foundPaths) {
         val normalizedPath = path.removeSuffix("/")
 
-        // 检查是否直接匹配受保护路径或是其子目录
+        // 优先检查：用户数据路径直接放行
+        val isUserPath = USER_DATA_PATHS.any { userPath ->
+            normalizedPath == userPath || normalizedPath.startsWith("$userPath/")
+        }
+        if (isUserPath) {
+            continue  // 用户路径，跳过保护检查
+        }
+
+        // 检查是否操作受保护的系统路径
         for (protectedPath in PROTECTED_SYSTEM_PATHS) {
             if (normalizedPath == protectedPath ||
                 normalizedPath.startsWith("$protectedPath/")) {
                 return ContainerSecurityResult(
                     isAllowed = false,
                     errorMessage = "Cannot modify system path: $path. " +
-                        "System path $protectedPath is protected for system stability. " +
-                        "You can delete user-installed tools in /usr/local (python, node, go, rust, etc.)"
+                        "System path $protectedPath is protected. " +
+                        "User paths (/workspace, /tmp, /usr/local, /home, /root) are freely accessible."
                 )
             }
         }
