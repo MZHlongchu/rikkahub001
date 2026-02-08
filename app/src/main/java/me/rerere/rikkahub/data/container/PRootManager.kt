@@ -588,10 +588,6 @@ class PRootManager(private val context: Context) {
                 add("-b")
                 add("${container.upperDir}/root:/root")
 
-                // 额外绑定挂载 usr/lib 以确保库文件可访问
-                // 使用 ! 后缀表示不追踪符号链接，确保覆盖 rootfs 中的同名目录
-                add("-b")
-                add("${container.upperDir}/usr/lib:/usr/lib!")
 
                 // 根目录使用基础 rootfs（只读）- 必须在 -b 之后
                 add("-R")
@@ -1488,9 +1484,6 @@ class PRootManager(private val context: Context) {
             add("-b")
             add("${container.upperDir}/root:/root")
 
-            // 额外绑定挂载 usr/lib 以确保库文件可访问
-            add("-b")
-            add("${container.upperDir}/usr/lib:/usr/lib!")
 
             // 根目录使用基础 rootfs（只读）- 必须在 -b 之后
             add("-R")
