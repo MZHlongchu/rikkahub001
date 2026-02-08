@@ -461,6 +461,10 @@ class PRootManager(private val context: Context) {
         if (nodeExists) {
             toolPaths.add("/usr/local/node/bin")
             env["NODE_HOME"] = "/usr/local/node"
+            // npm 配置 - 解决缓存和临时目录问题
+            env["npm_config_cache"] = "/tmp/npm-cache"
+            env["npm_config_prefix"] = "/usr/local"
+            env["npm_config_update_notifier"] = "false"
         }
 
         // Go
@@ -615,6 +619,7 @@ class PRootManager(private val context: Context) {
             processEnv["PROOT_TMP_DIR"] = context.cacheDir.absolutePath
             processEnv["PREFIX"] = "/usr"
             processEnv["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            processEnv["PROOT_NO_SECCOMP"] = "1"  // 修复 npm segmentation fault
 
             // 如果 termux-exec 可用，设置 LD_PRELOAD
             if (hasTermuxExec) {
@@ -1433,6 +1438,7 @@ class PRootManager(private val context: Context) {
         processEnv["PROOT_TMP_DIR"] = context.cacheDir.absolutePath
         processEnv["PREFIX"] = "/usr"
         processEnv["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            processEnv["PROOT_NO_SECCOMP"] = "1"  // 修复 npm segmentation fault
 
         // 检查 termux-exec 是否可用
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
