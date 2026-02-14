@@ -54,8 +54,14 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
     // 低复杂度稳定性参数
     private const val GLOBAL_MIN_SEARCH_INTERVAL_MS = 450L
     private const val SOURCE_COOLDOWN_MS = 90_000L
-    private const val MAX_RETRY_ATTEMPTS = 2
+    private const val OTHER_SOURCE_MAX_RETRY_ATTEMPTS = 1
     private const val INITIAL_RETRY_BACKOFF_MS = 350L
+    private const val SEARCH_TOTAL_BUDGET_MS = 8_000L
+    private const val SEARXNG_INSTANCE_COOLDOWN_MS = 30_000L
+    private const val SEARXNG_INSTANCE_FAILURE_THRESHOLD = 2
+    private const val MAX_EFFECTIVE_RESULT_SIZE = 20
+    private const val MAX_SCRAPE_HTML_CHARS = 1_200_000
+    private const val MAX_SCRAPE_MARKDOWN_CHARS = 120_000
 
     // 统一的请求指纹池（降低固定特征）
     private val USER_AGENTS = listOf(
@@ -69,6 +75,7 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
     private val inFlightSearches = ConcurrentHashMap<String, Deferred<List<SearchResultItem>>>()
     private val sourceCooldownUntil = ConcurrentHashMap<String, Long>()
     private val sourceFailureCount = ConcurrentHashMap<String, Int>()
+    private val searXNGInstanceStates = ConcurrentHashMap<String, SearXNGInstanceState>()
     private val searchLock = Any()
 
     @Volatile
@@ -111,13 +118,14 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
-            val normalizedQuery = "${query.trim().lowercase()}#${commonOptions.resultSize}"
+            val effectiveResultSize = commonOptions.resultSize.coerceIn(1, MAX_EFFECTIVE_RESULT_SIZE)
+            val normalizedQuery = "${query.trim().lowercase()}#$effectiveResultSize"
 
             val currentDeferred = inFlightSearches[normalizedQuery]
             if (currentDeferred != null) {
                 val mergedResults = currentDeferred.await()
                 require(mergedResults.isNotEmpty()) { "Search failed: no results found" }
-                return@runCatching SearchResult(items = mergedResults.take(commonOptions.resultSize * 2))
+                return@runCatching SearchResult(items = mergedResults.take(effectiveResultSize * 2))
             }
 
             val deferred = CompletableDeferred<List<SearchResultItem>>()
@@ -125,13 +133,13 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
             if (existing != null) {
                 val mergedResults = existing.await()
                 require(mergedResults.isNotEmpty()) { "Search failed: no results found" }
-                return@runCatching SearchResult(items = mergedResults.take(commonOptions.resultSize * 2))
+                return@runCatching SearchResult(items = mergedResults.take(effectiveResultSize * 2))
             }
 
             try {
                 enforceGlobalSearchInterval()
 
-                val allResults = runSearchPipelines(query, commonOptions.resultSize)
+                val allResults = runSearchPipelines(query, effectiveResultSize)
 
                 // 过滤和排序
                 val filteredResults = allResults
@@ -143,7 +151,7 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
                     "Search failed: no results found"
                 }
 
-                val finalResults = filteredResults.take(commonOptions.resultSize * 2)
+                val finalResults = filteredResults.take(effectiveResultSize * 2)
                 deferred.complete(finalResults)
                 SearchResult(items = finalResults)  // 返回足够多的结果
             } catch (e: Exception) {
@@ -175,13 +183,25 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
                     .userAgent(randomUserAgent())
                     .header("Accept-Language", randomAcceptLanguage())
                     .timeout(10000)
+                    .maxBodySize(MAX_SCRAPE_HTML_CHARS)
                     .get()
                     .outerHtml()
             }
 
-            val markdown = LocalReader.extract(html)
-            val title = Jsoup.parse(html).title()
-            val description = Jsoup.parse(html).select("meta[name=description]").attr("content")
+            val boundedHtml = if (html.length > MAX_SCRAPE_HTML_CHARS) {
+                html.substring(0, MAX_SCRAPE_HTML_CHARS)
+            } else {
+                html
+            }
+
+            val markdown = LocalReader.extract(
+                html = boundedHtml,
+                maxInputChars = MAX_SCRAPE_HTML_CHARS,
+                maxOutputChars = MAX_SCRAPE_MARKDOWN_CHARS
+            )
+            val parsed = Jsoup.parse(boundedHtml)
+            val title = parsed.title()
+            val description = parsed.select("meta[name=description]").attr("content")
 
             ScrapedResult(
                 urls = listOf(
@@ -203,14 +223,16 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
      */
     private suspend fun runSearchPipelines(query: String, limit: Int): List<SearchResultItem> {
         val targetCount = (limit * 3).coerceAtLeast(limit + 4)
-        val sourceOrder = listOf(SOURCE_SEARXNG, SOURCE_DDG, SOURCE_BING, SOURCE_SOGOU, SOURCE_GOOGLE)
+        val sourceOrder = buildSourceOrder()
         val collected = mutableListOf<SearchResultItem>()
+        val startedAt = System.currentTimeMillis()
 
         for ((index, source) in sourceOrder.withIndex()) {
             if (collected.size >= targetCount) break
+            if (System.currentTimeMillis() - startedAt >= SEARCH_TOTAL_BUDGET_MS) break
 
             if (index > 0) {
-                delay(Random.nextLong(120L, 320L))
+                delay(Random.nextLong(80L, 180L))
             }
 
             val sourceResults = when (source) {
@@ -225,9 +247,19 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
             if (sourceResults.isNotEmpty()) {
                 collected += sourceResults
             }
+
+            if (System.currentTimeMillis() - startedAt >= SEARCH_TOTAL_BUDGET_MS) break
         }
 
         return collected
+    }
+
+    private fun buildSourceOrder(): List<String> {
+        val baseOrder = listOf(SOURCE_SEARXNG, SOURCE_DDG, SOURCE_BING, SOURCE_SOGOU, SOURCE_GOOGLE)
+        if (baseOrder.size <= 1) return baseOrder
+
+        val start = Random.nextInt(baseOrder.size)
+        return baseOrder.drop(start) + baseOrder.take(start)
     }
 
     /**
@@ -266,24 +298,47 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
                 .get()
 
             doc.select(".result").take(limit).mapNotNull { element ->
-                val rawUrl = element.select(".result__url").text().trim()
-                val normalizedUrl = when {
-                    rawUrl.startsWith("http") -> rawUrl
-                    rawUrl.isNotBlank() -> "https://$rawUrl"
-                    else -> ""
-                }
+                // 从 result__a 的 href 提取真实链接，并解码 uddg 跳转
+                val href = element.select("a.result__a").attr("href")
+                val realUrl = extractDuckDuckGoRealUrl(href)
 
-                if (normalizedUrl.isBlank()) {
+                if (realUrl.isBlank()) {
                     null
                 } else {
                     SearchResultItem(
-                        title = element.select(".result__title").text(),
-                        url = normalizedUrl,
+                        title = element.select(".result__a").text(),
+                        url = realUrl,
                         text = element.select(".result__snippet").text()
                     )
                 }
             }
         }
+    }
+
+    /**
+     * 解码 DuckDuckGo 跳转链接，提取真实 URL
+     */
+    private fun extractDuckDuckGoRealUrl(href: String): String {
+        if (href.isBlank()) return ""
+
+        // 直接是真实链接（非跳转）
+        if (href.startsWith("http") && !href.contains("duckduckgo.com/l/?")) {
+            return href
+        }
+
+        // 解析 uddg 跳转链接
+        if (href.contains("duckduckgo.com/l/?") && href.contains("uddg=")) {
+            val uddgStart = href.indexOf("uddg=") + 5
+            val uddgEnd = href.indexOf("&", uddgStart).takeIf { it > 0 } ?: href.length
+            val encodedUrl = href.substring(uddgStart, uddgEnd)
+            return try {
+                java.net.URLDecoder.decode(encodedUrl, "UTF-8")
+            } catch (_: Exception) {
+                ""
+            }
+        }
+
+        return ""
     }
 
     /**
@@ -361,23 +416,19 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
      * SearXNG 搜索入口（实例随机顺序，成功即返回）
      */
     internal suspend fun searchSearXNG(query: String, limit: Int): List<SearchResultItem> {
-        return executeSourceSearch(SOURCE_SEARXNG) {
-            val instances = SEARXNG_INSTANCES.shuffled()
-            for ((index, instanceUrl) in instances.withIndex()) {
-                if (index > 0) {
-                    delay(Random.nextLong(80L, 220L))
-                }
-
-                val results = try {
-                    searchSearXNGInstance(instanceUrl, query, limit)
-                } catch (_: Exception) {
-                    emptyList()
-                }
-
-                if (results.isNotEmpty()) {
-                    return@executeSourceSearch results
-                }
+        val now = System.currentTimeMillis()
+        val instance = pickAvailableSearXNGInstance(now) ?: return emptyList()
+        return try {
+            val results = searchSearXNGInstance(instance, query, limit)
+            if (results.isEmpty()) {
+                markSearXNGInstanceFailure(instance, null)
+                emptyList()
+            } else {
+                markSearXNGInstanceSuccess(instance)
+                results
             }
+        } catch (e: Exception) {
+            markSearXNGInstanceFailure(instance, extractStatusCode(e))
             emptyList()
         }
     }
@@ -419,19 +470,53 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
         }
     }
 
+    private fun pickAvailableSearXNGInstance(nowMs: Long): String? {
+        val shuffled = SEARXNG_INSTANCES.shuffled()
+        return shuffled.firstOrNull { instance ->
+            val state = searXNGInstanceStates[instance]
+            state == null || state.cooldownUntilMs <= nowMs
+        }
+    }
+
+    private fun markSearXNGInstanceSuccess(instanceUrl: String) {
+        searXNGInstanceStates[instanceUrl] = SearXNGInstanceState(
+            failureCount = 0,
+            cooldownUntilMs = 0L
+        )
+    }
+
+    private fun markSearXNGInstanceFailure(instanceUrl: String, statusCode: Int?) {
+        val now = System.currentTimeMillis()
+        val current = searXNGInstanceStates[instanceUrl] ?: SearXNGInstanceState()
+        val failures = current.failureCount + 1
+        val shouldCooldown = statusCode == 403 || statusCode == 429 || failures >= SEARXNG_INSTANCE_FAILURE_THRESHOLD
+
+        searXNGInstanceStates[instanceUrl] = if (shouldCooldown) {
+            SearXNGInstanceState(
+                failureCount = 0,
+                cooldownUntilMs = now + SEARXNG_INSTANCE_COOLDOWN_MS
+            )
+        } else {
+            current.copy(failureCount = failures)
+        }
+    }
+
     /**
      * 统一源请求执行器：负责冷却、重试退避、失败统计
      */
     private suspend fun executeSourceSearch(
         source: String,
+        maxRetryAttempts: Int = OTHER_SOURCE_MAX_RETRY_ATTEMPTS,
+        retryOnEmptyResults: Boolean = false,
+        trackSourceHealth: Boolean = true,
         fetcher: suspend () -> List<SearchResultItem>
     ): List<SearchResultItem> {
-        if (isSourceCoolingDown(source)) {
+        if (trackSourceHealth && isSourceCoolingDown(source)) {
             return emptyList()
         }
 
         var backoffMs = INITIAL_RETRY_BACKOFF_MS
-        repeat(MAX_RETRY_ATTEMPTS + 1) { attempt ->
+        repeat(maxRetryAttempts + 1) { attempt ->
             try {
                 if (attempt > 0) {
                     delay(backoffMs + Random.nextLong(80L, 220L))
@@ -439,13 +524,22 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
                 }
 
                 val results = fetcher()
-                markSourceSuccess(source)
+                if (results.isEmpty()) {
+                    throw SourceEmptyResultException("Empty results (possibly blocked)")
+                }
+                if (trackSourceHealth) {
+                    markSourceSuccess(source)
+                }
                 return results
             } catch (e: Exception) {
                 val statusCode = extractStatusCode(e)
-                markSourceFailure(source, statusCode)
+                if (trackSourceHealth) {
+                    markSourceFailure(source, statusCode)
+                }
 
-                val canRetry = attempt < MAX_RETRY_ATTEMPTS && isRetriable(e, statusCode) && !isSourceCoolingDown(source)
+                val canRetry = attempt < maxRetryAttempts &&
+                    isRetriable(e, statusCode, retryOnEmptyResults) &&
+                    (!trackSourceHealth || !isSourceCoolingDown(source))
                 if (!canRetry) {
                     return emptyList()
                 }
@@ -479,6 +573,9 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
      * 记录源失败并按策略触发冷却
      */
     private fun markSourceFailure(source: String, statusCode: Int?) {
+        // 定期清理过期记录，防止 Map 无限增长
+        cleanupExpiredRecords()
+
         val failures = (sourceFailureCount[source] ?: 0) + 1
         sourceFailureCount[source] = failures
 
@@ -489,9 +586,31 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
     }
 
     /**
+     * 清理过期的冷却记录和过大的失败计数
+     */
+    private fun cleanupExpiredRecords() {
+        val now = System.currentTimeMillis()
+        // 清理已过期的冷却记录
+        sourceCooldownUntil.entries.removeIf { it.value < now }
+
+        // 限制失败计数 Map 大小（超过 20 个源时清理最旧的）
+        if (sourceFailureCount.size > 20) {
+            // 简单策略：清空所有失败计数，让系统重新统计
+            sourceFailureCount.clear()
+        }
+    }
+
+    /**
      * 是否属于可重试错误
      */
-    private fun isRetriable(error: Exception, statusCode: Int?): Boolean {
+    private fun isRetriable(
+        error: Exception,
+        statusCode: Int?,
+        retryOnEmptyResults: Boolean
+    ): Boolean {
+        if (error is SourceEmptyResultException && !retryOnEmptyResults) {
+            return false
+        }
         if (statusCode != null) {
             return statusCode == 408 || statusCode == 429 || statusCode >= 500
         }
@@ -559,6 +678,11 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
      * 内部 HTTP 异常（用于非 Jsoup 通道的状态码传递）
      */
     private class SourceHttpException(val statusCode: Int) : IOException("HTTP $statusCode")
+
+    /**
+     * 搜索结果为空异常（可能是被拦截）
+     */
+    private class SourceEmptyResultException(message: String) : IOException(message)
 
 
     // ==================== 结果过滤和排序 ====================
@@ -633,5 +757,10 @@ object RikkaLocalSearchService : SearchService<SearchServiceOptions.RikkaLocalOp
         val title: String,
         @SerialName("content")
         val content: String
+    )
+
+    private data class SearXNGInstanceState(
+        val failureCount: Int = 0,
+        val cooldownUntilMs: Long = 0L
     )
 }
