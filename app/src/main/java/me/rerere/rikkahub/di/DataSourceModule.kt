@@ -24,6 +24,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_6_7
 import me.rerere.rikkahub.data.db.migrations.Migration_11_12
 import me.rerere.rikkahub.data.db.migrations.Migration_12_13
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.repository.SkillRepository
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.rikkahub.data.sync.S3Sync
 import okhttp3.MediaType.Companion.toMediaType
@@ -172,5 +173,13 @@ val dataSourceModule = module {
 
     single<RikkaHubAPI> {
         get<Retrofit>().create(RikkaHubAPI::class.java)
+    }
+
+    single {
+        SkillRepository(
+            context = get(),
+            okHttpClient = get(),
+            json = get(),
+        )
     }
 }
