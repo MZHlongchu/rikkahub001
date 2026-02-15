@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources>
+  <!-- Agent Skills -->
+  <string name="skill_page_title">Agent Skills</string>
+  <string name="skill_page_desc">Manage and import agent skill packs</string>
+  <string name="skill_tab_local">My Skills</string>
+  <string name="skill_tab_marketplace">Marketplace</string>
+  <string name="skill_import_zip">Import ZIP</string>
+  <string name="skill_import_success">Skill imported successfully</string>
+  <string name="skill_import_failed">Import failed: %s</string>
+  <string name="skill_install">Install</string>
+  <string name="skill_install_success">Skill installed successfully</string>
+  <string name="skill_install_failed">Install failed: %s</string>
+  <string name="skill_empty_hint">No skills yet</string>
+  <string name="skill_empty_desc">Import a ZIP with SKILL.md or download from marketplace</string>
+  <string name="skill_source_local">Local</string>
+  <string name="skill_source_marketplace">Marketplace</string>
+  <string name="skill_edit_title">Edit Skill</string>
+  <string name="skill_name">Name</string>
+  <string name="skill_description">Description</string>
+  <string name="skill_search_hint">Search skills...</string>
+  <string name="skill_browse_marketplace">Browse skillsmp.com</string>
+  <string name="skill_marketplace_error">Failed to load marketplace</string>
+  <string name="skill_marketplace_empty">No skills found</string>
+  <string name="skill_retry">Retry</string>
+  <string name="skill_disabled">Disabled</string>
+  <string name="skill_no_skills_hint">No skills available. Add skills in Settings > Agent Skills.</string>
+  <string name="assistant_detail_skills_desc">Assign agent skills to enhance assistant capabilities</string>
+</resources>
