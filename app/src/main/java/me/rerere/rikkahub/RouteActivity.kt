@@ -81,6 +81,7 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMemoryPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantSkillPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
@@ -101,6 +102,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingProviderPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingTTSPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
+import me.rerere.rikkahub.ui.pages.skill.SkillPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -312,6 +314,11 @@ class RouteActivity : ComponentActivity() {
                         AssistantInjectionsPage(route.id)
                     }
 
+                    composable<Screen.AssistantSkill> { backStackEntry ->
+                        val route = backStackEntry.toRoute<Screen.AssistantSkill>()
+                        AssistantSkillPage(route.id)
+                    }
+
                     composable<Screen.Menu> {
                         MenuPage()
                     }
@@ -389,6 +396,10 @@ class RouteActivity : ComponentActivity() {
 
                     composable<Screen.Prompts> {
                         PromptPage()
+                    }
+
+                    composable<Screen.Skills> {
+                        SkillPage()
                     }
                 }
                     if (BuildConfig.DEBUG) {
@@ -487,6 +498,9 @@ sealed interface Screen {
     data class AssistantInjections(val id: String) : Screen
 
     @Serializable
+    data class AssistantSkill(val id: String) : Screen
+
+    @Serializable
     data object Menu : Screen
 
     @Serializable
@@ -542,4 +556,7 @@ sealed interface Screen {
 
     @Serializable
     data object Prompts : Screen
+
+    @Serializable
+    data object Skills : Screen
 }
