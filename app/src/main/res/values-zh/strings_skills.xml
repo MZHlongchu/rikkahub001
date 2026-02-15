@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources>
+  <!-- Agent Skills -->
+  <string name="skill_page_title">Agent 技能</string>
+  <string name="skill_page_desc">管理和导入 Agent 技能包</string>
+  <string name="skill_tab_local">我的技能</string>
+  <string name="skill_tab_marketplace">技能市场</string>
+  <string name="skill_import_zip">导入 ZIP</string>
+  <string name="skill_import_success">技能导入成功</string>
+  <string name="skill_import_failed">导入失败: %s</string>
+  <string name="skill_install">安装</string>
+  <string name="skill_install_success">技能安装成功</string>
+  <string name="skill_install_failed">安装失败: %s</string>
+  <string name="skill_empty_hint">暂无技能</string>
+  <string name="skill_empty_desc">导入包含 SKILL.md 的 ZIP 文件或从市场下载</string>
+  <string name="skill_source_local">本地</string>
+  <string name="skill_source_marketplace">市场</string>
+  <string name="skill_edit_title">编辑技能</string>
+  <string name="skill_name">名称</string>
+  <string name="skill_description">描述</string>
+  <string name="skill_search_hint">搜索技能...</string>
+  <string name="skill_browse_marketplace">浏览 skillsmp.com</string>
+  <string name="skill_marketplace_error">加载市场失败</string>
+  <string name="skill_marketplace_empty">未找到技能</string>
+  <string name="skill_retry">重试</string>
+  <string name="skill_disabled">已禁用</string>
+  <string name="skill_no_skills_hint">暂无可用技能，请在 设置 > Agent 技能 中添加。</string>
+  <string name="assistant_detail_skills_desc">为助手分配 Agent 技能以增强能力</string>
+</resources>
