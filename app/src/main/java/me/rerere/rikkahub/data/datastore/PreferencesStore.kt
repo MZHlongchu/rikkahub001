@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
+import me.rerere.rikkahub.data.model.AgentSkill
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
@@ -121,6 +122,9 @@ class SettingsStore(
 
         // 容器运行时
         val ENABLE_CONTAINER_RUNTIME = booleanPreferencesKey("enable_container_runtime")
+
+        // Agent Skills
+        val AGENT_SKILLS = stringPreferencesKey("agent_skills")
     }
 
     private val dataStore = context.settingsStore
@@ -195,6 +199,9 @@ class SettingsStore(
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
                 enableContainerRuntime = preferences[ENABLE_CONTAINER_RUNTIME] == true,
+                agentSkills = preferences[AGENT_SKILLS]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptyList(),
             )
         }
         .map {
@@ -237,6 +244,7 @@ class SettingsStore(
             val validMcpServerIds = settings.mcpServers.map { it.id }.toSet()
             val validModeInjectionIds = settings.modeInjections.map { it.id }.toSet()
             val validLorebookIds = settings.lorebooks.map { it.id }.toSet()
+            val validSkillIds = settings.agentSkills.map { it.id }.toSet()
             settings.copy(
                 providers = settings.providers.distinctBy { it.id }.map { provider ->
                     when (provider) {
@@ -266,6 +274,10 @@ class SettingsStore(
                         // 过滤掉不存在的 Lorebook ID
                         lorebookIds = assistant.lorebookIds.filter { id ->
                             id in validLorebookIds
+                        }.toSet(),
+                        // 过滤掉不存在的 Skill ID
+                        skillIds = assistant.skillIds.filter { id ->
+                            id in validSkillIds
                         }.toSet()
                     )
                 },
@@ -275,6 +287,7 @@ class SettingsStore(
                 },
                 modeInjections = settings.modeInjections.distinctBy { it.id },
                 lorebooks = settings.lorebooks.distinctBy { it.id },
+                agentSkills = settings.agentSkills.distinctBy { it.id },
             )
         }
         .onEach {
@@ -334,6 +347,7 @@ class SettingsStore(
             preferences[MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             preferences[ENABLE_CONTAINER_RUNTIME] = settings.enableContainerRuntime
+            preferences[AGENT_SKILLS] = JsonInstant.encodeToString(settings.agentSkills)
         }
     }
 
@@ -390,6 +404,9 @@ data class Settings(
     
     // 子代理设置
     val enabledSubAgentIds: Set<Uuid> = emptySet(),  // 启用的子代理ID
+
+    // Agent Skills
+    val agentSkills: List<AgentSkill> = emptyList(),
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储
@@ -509,6 +526,27 @@ fun Settings.getEnabledSubAgents(): List<me.rerere.rikkahub.data.model.SubAgent>
     } else {
         me.rerere.rikkahub.data.model.SubAgentTemplates.All.filter { 
             enabledSubAgentIds.contains(it.id) 
+        }
+    }
+}
+
+/**
+ * 获取助手关联的技能列表
+ */
+fun Settings.getAssistantSkills(assistant: Assistant): List<AgentSkill> {
+    return agentSkills.filter { it.id in assistant.skillIds && it.enabled }
+}
+
+/**
+ * 获取助手技能的合并提示词内容
+ */
+fun Settings.getAssistantSkillsPrompt(assistant: Assistant): String {
+    val skills = getAssistantSkills(assistant)
+    if (skills.isEmpty()) return ""
+    return skills.joinToString("\n\n") { skill ->
+        buildString {
+            appendLine("<!-- Skill: ${skill.name} -->")
+            append(skill.content)
         }
     }
 }
