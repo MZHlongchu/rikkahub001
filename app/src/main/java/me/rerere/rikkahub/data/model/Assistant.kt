@@ -41,6 +41,7 @@ data class Assistant(
     val background: String? = null,
     val modeInjectionIds: Set<Uuid> = emptySet(),      // 关联的模式注入 ID
     val lorebookIds: Set<Uuid> = emptySet(),            // 关联的 Lorebook ID
+    val skillIds: Set<Uuid> = emptySet(),               // 关联的 Agent Skill ID
 )
 
 @Serializable
@@ -86,11 +87,9 @@ fun String.replaceRegexes(
                     regex = Regex(regex.findRegex),
                     replacement = regex.replaceString,
                 )
-                // println("Regex: ${regex.findRegex} -> ${result}")
                 result
             } catch (e: Exception) {
                 e.printStackTrace()
-                // 如果正则表达式格式错误，返回原字符串
                 acc
             }
         } else {
