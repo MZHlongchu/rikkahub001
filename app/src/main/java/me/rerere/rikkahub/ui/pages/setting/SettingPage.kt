@@ -56,6 +56,7 @@ import com.composables.icons.lucide.Monitor
 import com.composables.icons.lucide.Palette
 import com.composables.icons.lucide.ScrollText
 import com.composables.icons.lucide.Share2
+import com.composables.icons.lucide.Sparkles
 import com.composables.icons.lucide.SunMoon
 import com.composables.icons.lucide.Terminal
 import com.composables.icons.lucide.Volume2
@@ -188,6 +189,16 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     description = { Text(stringResource(R.string.setting_page_prompts_desc)) },
                     icon = { Icon(Lucide.BookOpen, "Prompts") },
                     link = Screen.Prompts
+                )
+            }
+
+            item {
+                SettingItem(
+                    navController = navController,
+                    title = { Text(stringResource(R.string.skill_page_title)) },
+                    description = { Text(stringResource(R.string.skill_page_desc)) },
+                    icon = { Icon(Lucide.Sparkles, "Skills") },
+                    link = Screen.Skills
                 )
             }
 
