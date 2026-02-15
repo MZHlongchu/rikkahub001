@@ -34,6 +34,7 @@ import com.composables.icons.lucide.Code
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.MessageSquare
 import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Sparkles
 import com.composables.icons.lucide.Syringe
 import com.composables.icons.lucide.Wrench
 import me.rerere.rikkahub.R
@@ -141,6 +142,13 @@ fun AssistantDetailPage(id: String) {
                     title = stringResource(R.string.assistant_page_tab_local_tools),
                     description = stringResource(R.string.assistant_detail_local_tools_desc),
                     onClick = { navController.navigate(Screen.AssistantLocalTool(id)) }
+                )
+
+                SettingCard(
+                    icon = Lucide.Sparkles,
+                    title = stringResource(R.string.skill_page_title),
+                    description = stringResource(R.string.assistant_detail_skills_desc),
+                    onClick = { navController.navigate(Screen.AssistantSkill(id)) }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
