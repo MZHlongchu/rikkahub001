@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew:*)",
+      "Bash(find:*)",
+      "Bash(uv run --directory locale-tui src/main.py:*)",
+      "Bash(dir:*)",
+      "Bash(.\\\\gradlew.bat :app:compileDebugKotlin:*)",
+      "Bash(D:\\\\Android\\\\platform-tools\\\\adb.exe install:*)",
+      "Bash(\"/d/Android/platform-tools/adb.exe\" install:*)",
+      "Bash(ls -la:*)",
+      "Bash(D:/Android/platform-tools/adb devices:*)",
+      "Bash(D:/Android/platform-tools/adb install:*)",
+      "Bash(D:/Android/platform-tools/adb logcat:*)",
+      "Bash(D:/Android/platform-tools/adb shell:*)",
+      "Bash(git -C rikkahub-1.9 diff:*)",
+      "WebSearch"
+    ],
+    "deny": []
+  }
+}
