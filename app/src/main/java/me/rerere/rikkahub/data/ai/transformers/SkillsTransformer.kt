@@ -4,8 +4,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.data.model.AgentSkill
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.model.shouldTrigger // 显式导入扩展函数
 
 /**
  * Agent Skills 提示词注入转换器
@@ -15,8 +14,6 @@ import kotlinx.serialization.Serializable
  *    到对话底部（最新消息之前）
  */
 object SkillsTransformer : InputMessageTransformer {
-
-    private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun transform(
         ctx: TransformerContext,
