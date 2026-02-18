@@ -9,8 +9,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -230,8 +228,8 @@ class RouteActivity : ComponentActivity() {
                         onBack = { backStack.removeLastOrNull() },
                         transitionSpec = { slideInHorizontally { it } togetherWith slideOutHorizontally { -it } },
                         popTransitionSpec = {
-                            (slideInHorizontally { -it / 2 } + scaleIn(initialScale = 1.3f) + fadeIn()) togetherWith
-                                    (slideOutHorizontally { it } + scaleOut(targetScale = 0.75f) + fadeOut())
+                            (slideInHorizontally { -it / 2 } + fadeIn()) togetherWith
+                                    (slideOutHorizontally { it } + fadeOut())
                         },
                         entryProvider = entryProvider {
                             entry<Screen.Chat>(
