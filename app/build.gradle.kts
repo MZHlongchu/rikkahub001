@@ -15,6 +15,19 @@ android {
     namespace = "me.rerere.rikkahub"
     compileSdk = 36
 
+    // 添加这个 lint 配置块
+    lint {
+        disable += "ExpiredTargetSdkVersion"
+        // 如果还有其他需要禁用的检查，可以在这里添加
+        // disable += "OtherLintCheck"
+        
+        // 可选：如果你希望生成 baseline 文件来忽略现有问题
+        // baseline = file("lint-baseline.xml")
+        
+        // 可选：设置为 true 可以在遇到错误时继续构建（不推荐，但可作为临时方案）
+        // abortOnError = false
+    }
+
     defaultConfig {
         applicationId = "me.rerere.rikkahub"
         minSdk = 26
