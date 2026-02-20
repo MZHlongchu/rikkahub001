@@ -33,3 +33,11 @@
 # Android 不包含这些类，需要告知 R8 忽略
 -dontwarn java.lang.management.ManagementFactory
 -dontwarn java.lang.management.RuntimeMXBean
+# 修复 Ktor 在 Android 上的 R8 混淆问题
+# java.lang.management 在 Android 上不可用，需要 keep 或 dontwarn
+
+-dontwarn java.lang.management.ManagementFactory
+-dontwarn java.lang.management.RuntimeMXBean
+
+# 或者更通用的规则
+-dontwarn java.lang.management.**
