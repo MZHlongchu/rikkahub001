@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +69,9 @@ import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.reflect.full.primaryConstructor
+
+private const val MAX_SEARCH_API_KEYS = 100
+private val SEARCH_API_KEY_SPLIT_REGEX = "[\\s,]+".toRegex()
 
 @Composable
 fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
@@ -439,23 +444,12 @@ private fun TavilyOptions(
     options: SearchServiceOptions.TavilyOptions,
     onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text("API Key")
+    TavilyApiKeysEditor(
+        apiKeysRaw = options.apiKey,
+        onUpdate = { updated ->
+            onUpdateOptions(options.copy(apiKey = updated))
         }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(
-                    options.copy(
-                        apiKey = it
-                    )
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    )
 
     FormItem(
         label = {
@@ -483,6 +477,110 @@ private fun TavilyOptions(
             }
         }
     }
+}
+
+@Composable
+private fun TavilyApiKeysEditor(
+    apiKeysRaw: String,
+    onUpdate: (String) -> Unit
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var keyInputs by remember(apiKeysRaw) { mutableStateOf(parseSearchApiKeys(apiKeysRaw)) }
+
+    FormItem(
+        label = {
+            Text("API Key")
+        }
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Tavily Key Pool",
+                    modifier = Modifier.weight(1f)
+                )
+                Text(text = "${keyInputs.size}/$MAX_SEARCH_API_KEYS")
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = if (expanded) Lucide.X else Lucide.SquarePen,
+                        contentDescription = null
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    keyInputs.forEachIndexed { index, value ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = value,
+                                onValueChange = { text ->
+                                    val updated = keyInputs.toMutableList()
+                                    updated[index] = text
+                                    keyInputs = updated
+                                    onUpdate(joinSearchApiKeys(updated))
+                                },
+                                label = { Text("Key ${index + 1}") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            IconButton(
+                                onClick = {
+                                    val updated = keyInputs.toMutableList().apply { removeAt(index) }
+                                    keyInputs = updated
+                                    onUpdate(joinSearchApiKeys(updated))
+                                }
+                            ) {
+                                Icon(imageVector = Lucide.X, contentDescription = "Remove key")
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            if (keyInputs.size >= MAX_SEARCH_API_KEYS) return@Button
+                            val updated = keyInputs + ""
+                            keyInputs = updated
+                            onUpdate(joinSearchApiKeys(updated))
+                        },
+                        enabled = keyInputs.size < MAX_SEARCH_API_KEYS
+                    ) {
+                        Icon(imageVector = Lucide.Plus, contentDescription = null)
+                        Text("Add Key")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun parseSearchApiKeys(raw: String): List<String> {
+    return raw
+        .split(SEARCH_API_KEY_SPLIT_REGEX)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(MAX_SEARCH_API_KEYS)
+}
+
+private fun joinSearchApiKeys(keys: List<String>): String {
+    return keys
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(MAX_SEARCH_API_KEYS)
+        .joinToString(separator = "\n")
 }
 
 @Composable

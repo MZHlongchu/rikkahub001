@@ -59,7 +59,7 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.JinaOptions -> JinaSearchService
                 is SearchServiceOptions.BochaOptions -> BochaSearchService
                 is SearchServiceOptions.RikkaHubOptions -> RikkaHubSearchService
-                is SearchServiceOptions.RikkaLocalOptions -> RikkaLocalSearchService
+                is SearchServiceOptions.RikkaLocalOptions -> BingSearchService
             } as SearchService<T>
         }
 
@@ -140,7 +140,6 @@ sealed class SearchServiceOptions {
             FirecrawlOptions::class to "Firecrawl",
             JinaOptions::class to "Jina",
             BochaOptions::class to "博查",
-            RikkaLocalOptions::class to "Rikka内置",
         )
     }
 
@@ -252,6 +251,7 @@ sealed class SearchServiceOptions {
         val depth: String = "standard",
     ) : SearchServiceOptions()
 
+    // Legacy option kept only for backward compatibility with old settings payload.
     @Serializable
     @SerialName("rikka_local")
     data class RikkaLocalOptions(
