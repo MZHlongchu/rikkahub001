@@ -9,15 +9,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -50,8 +50,10 @@ import com.composables.icons.lucide.ClipboardPaste
 import com.composables.icons.lucide.Clock
 import com.composables.icons.lucide.Earth
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.RotateCcw
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Volume2
 import com.composables.icons.lucide.Wrench
 import com.composables.icons.lucide.X
 import kotlinx.coroutines.launch
@@ -67,7 +69,8 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.highlight.HighlightText
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.event.AppEvent
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -77,12 +80,11 @@ import me.rerere.rikkahub.ui.components.ui.DotLoading
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.components.ui.FormItem
-import me.rerere.rikkahub.ui.components.ui.GridLoading
-import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
+import me.rerere.rikkahub.utils.openUrl
 import org.koin.compose.koinInject
 
 private object ToolNames {
@@ -91,6 +93,7 @@ private object ToolNames {
     const val SCRAPE_WEB = "scrape_web"
     const val GET_TIME_INFO = "get_time_info"
     const val CLIPBOARD = "clipboard_tool"
+    const val TTS = "text_to_speech"
 }
 
 private object MemoryActions {
@@ -119,6 +122,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         ClipboardActions.WRITE -> Lucide.ClipboardPaste
         else -> Lucide.Clipboard
     }
+    ToolNames.TTS -> Lucide.Volume2
 
     else -> Lucide.Wrench
 }
@@ -135,6 +139,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     var showResult by remember { mutableStateOf(false) }
     var showDenyDialog by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(true) }
+    val eventBus: AppEventBus = koinInject()
+    val scope = rememberCoroutineScope()
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val arguments = tool.inputAsJson()
@@ -171,6 +177,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             else -> stringResource(R.string.chat_message_tool_call_generic, tool.toolName)
         }
 
+        ToolNames.TTS -> {
+            val preview = arguments.getStringContent("text")?.let { text ->
+                if (text.length > 24) text.take(24) + "…" else text
+            } ?: ""
+            "Speaking: $preview"
+        }
+
         else -> stringResource(R.string.chat_message_tool_call_generic, tool.toolName)
     }
 
@@ -183,6 +196,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             (content?.jsonObject?.get("items")?.jsonArray?.isNotEmpty() == true)
 
         ToolNames.SCRAPE_WEB -> arguments.getStringContent("url") != null
+        ToolNames.TTS -> arguments.getStringContent("text") != null
         else -> false
     } || isDenied || images.isNotEmpty()
 
@@ -302,6 +316,33 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                         )
                     }
+                    if (tool.toolName == ToolNames.TTS) {
+                        val text = arguments.getStringContent("text") ?: ""
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = text,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            FilledTonalIconButton(
+                                onClick = { scope.launch { eventBus.emit(AppEvent.Speak(text)) } },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Lucide.RotateCcw,
+                                    contentDescription = "Replay",
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                    }
                     if (images.isNotEmpty()) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -363,7 +404,6 @@ private fun ToolCallPreviewSheet(
     output: List<UIMessagePart>,
     onDismissRequest: () -> Unit = {}
 ) {
-    val navController = LocalNavController.current
     val memoryRepo: MemoryRepository = koinInject()
     val scope = rememberCoroutineScope()
 
@@ -391,7 +431,6 @@ private fun ToolCallPreviewSheet(
                 toolName == ToolNames.SEARCH_WEB -> SearchWebPreview(
                     arguments = arguments,
                     content = content,
-                    navController = navController
                 )
 
                 toolName == ToolNames.SCRAPE_WEB -> ScrapeWebPreview(content = content)
@@ -414,8 +453,8 @@ private fun ToolCallPreviewSheet(
 private fun SearchWebPreview(
     arguments: JsonElement,
     content: JsonElement,
-    navController: me.rerere.rikkahub.ui.context.Navigator
 ) {
+    val context = LocalContext.current
     val items = content.jsonObject["items"]?.jsonArray ?: emptyList()
     val answer = content.getStringContent("answer")
     val query = arguments.getStringContent("query") ?: ""
@@ -455,7 +494,7 @@ private fun SearchWebPreview(
                 val text = item.getStringContent("text") ?: return@items
 
                 Card(
-                    onClick = { navController.navigate(Screen.WebView(url = url)) },
+                    onClick = { context.openUrl(url) },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     )

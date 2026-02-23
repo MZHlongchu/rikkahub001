@@ -134,7 +134,6 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.ui.components.ui.InjectionSelector
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
-import me.rerere.rikkahub.ui.components.ui.RandomGridLoading
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager

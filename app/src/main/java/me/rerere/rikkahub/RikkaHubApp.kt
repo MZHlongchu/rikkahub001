@@ -1,12 +1,16 @@
 package me.rerere.rikkahub
 
 import android.app.Application
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.compose.foundation.ComposeFoundationFlags
 import androidx.compose.runtime.Composer
 import androidx.compose.runtime.tooling.ComposeStackTraceMode
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -24,8 +28,8 @@ import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.container.PRootManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.DatabaseUtil
-import me.rerere.rikkahub.web.WebServerManager
 import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
@@ -36,6 +40,7 @@ private const val TAG = "RikkaHubApp"
 
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
+const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -63,7 +68,23 @@ class RikkaHubApp : Application() {
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
+        // Increment launch count
+        incrementLaunchCount()
+
         // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+    }
+
+    private fun incrementLaunchCount() {
+        get<AppScope>().launch {
+            runCatching {
+                val store = get<SettingsStore>()
+                val current = store.settingsFlowRaw.first()
+                store.update(current.copy(launchCount = current.launchCount + 1))
+                Log.i(TAG, "incrementLaunchCount: ${store.settingsFlowRaw.first().launchCount}")
+            }.onFailure {
+                Log.e(TAG, "incrementLaunchCount failed", it)
+            }
+        }
     }
 
     private fun deleteTempFiles() {
@@ -104,7 +125,20 @@ class RikkaHubApp : Application() {
                 delay(500)
                 val settings = get<SettingsStore>().settingsFlowRaw.first()
                 if (settings.webServerEnabled) {
-                    get<WebServerManager>().start(port = settings.webServerPort)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            this@RikkaHubApp,
+                            android.Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        Log.w(TAG, "startWebServerIfEnabled: notification permission not granted, skipping")
+                        return@launch
+                    }
+                    val intent = Intent(this@RikkaHubApp, WebServerService::class.java).apply {
+                        action = WebServerService.ACTION_START
+                        putExtra(WebServerService.EXTRA_PORT, settings.webServerPort)
+                    }
+                    startForegroundService(intent)
                 }
             }.onFailure {
                 Log.e(TAG, "startWebServerIfEnabled failed", it)
@@ -133,12 +167,20 @@ class RikkaHubApp : Application() {
             .setVibrationEnabled(false)
             .build()
         notificationManager.createNotificationChannel(chatLiveUpdateChannel)
+
+        val webServerChannel = NotificationChannelCompat
+            .Builder(WEB_SERVER_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName(getString(R.string.notification_channel_web_server))
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(webServerChannel)
     }
 
     override fun onTerminate() {
         super.onTerminate()
         get<AppScope>().cancel()
-        get<WebServerManager>().stop()
+        stopService(Intent(this, WebServerService::class.java))
     }
 }
 
@@ -147,6 +189,6 @@ class AppScope : CoroutineScope by CoroutineScope(
         + Dispatchers.Main
         + CoroutineName("AppScope")
         + CoroutineExceptionHandler { _, e ->
-            Log.e(TAG, "AppScope exception", e)
-        }
+        Log.e(TAG, "AppScope exception", e)
+    }
 )

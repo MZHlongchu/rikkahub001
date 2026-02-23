@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.ai.subagent.SubAgentExecutor
 import me.rerere.rikkahub.data.ai.tools.LocalTools
 import me.rerere.rikkahub.data.container.BackgroundProcessManager
 import me.rerere.rikkahub.data.container.PRootManager
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
@@ -26,6 +27,10 @@ val appModule = module {
 
     single {
         Highlighter(get())
+    }
+
+    single {
+        AppEventBus()
     }
 
     single {

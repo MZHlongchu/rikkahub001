@@ -300,6 +300,13 @@ class ChatVM(
         }
     }
 
+    fun showDeleteBlockedWhileGeneratingError() {
+        chatService.addError(
+            error = IllegalStateException("请先停止生成再删除消息"),
+            conversationId = _conversationId
+        )
+    }
+
     fun regenerateAtMessage(
         message: UIMessage,
         regenerateAssistantMsg: Boolean = true
@@ -370,8 +377,8 @@ class ChatVM(
     }
 
     fun updateConversation(newConversation: Conversation) {
-        viewModelScope.launch {
-            chatService.saveConversation(_conversationId, newConversation)
+        chatService.updateConversationState(_conversationId) {
+            newConversation
         }
     }
 
