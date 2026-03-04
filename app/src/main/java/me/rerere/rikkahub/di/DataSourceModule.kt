@@ -179,6 +179,19 @@ val dataSourceModule = module {
 
                 chain.proceed(requestBuilder.build())
             }
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val contentType = request.body?.contentType()
+                if (contentType?.charset() != null) {
+                    chain.proceed(
+                        request.newBuilder()
+                            .header("Content-Type", "${contentType.type}/${contentType.subtype}")
+                            .build()
+                    )
+                } else {
+                    chain.proceed(request)
+                }
+            }
             .addInterceptor(RequestLoggingInterceptor())
             .addInterceptor(AIRequestInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {

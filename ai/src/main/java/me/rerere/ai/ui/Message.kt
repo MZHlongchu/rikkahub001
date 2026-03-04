@@ -224,7 +224,7 @@ fun List<UIMessage>.handleMessageChunk(chunk: MessageChunk, model: Model? = null
     val choice = chunk.choices.getOrNull(0) ?: return this
     val message = choice.delta ?: choice.message ?: throw Exception("delta/message is null")
     if (this.last().role != message.role) {
-        return this + message.copy(modelId = model?.id)
+        return this + (UIMessage(modelId = model?.id, role = message.role, parts = emptyList()) + chunk)
     } else {
         val last = this.last() + chunk
         return this.dropLast(1) + last
@@ -266,11 +266,6 @@ fun List<UIMessagePart>.isEmptyUIMessage(): Boolean {
             else -> true
         }
     }
-}
-
-fun List<UIMessage>.truncate(index: Int): List<UIMessage> {
-    if (index < 0 || index > this.lastIndex) return this
-    return this.subList(index, this.size)
 }
 
 fun List<UIMessage>.limitContext(size: Int): List<UIMessage> {
