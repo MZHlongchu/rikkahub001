@@ -166,7 +166,6 @@ fun ChatInput(
     workflowEnabled: Boolean = false,
     workflowActive: Boolean = false,
     onToggleWorkflow: () -> Unit = {},
-    onClearContext: () -> Unit,
     onOpenSandboxFileManager: () -> Unit,
     onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int, compressType: CompressType) -> Job,
     onCancelClick: () -> Unit,
@@ -424,7 +423,6 @@ fun ChatInput(
                             conversation = conversation,
                             state = state,
                             assistant = assistant,
-                            onClearContext = onClearContext,
                             onOpenSandboxFileManager = onOpenSandboxFileManager,
                             onCompressContext = onCompressContext,
                             onUpdateAssistant = onUpdateAssistant,
@@ -826,7 +824,6 @@ private fun FilesPicker(
     conversation: Conversation,
     assistant: Assistant,
     state: ChatInputState,
-    onClearContext: () -> Unit,
     onOpenSandboxFileManager: () -> Unit,
     onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int, compressType: CompressType) -> Job,
     onUpdateAssistant: (Assistant) -> Unit,
@@ -927,24 +924,6 @@ private fun FilesPicker(
                 .clickable {
                     onShowCompressDialogChange(true)
                 },
-        )
-
-        ListItem(
-            leadingContent = {
-                Icon(
-                    imageVector = HugeIcons.Cancel01,
-                    contentDescription = stringResource(R.string.chat_page_clear_context),
-                )
-            },
-            headlineContent = {
-                Text(stringResource(R.string.chat_page_clear_context))
-            },
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.large)
-                .clickable(
-                    onClick = {
-                        onClearContext()
-                    }),
         )
 
         ListItem(
