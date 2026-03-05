@@ -96,6 +96,7 @@ class LocalTools(
                             put("description", "The JavaScript code to execute")
                         })
                     },
+                    required = listOf("code")
                 )
             },
             execute = {
@@ -120,21 +121,20 @@ class LocalTools(
                 })
                 val code = it.jsonObject["code"]?.jsonPrimitive?.contentOrNull
                 val result = ctx.evaluate(code)
-                val resultText = buildString {
+                val payload = buildJsonObject {
                     if (logs.isNotEmpty()) {
-                        appendLine("Logs:")
-                        appendLine(logs.joinToString("\n"))
-                        appendLine()
+                        put("logs", JsonPrimitive(logs.joinToString("\n")))
                     }
-                    append("Result: ")
-                    append(
-                        when (result) {
-                            is QuickJSObject -> result.stringify()
-                            else -> result.toString()
+                    put(
+                        key = "result",
+                        element = when (result) {
+                            null -> JsonNull
+                            is QuickJSObject -> JsonPrimitive(result.stringify())
+                            else -> JsonPrimitive(result.toString())
                         }
                     )
                 }
-                listOf(UIMessagePart.Text(resultText))
+                listOf(UIMessagePart.Text(payload.toString()))
             }
         )
     }
