@@ -57,6 +57,13 @@ jobs:
           # 写入Google Services配置
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
 
+
+      ##### 改包名：me.rerere.rikkahub.dev.mod -> me.rerere.rikkahub.dev.mod.none #####
+      - name: Change package to me.rerere.rikkahub.dev.mod.none
+        run: |
+          sed -i 's/applicationId = "me.rerere.rikkahub.dev.mod"/applicationId = "me.rerere.rikkahub.dev.mod.none"/' app/build.gradle.kts
+          echo "✅ Package: me.rerere.rikkahub.dev.mod.none"
+
       - name: Gradle Build
         run: |
           chmod +x gradlew
