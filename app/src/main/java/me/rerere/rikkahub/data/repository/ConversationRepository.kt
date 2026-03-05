@@ -275,7 +275,6 @@ class ConversationRepository(
             createAt = conversation.createAt.toEpochMilli(),
             updateAt = conversation.updateAt.toEpochMilli(),
             assistantId = conversation.assistantId.toString(),
-            truncateIndex = conversation.truncateIndex,
             chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
             isPinned = conversation.isPinned,
             workflowState = conversation.workflowState?.let { JsonInstant.encodeToString(it) } ?: "",
@@ -293,7 +292,6 @@ class ConversationRepository(
             createAt = Instant.ofEpochMilli(conversationEntity.createAt),
             updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
             assistantId = Uuid.parse(conversationEntity.assistantId),
-            truncateIndex = conversationEntity.truncateIndex,
             chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
             isPinned = conversationEntity.isPinned,
             workflowState = conversationEntity.workflowState.takeIf { it.isNotBlank() }?.let {

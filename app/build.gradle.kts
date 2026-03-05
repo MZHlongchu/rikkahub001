@@ -36,8 +36,8 @@ android {
         applicationId = "me.rerere.rikkahub.dev"
         minSdk = 26
         targetSdk = 28
-        versionCode = 142
-        versionName = "2.0.4"
+        versionCode = 143
+        versionName = "2.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -252,6 +252,10 @@ dependencies {
     // https://github.com/drewnoakes/metadata-extractor
     implementation(libs.metadata.extractor)
 
+    // Haze (background blur)
+    implementation(libs.haze)
+    implementation(libs.haze.materials)
+
     // koin
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.android)
@@ -316,6 +320,7 @@ dependencies {
 
     // lucide icons
     implementation(libs.lucide.icons)
+    implementation(libs.huge.icons)
 
     // image viewer
     implementation(libs.image.viewer)

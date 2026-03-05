@@ -43,19 +43,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.ui.context.Navigator
-import com.composables.icons.lucide.List
-import com.composables.icons.lucide.ListTree
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.MessageCirclePlus
-import com.composables.icons.lucide.X
 import com.dokar.sonner.ToastType
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.LeftToRightListBullet
+import me.rerere.hugeicons.stroke.Menu03
+import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -65,13 +64,12 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
-import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.ui.components.sandbox.SandboxFileManagerDialog
 import me.rerere.rikkahub.ui.components.workflow.WorkflowFloatingPanel
 import me.rerere.rikkahub.ui.components.workflow.WorkflowSidebarHandle
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -256,6 +254,7 @@ private fun ChatPageContent(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     var previewMode by rememberSaveable { mutableStateOf(false) }
+    val hazeState = rememberHazeState()
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
     val assistant = setting.assistants.find { it.id == conversation.assistantId }
@@ -303,6 +302,7 @@ private fun ChatPageContent(
                     settings = setting,
                     conversation = conversation,
                     mcpManager = vm.mcpManager,
+                    hazeState = hazeState,
                     onCancelClick = {
                         loadingJob?.cancel()
                     },
@@ -394,6 +394,7 @@ private fun ChatPageContent(
                 loading = loadingJob != null,
                 previewMode = previewMode,
                 settings = setting,
+                hazeState = hazeState,
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
@@ -514,7 +515,7 @@ private fun TopBar(
                         scope.launch { drawerState.open() }
                     }
                 ) {
-                    Icon(Lucide.ListTree, "Messages")
+                    Icon(HugeIcons.Menu03, "Messages")
                 }
             }
         },
@@ -560,7 +561,7 @@ private fun TopBar(
                     onClickMenu()
                 }
             ) {
-                Icon(if (previewMode) Lucide.X else Lucide.List, "Chat Options")
+                Icon(if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet, "Chat Options")
             }
 
             IconButton(
@@ -568,7 +569,7 @@ private fun TopBar(
                     onNewChat()
                 }
             ) {
-                Icon(Lucide.MessageCirclePlus, "New Message")
+                Icon(HugeIcons.MessageAdd01, "New Message")
             }
         },
     )

@@ -444,13 +444,13 @@ class GoogleProvider(
                     when (builtInTool) {
                         BuiltInTools.Search -> {
                             add(buildJsonObject {
-                                put("google_search", buildJsonObject {})
+                                put("googleSearch", buildJsonObject {})
                             })
                         }
 
                         BuiltInTools.UrlContext -> {
                             add(buildJsonObject {
-                                put("url_context", buildJsonObject {})
+                                put("urlContext", buildJsonObject {})
                             })
                         }
                     }
@@ -662,8 +662,8 @@ class GoogleProvider(
         is UIMessagePart.Image -> {
             encodeBase64(false).getOrNull()?.let { encoded ->
                 buildJsonObject {
-                    put("inline_data", buildJsonObject {
-                        put("mime_type", encoded.mimeType)
+                    put("inlineData", buildJsonObject {
+                        put("mimeType", encoded.mimeType)
                         put("data", encoded.base64)
                     })
                     metadata?.get("thoughtSignature")?.jsonPrimitive?.contentOrNull?.let {
@@ -676,8 +676,8 @@ class GoogleProvider(
         is UIMessagePart.Video -> {
             encodeBase64(false).getOrNull()?.let { base64Data ->
                 buildJsonObject {
-                    put("inline_data", buildJsonObject {
-                        put("mime_type", "video/mp4")
+                    put("inlineData", buildJsonObject {
+                        put("mimeType", "video/mp4")
                         put("data", base64Data)
                     })
                 }
@@ -687,8 +687,8 @@ class GoogleProvider(
         is UIMessagePart.Audio -> {
             encodeBase64(false).getOrNull()?.let { base64Data ->
                 buildJsonObject {
-                    put("inline_data", buildJsonObject {
-                        put("mime_type", "audio/mp3")
+                    put("inlineData", buildJsonObject {
+                        put("mimeType", "audio/mp3")
                         put("data", base64Data)
                     })
                 }
