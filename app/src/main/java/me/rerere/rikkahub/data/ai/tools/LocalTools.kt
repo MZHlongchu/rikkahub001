@@ -15,6 +15,8 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.subagent.SubAgentProgressManager
 import me.rerere.rikkahub.data.ai.subagent.SubAgentResult
+import me.rerere.rikkahub.data.event.AppEvent
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.sandbox.SandboxEngine
 import me.rerere.rikkahub.data.model.TodoStatus
 import me.rerere.rikkahub.data.model.TodoItem
@@ -69,12 +71,21 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("sandbox_file")
     data object SandboxFile : LocalToolOption()
+
+    @Serializable
+    @SerialName("tts")
+    data object Tts : LocalToolOption()
+
+    @Serializable
+    @SerialName("ask_user")
+    data object AskUser : LocalToolOption()
 }
 
 class LocalTools(
     private val context: Context,
     private val prootManager: me.rerere.rikkahub.data.container.PRootManager,
     private val backgroundProcessManager: me.rerere.rikkahub.data.container.BackgroundProcessManager,
+    private val eventBus: AppEventBus,
     val subAgentExecutor: me.rerere.rikkahub.data.ai.subagent.SubAgentExecutor? = null,
 ) {
     val javascriptTool by lazy {
@@ -231,6 +242,38 @@ class LocalTools(
      * 工具 1: 沙箱文件操作
      * 基础文件管理：读写、复制移动、压缩解压等
      */
+    val ttsTool by lazy {
+        Tool(
+            name = "text_to_speech",
+            description = """
+                Speak text aloud to the user using the device's text-to-speech engine.
+                Use this when the user asks you to read something aloud, or when audio output is appropriate.
+                The tool returns immediately; audio plays in the background on the device.
+                Provide natural, readable text without markdown formatting.
+            """.trimIndent().replace("\n", " "),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("text", buildJsonObject {
+                            put("type", "string")
+                            put("description", "The text to speak aloud")
+                        })
+                    },
+                    required = listOf("text")
+                )
+            },
+            execute = {
+                val text = it.jsonObject["text"]?.jsonPrimitive?.contentOrNull
+                    ?: error("text is required")
+                eventBus.emit(AppEvent.Speak(text))
+                val payload = buildJsonObject {
+                    put("success", true)
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
+            }
+        )
+    }
+
     fun createSandboxFileTool(sandboxId: Uuid): Tool = createSandboxTool(
         name = "sandbox_file",
         description = "沙箱文件操作。文件用 file_path，目录用 path。最大 50MB。",
@@ -871,7 +914,61 @@ class LocalTools(
         )
     }
 
-      /**
+    val askUserTool by lazy {
+        Tool(
+            name = "ask_user",
+            description = """
+                Ask the user one or more questions when you need clarification, additional information, or confirmation.
+                Each question can optionally provide a list of suggested options for the user to choose from.
+                The user may select an option or provide their own free-text answer for each question.
+                The answers will be returned as a JSON object mapping question IDs to the user's responses.
+            """.trimIndent().replace("\n", " "),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("questions", buildJsonObject {
+                            put("type", "array")
+                            put("description", "List of questions to ask the user")
+                            put("items", buildJsonObject {
+                                put("type", "object")
+                                put("properties", buildJsonObject {
+                                    put("id", buildJsonObject {
+                                        put("type", "string")
+                                        put("description", "Unique identifier for this question")
+                                    })
+                                    put("question", buildJsonObject {
+                                        put("type", "string")
+                                        put("description", "The question text to display to the user")
+                                    })
+                                    put("options", buildJsonObject {
+                                        put("type", "array")
+                                        put(
+                                            "description",
+                                            "Optional list of suggested options for the user to choose from"
+                                        )
+                                        put("items", buildJsonObject {
+                                            put("type", "string")
+                                        })
+                                    })
+                                })
+                                put("required", buildJsonArray {
+                                    add("id")
+                                    add("question")
+                                })
+                            })
+                        })
+                    },
+                    required = listOf("questions")
+                )
+            },
+            needsApproval = true,
+            execute = {
+                error("ask_user tool should be handled by HITL flow")
+            }
+        )
+    }
+
+    /**
        * 获取工具列表（新版 - 5个独立沙箱工具）
        *
        * 容器运行时工具暴露逻辑变更（全局单例）：
@@ -911,6 +1008,9 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.Clipboard)) {
             tools.add(clipboardTool)
+        }
+        if (options.contains(LocalToolOption.Tts)) {
+            tools.add(ttsTool)
         }
 
         // ✅ 文件管理工具 - 需要开关
@@ -954,6 +1054,9 @@ class LocalTools(
                 mcpTools = mcpTools
             ))
         }
+        if (options.contains(LocalToolOption.AskUser)) {
+            tools.add(askUserTool)
+        }
 
         return tools
     }
@@ -989,6 +1092,8 @@ class LocalTools(
                 LocalToolOption.WorkflowControl -> "Workflow Control"
                 LocalToolOption.SubAgent -> "SubAgent"
                 LocalToolOption.SandboxFile -> "Sandbox File"
+                LocalToolOption.Tts -> "Text To Speech"
+                LocalToolOption.AskUser -> "Ask User"
                 else -> null // 忽略已废弃的选项
             }
         }.joinToString(", ")

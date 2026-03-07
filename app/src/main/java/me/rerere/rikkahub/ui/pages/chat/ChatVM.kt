@@ -331,6 +331,12 @@ class ChatVM(
         chatService.handleToolApproval(_conversationId, toolCallId, approved, reason)
     }
 
+    fun handleToolAnswer(
+        toolCallId: String,
+        answer: String,
+    ) {        chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
+    }
+
     fun saveConversationAsync() {
         viewModelScope.launch {
             chatService.saveConversation(_conversationId, conversation.value)
@@ -360,7 +366,12 @@ class ChatVM(
         viewModelScope.launch {
             val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
             val updatedConversation = conversationFull.copy(assistantId = targetAssistantId)
-            conversationRepo.updateConversation(updatedConversation)
+            if (conversation.id == _conversationId) {
+                chatService.saveConversation(_conversationId, updatedConversation)
+                settingsStore.updateAssistant(targetAssistantId)
+            } else {
+                conversationRepo.updateConversation(updatedConversation)
+            }
         }
     }
 
@@ -489,3 +500,4 @@ class ChatVM(
         }
     }
 }
+

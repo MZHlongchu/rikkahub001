@@ -82,6 +82,7 @@ val appModule = module {
             context = get(),
             prootManager = get(),
             backgroundProcessManager = get(),
+            eventBus = get(),
             subAgentExecutor = get()
         )
     }
