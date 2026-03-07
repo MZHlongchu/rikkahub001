@@ -41,10 +41,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
-    }
+        //ndk {
+            //abiFilters += listOf("arm64-v8a")
+        //}
+    //}
 
     signingConfigs {
         create("release") {
