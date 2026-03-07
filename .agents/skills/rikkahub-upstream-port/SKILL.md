@@ -123,9 +123,16 @@ git merge --ff-only port-upstream-<yyyymmdd>-<version>
 git push origin master
 ```
 
+Delete the finished port branch after master is updated:
+
+```bash
+git branch -d port-upstream-<yyyymmdd>-<version>
+```
+
 ## Step 6: Publish Release
 
 Use upstream version tag format directly (no custom prefix/suffix).
+Only build and publish the `arm64-v8a` APK. Do not keep or upload `x86_64` or universal APKs.
 
 Example:
 
@@ -157,4 +164,5 @@ Poll every few seconds, print log tail, and stop on timeout if needed.
 - `:app:assembleRelease -x lintVitalRelease` succeeds
 - Web static is present and not regressed
 - `origin/master` pushed
+- Finished `port-*` branch deleted locally
 - Release published with correct tag and asset
