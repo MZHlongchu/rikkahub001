@@ -128,6 +128,16 @@ private const val RECALL_MAX_RETURN_CHUNKS = 5
 private const val RECALL_MAX_INJECT_TOKENS = 2_500
 private const val SOURCE_PREVIEW_MAX_RESULTS = 3
 
+internal fun shouldPreservePendingToolNode(tools: List<UIMessagePart.Tool>): Boolean {
+    if (tools.isEmpty()) return false
+    if (tools.all { it.isExecuted }) return true
+
+    return tools.any { tool ->
+        tool.approvalState is ToolApprovalState.Approved ||
+            tool.approvalState is ToolApprovalState.Answered
+    }
+}
+
 enum class ChatNoticeKind {
     ERROR,
     SUCCESS,
@@ -841,17 +851,8 @@ class ChatService(
             val hasPendingTools = node.currentMessage.getTools().any { !it.isExecuted }
 
             if (hasPendingTools) {
-                // Skip removal if any tool is Approved (waiting to be executed)
-                val hasApprovedTool = node.currentMessage.getTools().any {
-                    it.approvalState is ToolApprovalState.Approved
-                }
-                if (hasApprovedTool) {
-                    return@mapIndexed node
-                }
-
-                // If all tools are executed, it's valid
-                val allToolsExecuted = node.currentMessage.getTools().all { it.isExecuted }
-                if (allToolsExecuted && node.currentMessage.getTools().isNotEmpty()) {
+                // Keep tool nodes that are ready to resume after approval or ask_user answers.
+                if (shouldPreservePendingToolNode(node.currentMessage.getTools())) {
                     return@mapIndexed node
                 }
 
