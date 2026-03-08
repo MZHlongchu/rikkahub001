@@ -17,20 +17,9 @@ android {
     namespace = "me.rerere.rikkahub"
     compileSdk = 36
 
-    // 添加这个 lint 配置块
     lint {
         disable += "ExpiredTargetSdkVersion"
-        // 如果还有其他需要禁用的检查，可以在这里添加
-        // disable += "OtherLintCheck"
-
-        // 可选：如果你希望生成 baseline 文件来忽略现有问题
-        // baseline = file("lint-baseline.xml")
-
-        // 可选：设置为 true 可以在遇到错误时继续构建（不推荐，但可作为临时方案）
-        // abortOnError = false
     }
-
-
 
     defaultConfig {
         applicationId = "me.rerere.rikkahub.dev"
@@ -41,9 +30,20 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        //ndk {
-            //abiFilters += listOf("arm64-v8a")
-        //}
+        // 已注释掉 ndk.abiFilters，改用 splits.abi 配置
+        // ndk {
+        //     abiFilters += listOf("arm64-v8a")
+        // }
+    }
+
+    // 添加 splits 配置替代 ndk.abiFilters
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
     }
 
     signingConfigs {
@@ -100,25 +100,31 @@ android {
             isProfileable = true
         }
     }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    
     buildFeatures {
         compose = true
         buildConfig = true
     }
+    
     sourceSets {
         getByName("androidTest").assets.directories.add("$projectDir/schemas")
     }
+    
     androidResources {
         generateLocaleConfig = true
     }
+    
     packaging {
         jniLibs {
             useLegacyPackaging = true
         }
     }
+    
     tasks.withType<KotlinCompile>().configureEach {
         compilerOptions.optIn.add("androidx.compose.material3.ExperimentalMaterial3Api")
         compilerOptions.optIn.add("androidx.compose.material3.ExperimentalMaterial3ExpressiveApi")
@@ -203,6 +209,7 @@ chaquopy {
         }
     }
 }
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -237,7 +244,6 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     // Image metadata extractor
-    // https://github.com/drewnoakes/metadata-extractor
     implementation(libs.metadata.extractor)
 
     // Haze (background blur)
@@ -303,7 +309,7 @@ dependencies {
     // Toast (Sonner)
     implementation(libs.sonner)
 
-    // Reorderable (https://github.com/Calvin-LL/Reorderable/)
+    // Reorderable
     implementation(libs.reorderable)
 
     // lucide icons
@@ -314,7 +320,6 @@ dependencies {
     implementation(libs.image.viewer)
 
     // JLatexMath
-    // https://github.com/rikkahub/jlatexmath-android
     implementation(libs.jlatexmath)
     implementation(libs.jlatexmath.font.greek)
     implementation(libs.jlatexmath.font.cyrillic)
@@ -322,10 +327,10 @@ dependencies {
     // mcp
     implementation(libs.modelcontextprotocol.kotlin.sdk)
 
-    // jmDNS (mDNS/Bonjour for .local hostname)
+    // jmDNS
     implementation(libs.jmdns)
 
-    // sqlite-android (requery SQLite for Android)
+    // sqlite-android
     implementation(libs.sqlite.android)
 
     // modules
@@ -339,9 +344,6 @@ dependencies {
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
 
-    // Leak Canary
-    // debugImplementation(libs.leakcanary.android)
-
     // tests
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -352,3 +354,4 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }
+// 确保文件以空行结束，不要有 ***
