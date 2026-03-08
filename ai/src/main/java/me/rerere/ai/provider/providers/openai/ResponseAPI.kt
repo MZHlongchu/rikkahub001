@@ -460,6 +460,7 @@ class ResponseAPI(
                         )
                     )
                 } else if (type == "reasoning") {
+                    val encryptedContent = item["encrypted_content"]?.jsonPrimitive?.content
                     return MessageChunk(
                         id = id,
                         model = "",
@@ -474,6 +475,9 @@ class ResponseAPI(
                                             reasoning = "",
                                             createdAt = Clock.System.now(),
                                             finishedAt = null,
+                                            metadata = buildJsonObject {
+                                                put("encrypted_content", encryptedContent)
+                                            }
                                         )
                                     )
                                 ),
