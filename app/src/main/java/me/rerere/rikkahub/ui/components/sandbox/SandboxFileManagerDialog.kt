@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.sandbox
 
 import android.content.Intent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,8 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,7 +52,6 @@ import com.composables.icons.lucide.FileType
 import com.composables.icons.lucide.Folder
 import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.File
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.Share2
@@ -265,12 +267,13 @@ fun SandboxFileManagerDialog(
                                 item = item,
                                 onClick = {
                                     if (item.isDirectory) {
-                                        pathHistory = pathHistory + item.name
-                                        currentPath = if (currentPath.isEmpty()) {
+                                        val newPath = if (currentPath.isEmpty()) {
                                             item.name
                                         } else {
                                             "$currentPath/${item.name}"
                                         }
+                                        currentPath = newPath
+                                        pathHistory = pathHistory + newPath
                                     } else {
                                         // 打开文件
                                         val file = java.io.File(context.filesDir, "sandboxes/$sandboxId/${item.path}")
@@ -595,6 +598,7 @@ private fun BreadcrumbNavigation(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(top = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -629,14 +633,18 @@ private fun BreadcrumbNavigation(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = path,
+                        text = path.substringAfterLast("/"),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (index == pathHistory.size - 2) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.clickable { onPathClick(index + 1) }
+                        modifier = Modifier
+                            .widthIn(max = 100.dp)
+                            .clickable { onPathClick(index + 1) },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -682,7 +690,9 @@ private fun FileManagerToolbar(
             Text(
                 text = if (currentPath.isEmpty()) "根目录" else currentPath.substringAfterLast('/'),
                 style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .widthIn(max = 150.dp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

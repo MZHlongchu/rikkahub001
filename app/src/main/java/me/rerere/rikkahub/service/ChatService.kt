@@ -1004,11 +1004,17 @@ class ChatService(
         val conversation = conversationRepo.getConversationById(conversationId)
             ?: throw IllegalStateException("Conversation not found")
         try {
-            rebuildConversationIndexes(
+            val indexedCount = rebuildConversationIndexes(
                 conversationId = conversationId,
                 conversation = conversation,
                 settings = settings,
             )
+            addSuccessNotice(
+                message = context.getString(R.string.memory_index_updated),
+                conversationId = conversationId,
+                title = context.getString(R.string.memory_index_updated_title)
+            )
+            indexedCount
         } catch (error: Throwable) {
             saveConversation(
                 conversationId,
@@ -1085,6 +1091,8 @@ class ChatService(
         }
 
         val showAutoProgress = trigger == "auto-threshold"
+        val showIndexSuccessNotice =
+            trigger == "manual" || trigger == "auto-threshold" || trigger == "regenerate"
         if (showAutoProgress) {
             updateCompressionUiState(
                 conversationId,
@@ -1215,7 +1223,7 @@ class ChatService(
                     conversation = updatedConversation,
                     settings = settings,
                 )
-                if (showAutoProgress) {
+                if (showIndexSuccessNotice) {
                     addSuccessNotice(
                         message = context.getString(R.string.memory_index_updated),
                         conversationId = conversationId,

@@ -35,6 +35,7 @@ import me.rerere.ai.ui.MessageChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.buildToolStreamMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
@@ -190,7 +191,8 @@ class ClaudeProvider(
                 }
 
                 val dataJson = json.parseToJsonElement(data).jsonObject
-                val deltaMessage = parseMessage(buildJsonArray {
+                val deltaMessage = parseMessage(
+                    content = buildJsonArray {
                     val contentBlockObj = dataJson["content_block"]?.jsonObject
                     val deltaObj = dataJson["delta"]?.jsonObject
                     if (contentBlockObj != null) {
@@ -199,7 +201,9 @@ class ClaudeProvider(
                     if (deltaObj != null) {
                         add(deltaObj)
                     }
-                })
+                },
+                    streamIndex = dataJson["index"]?.jsonPrimitive?.intOrNull
+                )
                 val tokenUsage = parseTokenUsage(dataJson)
                 val messageChunk = MessageChunk(
                     id = id ?: "",
@@ -495,7 +499,7 @@ class ClaudeProvider(
         put("content", output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
     }
 
-    private fun parseMessage(content: JsonArray): UIMessage {
+    private fun parseMessage(content: JsonArray, streamIndex: Int? = null): UIMessage {
         val parts = mutableListOf<UIMessagePart>()
 
         content.forEach { contentBlock ->
@@ -542,7 +546,8 @@ class ClaudeProvider(
                             toolCallId = id,
                             toolName = name,
                             input = if (input.isEmpty()) "" else json.encodeToString(input),
-                            output = emptyList()
+                            output = emptyList(),
+                            metadata = buildToolStreamMetadata(streamIndex)
                         )
                     )
                 }
@@ -554,7 +559,8 @@ class ClaudeProvider(
                             toolCallId = "",
                             toolName = "",
                             input = input ?: "",
-                            output = emptyList()
+                            output = emptyList(),
+                            metadata = buildToolStreamMetadata(streamIndex)
                         )
                     )
                 }

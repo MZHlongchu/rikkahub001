@@ -48,7 +48,7 @@ class FilesManager(
         mimeType: String? = null,
     ): ManagedFileEntity = withContext(Dispatchers.IO) {
         val resolvedName = displayName ?: getFileNameFromUri(uri) ?: "file"
-        val resolvedMime = mimeType ?: getFileMimeType(uri) ?: "application/octet-stream"
+        val resolvedMime = mimeType ?: resolveMimeType(uri, resolvedName)
         val target = createTargetFile(FileFolders.UPLOAD, resolvedName, resolvedMime)
         context.contentResolver.openInputStream(uri)?.use { input ->
             target.outputStream().use { output ->
@@ -132,7 +132,7 @@ class FilesManager(
         }
         uris.forEach { uri ->
             val sourceName = getFileNameFromUri(uri) ?: uri.lastPathSegment ?: "file"
-            val sourceMime = getFileMimeType(uri)
+            val sourceMime = resolveMimeType(uri, sourceName)
             val fileName = buildUuidFileName(displayName = sourceName, mimeType = sourceMime)
             val file = dir.resolve(fileName)
             if (!file.exists()) {
@@ -454,10 +454,38 @@ class FilesManager(
         }
     }
 
+    fun resolveMimeType(uri: Uri, fileName: String? = null): String {
+        val resolverMime = getFileMimeType(uri)
+        if (!resolverMime.isNullOrBlank() && resolverMime != "application/octet-stream") {
+            return resolverMime
+        }
+
+        val ext = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
+        if (ext.isNotEmpty()) {
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)?.let { return it }
+            archiveMimeTypeFromExtension(ext)?.let { return it }
+        }
+
+        if (uri.scheme == "content") {
+            val header = ByteArray(16)
+            val read = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    input.read(header)
+                } ?: -1
+            }.getOrDefault(-1)
+            if (read > 0) {
+                return sniffMimeType(header.copyOf(read))
+            }
+        }
+
+        return resolverMime ?: "application/octet-stream"
+    }
+
     private fun guessMimeType(file: File, fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         if (ext.isNotEmpty()) {
             return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+                ?: archiveMimeTypeFromExtension(ext)
                 ?: "application/octet-stream"
         }
         return sniffMimeType(file)
@@ -473,6 +501,29 @@ class FilesManager(
 
         if (read <= 0) return "application/octet-stream"
 
+        val detectedMime = sniffMimeType(header.copyOf(read))
+        if (detectedMime != "application/octet-stream") {
+            return detectedMime
+        }
+
+        val textSample = runCatching {
+            val sample = ByteArray(512)
+            FileInputStream(file).use { input ->
+                val len = input.read(sample)
+                if (len <= 0) return@runCatching null
+                sample.copyOf(len)
+            }
+        }.getOrNull()
+        if (textSample != null && isLikelyText(textSample)) {
+            return "text/plain"
+        }
+
+        return "application/octet-stream"
+    }
+
+    private fun sniffMimeType(header: ByteArray): String {
+        if (header.isEmpty()) return "application/octet-stream"
+
         // Magic numbers
         if (header.startsWithBytes(0x89, 0x50, 0x4E, 0x47)) return "image/png"
         if (header.startsWithBytes(0xFF, 0xD8, 0xFF)) return "image/jpeg"
@@ -487,20 +538,22 @@ class FilesManager(
             return "image/webp"
         }
 
-        // Heuristic: treat mostly printable UTF-8 as text/plain
-        val textSample = runCatching {
-            val sample = ByteArray(512)
-            FileInputStream(file).use { input ->
-                val len = input.read(sample)
-                if (len <= 0) return@runCatching null
-                sample.copyOf(len)
-            }
-        }.getOrNull()
-        if (textSample != null && isLikelyText(textSample)) {
+        if (isLikelyText(header)) {
             return "text/plain"
         }
 
         return "application/octet-stream"
+    }
+
+    private fun archiveMimeTypeFromExtension(ext: String): String? = when (ext) {
+        "zip" -> "application/zip"
+        "tar" -> "application/x-tar"
+        "gz", "tgz" -> "application/gzip"
+        "bz2" -> "application/x-bzip2"
+        "7z" -> "application/x-7z-compressed"
+        "rar" -> "application/vnd.rar"
+        "xz" -> "application/x-xz"
+        else -> null
     }
 
     private fun isLikelyText(bytes: ByteArray): Boolean {

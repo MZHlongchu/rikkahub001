@@ -59,10 +59,35 @@ export interface ChatInputProps {
 }
 
 const IMAGE_UPLOAD_ACCEPT = "image/*";
+const ALLOWED_ARCHIVE_MIME_TYPES = new Set([
+  "application/zip",
+  "application/x-tar",
+  "application/gzip",
+  "application/x-bzip2",
+  "application/x-7z-compressed",
+  "application/vnd.rar",
+  "application/x-xz",
+]);
+const ALLOWED_ARCHIVE_EXTENSIONS = new Set([
+  "zip",
+  "tar",
+  "tgz",
+  "gz",
+  "bz2",
+  "7z",
+  "rar",
+  "xz",
+]);
+
+function getFileExtension(fileName: string): string {
+  const ext = fileName.split(".").pop();
+  return ext ? ext.toLowerCase() : "";
+}
 
 async function isAllowedUploadFile(file: globalThis.File): Promise<boolean> {
   const buffer = await file.slice(0, 4100).arrayBuffer();
   const detected = await fileTypeFromBuffer(buffer);
+  const extension = getFileExtension(file.name);
 
   // 无法识别 magic bytes → 文本文件 → 允许
   if (!detected) return true;
@@ -77,7 +102,11 @@ async function isAllowedUploadFile(file: globalThis.File): Promise<boolean> {
   }
 
   // 其他可识别的二进制格式（exe、zip 等）→ 拒绝
-  return false;
+  if (ALLOWED_ARCHIVE_MIME_TYPES.has(detected.mime)) {
+    return true;
+  }
+
+  return ALLOWED_ARCHIVE_EXTENSIONS.has(extension);
 }
 
 function toMessagePart(
