@@ -33,6 +33,7 @@ import me.rerere.ai.ui.MessageChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.buildToolStreamMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
@@ -385,7 +386,7 @@ class ResponseAPI(
         })
     }
 
-    private fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
+    internal fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
         val chunkType = jsonObject["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
 
         when (chunkType) {
@@ -434,32 +435,10 @@ class ResponseAPI(
             "response.output_item.added" -> {
                 val item = jsonObject["item"]?.jsonObject ?: error("chunk item not found")
                 val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
                 if (type == "function_call") {
-                    return MessageChunk(
-                        id = id,
-                        model = "",
-                        choices = listOf(
-                            UIMessageChoice(
-                                index = 0,
-                                message = null,
-                                delta = UIMessage(
-                                    role = MessageRole.ASSISTANT,
-                                    parts = listOf(
-                                        UIMessagePart.Tool(
-                                            toolCallId = id,
-                                            toolName = item["name"]?.jsonPrimitive?.content ?: "",
-                                            input = item["arguments"]?.jsonPrimitive?.content
-                                                ?: "",
-                                            output = emptyList()
-                                        )
-                                    )
-                                ),
-                                finishReason = null
-                            )
-                        )
-                    )
+                    return buildFunctionCallChunk(item)
                 } else if (type == "reasoning") {
+                    val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
                     val encryptedContent = item["encrypted_content"]?.jsonPrimitive?.content
                     return MessageChunk(
                         id = id,
@@ -491,8 +470,10 @@ class ResponseAPI(
             "response.output_item.done" -> {
                 val item = jsonObject["item"]?.jsonObject ?: error("chunk item not found")
                 val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
-                if (type == "reasoning") {
+                if (type == "function_call") {
+                    return buildFunctionCallChunk(item)
+                } else if (type == "reasoning") {
+                    val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
                     val encryptedContent = item["encrypted_content"]?.jsonPrimitive?.content
                     // val summary = item["summary"]?.jsonArray ?: error("summary not found")
                     return MessageChunk(
@@ -523,12 +504,13 @@ class ResponseAPI(
             }
 
             "response.function_call_arguments.done" -> {
-                val toolCallId =
+                val responseItemId =
                     jsonObject["item_id"]?.jsonPrimitive?.content ?: error("item_id not found")
                 val arguments =
                     jsonObject["arguments"]?.jsonPrimitive?.content ?: error("arguments not found")
+                val toolCallId = jsonObject["call_id"]?.jsonPrimitive?.contentOrNull ?: ""
                 return MessageChunk(
-                    id = toolCallId,
+                    id = responseItemId,
                     model = "",
                     choices = listOf(
                         UIMessageChoice(
@@ -540,7 +522,8 @@ class ResponseAPI(
                                         toolCallId = toolCallId,
                                         toolName = "",
                                         input = arguments,
-                                        output = emptyList()
+                                        output = emptyList(),
+                                        metadata = buildToolStreamMetadata(responseItemId = responseItemId)
                                     )
                                 )
                             ),
@@ -654,6 +637,34 @@ class ResponseAPI(
             totalTokens = jsonObject["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
             cachedTokens = jsonObject["input_tokens_details"]?.jsonObjectOrNull?.get("cached_tokens")?.jsonPrimitive?.intOrNull
                 ?: 0
+        )
+    }
+
+    private fun buildFunctionCallChunk(item: JsonObject): MessageChunk {
+        val responseItemId = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
+        val toolCallId = item["call_id"]?.jsonPrimitive?.contentOrNull ?: responseItemId
+        return MessageChunk(
+            id = responseItemId,
+            model = "",
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    message = null,
+                    delta = UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(
+                                toolCallId = toolCallId,
+                                toolName = item["name"]?.jsonPrimitive?.contentOrNull ?: "",
+                                input = item["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                                output = emptyList(),
+                                metadata = buildToolStreamMetadata(responseItemId = responseItemId)
+                            )
+                        )
+                    ),
+                    finishReason = null
+                )
+            )
         )
     }
 }

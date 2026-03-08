@@ -21,6 +21,7 @@ import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 private const val TOOL_STREAM_INDEX_KEY = "stream_tool_index"
+private const val TOOL_RESPONSE_ITEM_ID_KEY = "stream_tool_item_id"
 
 // 公共消息抽象, 具体的Provider实现会转换为API接口需要的DTO
 @Serializable
@@ -503,7 +504,7 @@ sealed class UIMessagePart {
             return Tool(
                 toolCallId = mergedId,
                 toolName = mergedName,
-                input = input + other.input,
+                input = input.mergeStreamingFragment(other.input),
                 output = output + other.output,
                 approvalState = approvalState,
                 metadata = mergeToolMetadata(metadata, other.metadata),
@@ -514,8 +515,14 @@ sealed class UIMessagePart {
 
 private fun List<UIMessagePart>.findMergeTarget(deltaPart: UIMessagePart.Tool): UIMessagePart.Tool? {
     val deltaStreamIndex = deltaPart.streamToolIndex()
+    val deltaResponseItemId = deltaPart.responseItemId()
     if (deltaPart.toolCallId.isNotBlank()) {
         filterIsInstance<UIMessagePart.Tool>().firstOrNull { it.toolCallId == deltaPart.toolCallId }?.let {
+            return it
+        }
+    }
+    if (!deltaResponseItemId.isNullOrBlank()) {
+        filterIsInstance<UIMessagePart.Tool>().firstOrNull { it.responseItemId() == deltaResponseItemId }?.let {
             return it
         }
     }
@@ -524,7 +531,7 @@ private fun List<UIMessagePart>.findMergeTarget(deltaPart: UIMessagePart.Tool): 
             return it
         }
     }
-    if (deltaPart.toolCallId.isNotBlank() || deltaStreamIndex != null) {
+    if (deltaPart.toolCallId.isNotBlank() || deltaStreamIndex != null || !deltaResponseItemId.isNullOrBlank()) {
         return null
     }
     return filterIsInstance<UIMessagePart.Tool>().lastOrNull {
@@ -535,12 +542,21 @@ private fun List<UIMessagePart>.findMergeTarget(deltaPart: UIMessagePart.Tool): 
 private fun UIMessagePart.Tool.streamToolIndex(): Int? =
     metadata?.get(TOOL_STREAM_INDEX_KEY)?.jsonPrimitive?.intOrNull
 
+private fun UIMessagePart.Tool.responseItemId(): String? =
+    metadata?.get(TOOL_RESPONSE_ITEM_ID_KEY)?.jsonPrimitive?.content
+
 private fun String.mergeStreamingFragment(other: String): String {
     if (other.isBlank()) return this
     if (this.isBlank()) return other
     if (this == other) return this
     if (other.startsWith(this)) return other
     if (this.startsWith(other)) return this
+    val maxOverlap = minOf(this.length, other.length)
+    for (overlap in maxOverlap downTo 1) {
+        if (this.endsWith(other.substring(0, overlap))) {
+            return this + other.substring(overlap)
+        }
+    }
     return this + other
 }
 
@@ -550,10 +566,18 @@ private fun mergeToolMetadata(base: JsonObject?, incoming: JsonObject?): JsonObj
     return JsonObject(base + incoming)
 }
 
-fun buildToolStreamMetadata(streamIndex: Int?): JsonObject? {
-    if (streamIndex == null) return null
+fun buildToolStreamMetadata(
+    streamIndex: Int? = null,
+    responseItemId: String? = null
+): JsonObject? {
+    if (streamIndex == null && responseItemId.isNullOrBlank()) return null
     return buildJsonObject {
-        put(TOOL_STREAM_INDEX_KEY, JsonPrimitive(streamIndex))
+        streamIndex?.let {
+            put(TOOL_STREAM_INDEX_KEY, JsonPrimitive(it))
+        }
+        responseItemId?.takeIf { it.isNotBlank() }?.let {
+            put(TOOL_RESPONSE_ITEM_ID_KEY, JsonPrimitive(it))
+        }
     }
 }
 

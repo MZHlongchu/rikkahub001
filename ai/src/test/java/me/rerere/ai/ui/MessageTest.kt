@@ -1,6 +1,8 @@
 package me.rerere.ai.ui
 
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -218,6 +220,90 @@ class MessageTest {
         val messages = createTestMessages(4)
         val result = messages.findKeepStartIndexForVisibleMessages(0)
         assertEquals(messages.size, result)
+    }
+
+    @Test
+    fun `handleMessageChunk should merge overlapping tool argument fragments`() {
+        val existing = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "call_1",
+                    toolName = "sandbox_python",
+                    input = """{"operation":"python_exec","params":{"code":"print(1)"""
+                )
+            )
+        )
+        val chunk = MessageChunk(
+            id = "call_1",
+            model = "",
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    delta = UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(
+                                toolCallId = "call_1",
+                                toolName = "",
+                                input = """print(1)"}}"""
+                            )
+                        )
+                    ),
+                    message = null,
+                    finishReason = null
+                )
+            )
+        )
+
+        val result = listOf(existing).handleMessageChunk(chunk)
+        val tool = result.last().getTools().single()
+
+        assertEquals("""{"operation":"python_exec","params":{"code":"print(1)"}}""", tool.input)
+    }
+
+    @Test
+    fun `handleMessageChunk should merge response api tool chunks by response item id`() {
+        val existing = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "call_1",
+                    toolName = "container_shell",
+                    input = "",
+                    metadata = buildToolStreamMetadata(responseItemId = "fc_item_1")
+                )
+            )
+        )
+        val chunk = MessageChunk(
+            id = "fc_item_1",
+            model = "",
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    delta = UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(
+                                toolCallId = "",
+                                toolName = "",
+                                input = """{"command":"pwd"}""",
+                                metadata = buildToolStreamMetadata(responseItemId = "fc_item_1")
+                            )
+                        )
+                    ),
+                    message = null,
+                    finishReason = null
+                )
+            )
+        )
+
+        val result = listOf(existing).handleMessageChunk(chunk)
+        val tool = result.last().getTools().single()
+
+        assertEquals("call_1", tool.toolCallId)
+        assertEquals("container_shell", tool.toolName)
+        assertEquals("""{"command":"pwd"}""", tool.input)
     }
 
     @Test
