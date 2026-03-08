@@ -30,21 +30,12 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 已注释掉 ndk.abiFilters，改用 splits.abi 配置
-        // ndk {
-        //     abiFilters += listOf("arm64-v8a")
-        // }
-    }
-
-    // 添加 splits 配置替代 ndk.abiFilters
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
+        已注释掉 ndk.abiFilters，改用 splits.abi 配置
+        ndk {
+             abiFilters += listOf("arm64-v8a")
         }
     }
+
 
     signingConfigs {
         create("release") {
