@@ -76,7 +76,38 @@ async function isAllowedUploadFile(file: globalThis.File): Promise<boolean> {
     return true;
   }
 
-  // 其他可识别的二进制格式（exe、zip 等）→ 拒绝
+  // 允许文档类型 (ZIP, PDF, DOCX, PPTX, XLSX 等)
+  // ZIP 格式包括: application/zip, application/x-zip-compressed等
+  // Office 文档: application/vnd.openxmlformats-officedocument.*, application/msword等
+  const allowedMimeTypes = new Set([
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/zip-compressed",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
+    "application/rtf",
+    "application/epub+zip",
+  ]);
+  
+  // 检查是否在允许的MIME类型列表中
+  if (allowedMimeTypes.has(detected.mime)) {
+    return true;
+  }
+  
+  // Office 文档类型 (DOCX, XLSX, PPTX 等) 都是 ZIP 格式
+  if (detected.mime.startsWith("application/vnd.openxmlformats-officedocument")) {
+    return true;
+  }
+
+  // 其他可识别的二进制格式（exe 等）→ 拒绝
   return false;
 }
 
