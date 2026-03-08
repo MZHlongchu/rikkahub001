@@ -30,7 +30,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        已注释掉 ndk.abiFilters，改用 splits.abi 配置
+        // 已注释掉 ndk.abiFilters，改用 splits.abi 配置
         ndk {
              abiFilters += listOf("arm64-v8a")
         }
