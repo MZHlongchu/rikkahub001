@@ -44,7 +44,7 @@ android {
         //ndk {
             //abiFilters += listOf("arm64-v8a")
         //}
-    //}
+    }
 
     signingConfigs {
         create("release") {
