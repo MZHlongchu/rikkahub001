@@ -125,7 +125,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val inputState = vm.inputState
     val latestConversation by rememberUpdatedState(conversation)
 
-    // 初始化输入状态（处理传入�?files �?text 参数�?
+    // 初始化输入状态（处理传入�?files �?text 参数�?
     LaunchedEffect(files, text) {
         if (files.isNotEmpty()) {
             val localFiles = filesManager.createChatFilesByContents(files)
@@ -497,6 +497,7 @@ private fun ChatPageContent(
                 )
             }
 
+
             WorkflowFloatingPanel(
                 visible = showWorkflowPanel,
                 onDismiss = { showWorkflowPanel = false },
@@ -504,6 +505,9 @@ private fun ChatPageContent(
                 onPhaseChange = { phase ->
                     vm.updateWorkflowPhase(phase)
                 },
+                onOpenSandbox = {
+                    showSandboxFileManager = true
+                }
             )
         }
 
@@ -513,7 +517,6 @@ private fun ChatPageContent(
                 onDismiss = { showSandboxFileManager = false }
             )
         }
-    }
 }
 
 @Composable
