@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Sparkles
 import com.composables.icons.lucide.X
@@ -107,7 +108,7 @@ fun WorkflowFloatingPanel(
 
                     // 沙箱文件管理入口
                     WorkflowMenuCard(
-                        icon = Lucide.FolderOpen,
+                        icon = FolderOpen,
                         iconTint = MaterialTheme.colorScheme.secondary,
                         title = "沙箱文件管理",
                         subtitle = "管理对话文件和目录",
