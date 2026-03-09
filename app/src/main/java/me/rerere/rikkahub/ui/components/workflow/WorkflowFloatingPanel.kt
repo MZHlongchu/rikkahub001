@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,8 +30,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Sparkles
+import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.X
 import me.rerere.rikkahub.data.model.WorkflowPhase
+import me.rerere.rikkahub.ui.components.workflow.WorkflowMenuCard
 
 @Composable
 fun WorkflowFloatingPanel(
@@ -40,6 +41,7 @@ fun WorkflowFloatingPanel(
     onDismiss: () -> Unit,
     currentPhase: WorkflowPhase,
     onPhaseChange: (WorkflowPhase) -> Unit,
+    onOpenSandbox: () -> Unit,
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -100,6 +102,17 @@ fun WorkflowFloatingPanel(
                             onClick = { onPhaseChange(phase) }
                         )
                     }
+
+                    Spacer(modifier = Modifier.padding(vertical = 4.dp))
+
+                    // 沙箱文件管理入口
+                    WorkflowMenuCard(
+                        icon = FolderOpen,
+                        iconTint = MaterialTheme.colorScheme.secondary,
+                        title = "沙箱文件管理",
+                        subtitle = "管理对话文件和目录",
+                        onClick = onOpenSandbox
+                    )
                 }
             }
         }
