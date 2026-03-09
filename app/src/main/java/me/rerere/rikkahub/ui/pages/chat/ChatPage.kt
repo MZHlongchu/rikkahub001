@@ -497,7 +497,6 @@ private fun ChatPageContent(
                 )
             }
 
-
             WorkflowFloatingPanel(
                 visible = showWorkflowPanel,
                 onDismiss = { showWorkflowPanel = false },
@@ -517,6 +516,7 @@ private fun ChatPageContent(
                 onDismiss = { showSandboxFileManager = false }
             )
         }
+    }
 }
 
 @Composable
