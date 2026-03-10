@@ -108,7 +108,7 @@ fun WorkflowFloatingPanel(
 
                     // 沙箱文件管理入口
                     WorkflowMenuCard(
-                        icon = FolderOpen,
+                        icon = Lucide.FolderOpen,
                         iconTint = MaterialTheme.colorScheme.secondary,
                         title = "沙箱文件管理",
                         subtitle = "管理对话文件和目录",
