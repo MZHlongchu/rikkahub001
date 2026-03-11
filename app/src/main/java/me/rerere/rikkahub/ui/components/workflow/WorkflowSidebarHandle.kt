@@ -48,12 +48,12 @@ fun WorkflowSidebarHandle(
             if (!initialized) {
                 // 初始位置放在右上角
                 offsetX = maxX
-                offsetY = maxY * 0.35f
+                offsetY = maxY * 0.25f
                 initialized = true
             } else {
                 // 限制在屏幕范围内
-                offsetX = offsetX.coerceIn(0f, maxX)
-                offsetY = offsetY.coerceIn(0f, maxY)
+                offsetX = offsetX.coerceIn(0f, maxX * 1.1f)
+                offsetY = offsetY.coerceIn(0f, maxY * 1.1f)
             }
         }
 
