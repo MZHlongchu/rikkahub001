@@ -32,7 +32,7 @@ fun WorkflowSidebarHandle(
     modifier: Modifier = Modifier,
 ) {
     val handleSize = 36.dp
-    val iconSize = 20.dp
+    val iconSize = 30.dp
 
     BoxWithConstraints(
         modifier = modifier.fillMaxSize()
@@ -76,7 +76,7 @@ fun WorkflowSidebarHandle(
                 modifier = Modifier
                     .size(iconSize)
                     .border(
-                        width = 2.dp,
+                        width = 1.dp,
                         color = Color.Black,
                         shape = CircleShape
                     )
