@@ -101,7 +101,8 @@ val appModule = module {
             providerManager = get(),
             localTools = get(),
             mcpManager = get(),
-            filesManager = get()
+            filesManager = get(),
+            skillManager = get()
         )
     }
 
