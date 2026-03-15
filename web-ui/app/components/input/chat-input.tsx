@@ -23,7 +23,7 @@ import { ModelList } from "~/components/input/model-list";
 import { ReasoningPickerButton } from "~/components/input/reasoning-picker";
 import { SearchPickerButton } from "~/components/input/search-picker";
 import { McpPickerButton } from "~/components/input/mcp-picker";
-import { InjectionPickerButton } from "~/components/input/injection-picker";
+import { ExtensionPickerButton } from "~/components/input/extension-picker";
 import { useSettingsStore } from "~/stores";
 import { Button } from "~/components/ui/button";
 import {
@@ -84,29 +84,49 @@ function getFileExtension(fileName: string): string {
   return ext ? ext.toLowerCase() : "";
 }
 
-async function isAllowedUploadFile(file: globalThis.File): Promise<boolean> {
+async function detectUploadFile(
+  file: globalThis.File,
+): Promise<{ allowed: boolean; mimeType: string }> {
   const buffer = await file.slice(0, 4100).arrayBuffer();
   const detected = await fileTypeFromBuffer(buffer);
   const extension = getFileExtension(file.name);
 
-  // 无法识别 magic bytes → 文本文件 → 允许
-  if (!detected) return true;
+  // 无法识别 magic bytes → 文本文件 → 允许，强制 text/plain 防止 OS MIME 映射污染（如 .ts → video/mp2t）
+  if (!detected) return { allowed: true, mimeType: "text/plain" };
 
-  // 识别为图片 / 视频 / 音频 → 允许
+  // 识别为图片 / 视频 / 音频 → 允许，使用 magic bytes 检测到的 MIME
   if (
     detected.mime.startsWith("image/") ||
     detected.mime.startsWith("video/") ||
     detected.mime.startsWith("audio/")
   ) {
-    return true;
+    return { allowed: true, mimeType: detected.mime };
+  }
+
+  // 允许常见文档格式
+  const ALLOWED_DOCUMENT_MIMES = new Set([
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ]);
+  if (ALLOWED_DOCUMENT_MIMES.has(detected.mime)) {
+    return { allowed: true, mimeType: detected.mime };
   }
 
   // 其他可识别的二进制格式（exe、zip 等）→ 拒绝
   if (ALLOWED_ARCHIVE_MIME_TYPES.has(detected.mime)) {
-    return true;
+    return { allowed: true, mimeType: detected.mime };
   }
 
-  return ALLOWED_ARCHIVE_EXTENSIONS.has(extension);
+  if (ALLOWED_ARCHIVE_EXTENSIONS.has(extension)) {
+    return { allowed: true, mimeType: detected.mime };
+  }
+
+  return { allowed: false, mimeType: detected.mime };
 }
 
 function toMessagePart(
@@ -215,30 +235,23 @@ function ChatInputInner({
   const pasteLongTextThreshold = useSettingsStore(
     (state) => state.settings?.displaySetting.pasteLongTextThreshold ?? 1000,
   );
-  const { currentAssistant } = useCurrentAssistant();
+  const { currentAssistant, settings } = useCurrentAssistant();
 
   const quickMessages = React.useMemo(() => {
-    const source = currentAssistant?.quickMessages;
-    if (!Array.isArray(source)) {
+    const ids = currentAssistant?.quickMessageIds;
+    const allQuickMessages = settings?.quickMessages ?? [];
+    if (!Array.isArray(ids) || ids.length === 0 || allQuickMessages.length === 0) {
       return [] as QuickMessageOption[];
     }
-
-    return source
-      .map((item) => {
-        const title = typeof item?.title === "string" ? item.title.trim() : "";
-        const content =
-          typeof item?.content === "string" ? item.content.trim() : "";
-        if (!content) {
-          return null;
-        }
-
-        return {
-          title: title || t("chat.quick_message_default_title"),
-          content,
-        };
-      })
-      .filter((item): item is QuickMessageOption => item !== null);
-  }, [currentAssistant?.quickMessages, t]);
+    const idSet = new Set(ids);
+    return allQuickMessages
+      .filter((qm) => idSet.has(qm.id))
+      .map((qm) => ({
+        title: qm.title.trim() || t("chat.quick_message_default_title"),
+        content: qm.content.trim(),
+      }))
+      .filter((item): item is QuickMessageOption => item.content.length > 0);
+  }, [currentAssistant?.quickMessageIds, settings?.quickMessages, t]);
 
   const imageInputRef = React.useRef<HTMLInputElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -277,10 +290,10 @@ function ChatInputInner({
 
       const allFiles = Array.from(fileList);
       const results = await Promise.all(
-        allFiles.map(async (f) => ({ file: f, allowed: await isAllowedUploadFile(f) })),
+        allFiles.map(async (f) => ({ file: f, ...(await detectUploadFile(f)) })),
       );
-      const uploadableFiles = results.filter((r) => r.allowed).map((r) => r.file);
-      const skippedFiles = results.filter((r) => !r.allowed).map((r) => r.file);
+      const uploadableFiles = results.filter((r) => r.allowed);
+      const skippedFiles = results.filter((r) => !r.allowed);
 
       if (skippedFiles.length > 0) {
         toast.warning(
@@ -293,8 +306,13 @@ function ChatInputInner({
       }
 
       const formData = new FormData();
-      uploadableFiles.forEach((file) => {
-        formData.append("files", file, file.name);
+      uploadableFiles.forEach(({ file, mimeType }) => {
+        // 用 magic bytes 检测结果覆盖浏览器的 file.type，修正跨平台 MIME 歧义
+        const safeFile =
+          file.type !== mimeType
+            ? new globalThis.File([file], file.name, { type: mimeType })
+            : file;
+        formData.append("files", safeFile, safeFile.name);
       });
 
       setUploading(true);
@@ -432,24 +450,17 @@ function ChatInputInner({
         }
       }
 
-      const uploadableFiles = (
-        await Promise.all(
-          Array.from(event.clipboardData.items)
-            .filter((item) => item.kind === "file")
-            .map((item) => item.getAsFile())
-            .filter((file): file is globalThis.File => file !== null)
-            .map(async (file) => ({ file, allowed: await isAllowedUploadFile(file) })),
-        )
-      )
-        .filter((r) => r.allowed)
-        .map((r) => r.file);
+      const files = Array.from(event.clipboardData.items)
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((file): file is globalThis.File => file !== null);
 
-      if (uploadableFiles.length === 0) {
+      if (files.length === 0) {
         return;
       }
 
       event.preventDefault();
-      void uploadFiles(uploadableFiles);
+      void uploadFiles(files);
     },
     [canUpload, pasteLongTextAsFile, pasteLongTextThreshold, t, uploadFiles],
   );
@@ -724,7 +735,7 @@ function ChatInputInner({
               <SearchPickerButton disabled={!canSwitchModel} />
               <ReasoningPickerButton disabled={!canSwitchModel} />
               <McpPickerButton disabled={!canSwitchModel} />
-              <InjectionPickerButton disabled={!canSwitchModel} />
+              <ExtensionPickerButton disabled={!canSwitchModel} />
               <QuickMessageButton
                 quickMessages={quickMessages}
                 disabled={!canUseQuickMessage}

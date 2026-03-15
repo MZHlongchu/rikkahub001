@@ -58,6 +58,8 @@ import me.rerere.rikkahub.data.ai.tools.buildReadSourceTool
 import me.rerere.rikkahub.data.ai.tools.buildRecallMemoryTool
 import me.rerere.rikkahub.data.ai.tools.buildSearchSourceTool
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
+import me.rerere.rikkahub.data.ai.tools.createSkillTools
+import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
@@ -204,6 +206,7 @@ class ChatService(
     private val localTools: LocalTools,
     val mcpManager: McpManager,
     private val filesManager: FilesManager,
+    private val skillManager: SkillManager,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -562,6 +565,7 @@ class ChatService(
                 val toolRequired = settings.enableWebSearch ||
                     assistant.enableMemory ||
                     assistant.enableRecentChatsReference ||
+                    assistant.enabledSkills.isNotEmpty() ||
                     assistant.localTools.isNotEmpty() ||
                     mcpManager.getAllAvailableTools().isNotEmpty()
                 if (toolRequired) {
@@ -704,6 +708,15 @@ class ChatService(
                                     sourceRef = sourceRef
                                 )
                             }
+                        )
+                    }
+                    if (assistant.enabledSkills.isNotEmpty()) {
+                        addAll(
+                            createSkillTools(
+                                enabledSkills = assistant.enabledSkills,
+                                allSkills = skillManager.listSkills(),
+                                skillManager = skillManager,
+                            )
                         )
                     }
                     addAll(
@@ -914,7 +927,8 @@ class ChatService(
                     ),
                 ),
                 params = TextGenerationParams(
-                    model = model, temperature = 0.3f, thinkingBudget = 0
+                    model = model,
+                    thinkingBudget = 0,
                 ),
             )
 
@@ -959,7 +973,6 @@ class ChatService(
                 ),
                 params = TextGenerationParams(
                     model = model,
-                    temperature = 1.0f,
                     thinkingBudget = 0,
                 ),
             )
