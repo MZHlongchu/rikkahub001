@@ -69,6 +69,7 @@ import me.rerere.hugeicons.stroke.Clipboard
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Eraser
 import me.rerere.hugeicons.stroke.GlobalSearch
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.QuillWrite01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Search01
@@ -103,6 +104,7 @@ private object ToolNames {
     const val CLIPBOARD = "clipboard_tool"
     const val TTS = "text_to_speech"
     const val ASK_USER = "ask_user"
+    const val USE_SKILL = "use_skill"
 }
 
 private object MemoryActions {
@@ -129,6 +131,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
     ToolNames.CLIPBOARD -> HugeIcons.Clipboard
     ToolNames.TTS -> HugeIcons.VolumeHigh
     ToolNames.ASK_USER -> HugeIcons.BubbleChatQuestion
+    ToolNames.USE_SKILL -> HugeIcons.MagicWand01
     else -> HugeIcons.Tools
 }
 
@@ -194,6 +197,12 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 if (text.length > 24) text.take(24) + "…" else text
             } ?: ""
             "Speaking: $preview"
+        }
+
+        ToolNames.USE_SKILL -> {
+            val skillName = arguments.getStringContent("name") ?: ""
+            val path = arguments.getStringContent("path")
+            if (path != null) "Skill: $skillName / $path" else "Skill: $skillName"
         }
 
         else -> stringResource(R.string.chat_message_tool_call_generic, tool.toolName)
@@ -753,13 +762,11 @@ private fun ChainOfThoughtScope.AskUserToolStep(
             ) {
                 questions.forEach { q ->
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (questions.size > 1) {
-                            Text(
-                                text = q.question,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
+                        Text(
+                            text = q.question,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
 
                         if (isPending && onToolAnswer != null) {
                             // Show options as chips
