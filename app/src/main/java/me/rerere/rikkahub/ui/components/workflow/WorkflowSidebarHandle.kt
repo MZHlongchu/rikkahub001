@@ -38,22 +38,19 @@ fun WorkflowSidebarHandle(
         modifier = modifier.fillMaxSize()
     ) {
         val density = LocalDensity.current
-        val maxX = with(density) { (maxWidth - handleSize).toPx().coerceAtLeast(0f) }
-        val maxY = with(density) { (maxHeight - handleSize).toPx().coerceAtLeast(0f) }
+        val maxX = with(density) { (maxWidth - handleSize).toPx() }
+        val maxY = with(density) { (maxHeight - handleSize).toPx() }
+        
         var offsetX by rememberSaveable { mutableFloatStateOf(0f) }
         var offsetY by rememberSaveable { mutableFloatStateOf(0f) }
         var initialized by rememberSaveable { mutableStateOf(false) }
 
         LaunchedEffect(maxX, maxY) {
             if (!initialized) {
-                // 初始位置放在右上角
-                offsetX = maxX
-                offsetY = maxY * 0.25f
+                // 初始位置：右上角偏下25%
+                offsetX = maxX.coerceAtLeast(0f)
+                offsetY = (maxY * 0.25f).coerceIn(0f, maxY.coerceAtLeast(0f))
                 initialized = true
-            } else {
-                // 限制在屏幕范围内
-                offsetX = offsetX.coerceIn(0f, maxX * 1.1f)
-                offsetY = offsetY.coerceIn(0f, maxY * 1.1f)
             }
         }
 
@@ -63,21 +60,30 @@ fun WorkflowSidebarHandle(
                 .pointerInput(Unit) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        offsetX = (offsetX + dragAmount.x).coerceIn(0f, maxX)
-                        offsetY = (offsetY + dragAmount.y).coerceIn(0f, maxY)
+                        // 允许在全屏任何位置移动，包括部分超出边界
+                        offsetX = (offsetX + dragAmount.x).coerceIn(
+                            -handleSize.toPx() / 2, 
+                            maxX + handleSize.toPx() / 2
+                        )
+                        offsetY = (offsetY + dragAmount.y).coerceIn(
+                            -handleSize.toPx() / 2, 
+                            maxY + handleSize.toPx() / 2
+                        )
                     }
                 }
                 .pointerInput(onClick) {
                     detectTapGestures(onTap = { onClick() })
                 }
+                .size(handleSize),
+            contentAlignment = Alignment.Center
         ) {
-            // 黑色圆环图标
+            // 浅灰半透明细圆环
             Box(
                 modifier = Modifier
                     .size(iconSize)
                     .border(
-                        width = 1.dp,
-                        color = Color.Black,
+                        width = 0.5.dp,
+                        color = Color.Gray.copy(alpha = 0.5f),
                         shape = CircleShape
                     )
             )
