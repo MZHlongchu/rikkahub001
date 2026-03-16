@@ -62,7 +62,7 @@ android {
     buildTypes {
         release {
             applicationIdSuffix = ".mod"
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -80,7 +80,7 @@ android {
         create("baseline") {
             initWith(getByName("release"))
             matchingFallbacks.add("release")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             applicationIdSuffix = ".debug"
             isDebuggable = false
             isMinifyEnabled = false
