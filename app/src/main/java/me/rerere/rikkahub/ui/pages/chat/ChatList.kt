@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.pages.chat
+﻿package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
@@ -23,6 +23,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -36,12 +37,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
@@ -96,6 +100,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.parseCompressionSummarySnapshot
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.CompressionRegenerationTarget
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialogMode
 import me.rerere.rikkahub.ui.components.message.ChatMessage
@@ -113,6 +118,11 @@ private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 
+private enum class CompressionCardPage {
+    DialogueSummary,
+    MemoryLedger,
+}
+
 @Composable
 fun ChatList(
     innerPadding: PaddingValues,
@@ -125,7 +135,7 @@ fun ChatList(
     errors: List<ChatError> = emptyList(),
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
-    onRegenerateLatestCompression: () -> Unit = {},
+    onRegenerateLatestCompression: (CompressionRegenerationTarget) -> Unit = {},
     onRegenerate: (UIMessage) -> Unit = {},
     onEdit: (UIMessage) -> Unit = {},
     onForkMessage: (UIMessage) -> Unit = {},
@@ -195,7 +205,7 @@ private fun ChatListNormal(
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
-    onRegenerateLatestCompression: () -> Unit,
+    onRegenerateLatestCompression: (CompressionRegenerationTarget) -> Unit,
     onRegenerate: (UIMessage) -> Unit,
     onEdit: (UIMessage) -> Unit,
     onForkMessage: (UIMessage) -> Unit,
@@ -224,15 +234,15 @@ private fun ChatListNormal(
         return lastPos <= inputPos - 8
     }
 
-    // 聊天选择
+    // 鑱婂ぉ閫夋嫨
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
 
-    // 自动跟随键盘滚动
+    // 鑷姩璺熼殢閿洏婊氬姩
     ImeLazyListAutoScroller(lazyListState = state)
 
-    // 对话大小警告对话框
+    // 瀵硅瘽澶у皬璀﹀憡瀵硅瘽妗?
     val sizeInfo = rememberConversationSizeInfo(conversation)
     var showSizeWarningDialog by rememberSaveable(conversation.id) { mutableStateOf(true) }
     if (sizeInfo.showWarning && showSizeWarningDialog) {
@@ -252,6 +262,12 @@ private fun ChatListNormal(
     val latestCompressionEventId = normalizedCompressionEvents.lastOrNull()?.id
     var expandedCompressionEventId by rememberSaveable(conversation.id) { mutableStateOf(latestCompressionEventId) }
     var showRegenerateConfirm by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var regenerateTarget by rememberSaveable(conversation.id) {
+        mutableStateOf(CompressionRegenerationTarget.DialogueSummary)
+    }
+    var latestCompressionPage by rememberSaveable(conversation.id) {
+        mutableStateOf(CompressionCardPage.DialogueSummary)
+    }
     val eventsByBoundary = remember(normalizedCompressionEvents) {
         normalizedCompressionEvents.groupBy { it.boundaryIndex }
     }
@@ -262,7 +278,28 @@ private fun ChatListNormal(
         CompressContextDialog(
             mode = CompressContextDialogMode.RegenerateConfirm,
             onDismiss = { showRegenerateConfirm = false },
-            onConfirmRegenerate = onRegenerateLatestCompression
+            regenerateTitle = stringResource(
+                if (regenerateTarget == CompressionRegenerationTarget.DialogueSummary) {
+                    R.string.chat_page_regenerate_dialogue_summary_title_v2
+                } else {
+                    R.string.chat_page_regenerate_memory_ledger_title_v2
+                }
+            ),
+            regenerateDescription = stringResource(
+                if (regenerateTarget == CompressionRegenerationTarget.DialogueSummary) {
+                    R.string.chat_page_regenerate_dialogue_summary_desc_v2
+                } else {
+                    R.string.chat_page_regenerate_memory_ledger_desc_v2
+                }
+            ),
+            regenerateActionLabel = stringResource(
+                if (regenerateTarget == CompressionRegenerationTarget.DialogueSummary) {
+                    R.string.chat_page_regenerate_dialogue_summary_action_v2
+                } else {
+                    R.string.chat_page_regenerate_memory_ledger_action_v2
+                }
+            ),
+            onConfirmRegenerate = { onRegenerateLatestCompression(regenerateTarget) }
         )
     }
 
@@ -270,7 +307,7 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 自动滚动到底部
+        // 鑷姩婊氬姩鍒板簳閮?
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(state) {
                 snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
@@ -285,7 +322,7 @@ private fun ChatListNormal(
             }
         }
 
-        // 判断最近是否滚动
+        // 鍒ゆ柇鏈€杩戞槸鍚︽粴鍔?
         LaunchedEffect(state.isScrollInProgress) {
             if (state.isScrollInProgress) {
                 isRecentScroll = true
@@ -317,11 +354,30 @@ private fun ChatListNormal(
                             event = event,
                             latest = event.id == latestCompressionEventId,
                             expanded = expandedCompressionEventId == event.id,
-                            onRegenerate = if (event.id == latestCompressionEventId) {
-                                { showRegenerateConfirm = true }
+                            latestPage = latestCompressionPage,
+                            ledgerStatus = if (event.id == latestCompressionEventId) {
+                                conversation.compressionState.memoryLedgerStatus
                             } else {
                                 null
                             },
+                            ledgerError = if (event.id == latestCompressionEventId) {
+                                conversation.compressionState.memoryLedgerError
+                            } else {
+                                null
+                            },
+                            onRegenerate = if (event.id == latestCompressionEventId) {
+                                {
+                                    regenerateTarget = if (latestCompressionPage == CompressionCardPage.DialogueSummary) {
+                                        CompressionRegenerationTarget.DialogueSummary
+                                    } else {
+                                        CompressionRegenerationTarget.MemoryLedger
+                                    }
+                                    showRegenerateConfirm = true
+                                }
+                            } else {
+                                null
+                            },
+                            onPageChanged = { latestCompressionPage = it },
                             onToggle = {
                                 expandedCompressionEventId = if (expandedCompressionEventId == event.id) {
                                     null
@@ -362,7 +418,7 @@ private fun ChatListNormal(
                                 onDelete(node.currentMessage)
                             },
                             onShare = {
-                                selecting = true  // 使用 CoroutineScope 延迟状态更新
+                                selecting = true  // 浣跨敤 CoroutineScope 寤惰繜鐘舵€佹洿鏂?
                                 selectedItems.clear()
                                 selectedItems.addAll(conversation.messageNodes.map { it.id }
                                     .subList(0, conversation.messageNodes.indexOf(node) + 1))
@@ -390,11 +446,30 @@ private fun ChatListNormal(
                         event = event,
                         latest = event.id == latestCompressionEventId,
                         expanded = expandedCompressionEventId == event.id,
-                        onRegenerate = if (event.id == latestCompressionEventId) {
-                            { showRegenerateConfirm = true }
+                        latestPage = latestCompressionPage,
+                        ledgerStatus = if (event.id == latestCompressionEventId) {
+                            conversation.compressionState.memoryLedgerStatus
                         } else {
                             null
                         },
+                        ledgerError = if (event.id == latestCompressionEventId) {
+                            conversation.compressionState.memoryLedgerError
+                        } else {
+                            null
+                        },
+                        onRegenerate = if (event.id == latestCompressionEventId) {
+                            {
+                                regenerateTarget = if (latestCompressionPage == CompressionCardPage.DialogueSummary) {
+                                    CompressionRegenerationTarget.DialogueSummary
+                                } else {
+                                    CompressionRegenerationTarget.MemoryLedger
+                                }
+                                showRegenerateConfirm = true
+                            }
+                        } else {
+                            null
+                        },
+                        onPageChanged = { latestCompressionPage = it },
                         onToggle = {
                             expandedCompressionEventId = if (expandedCompressionEventId == event.id) {
                                 null
@@ -417,7 +492,7 @@ private fun ChatListNormal(
                 }
             }
 
-            // 为了能正确滚动到这
+            // 涓轰簡鑳芥纭粴鍔ㄥ埌杩?
             item(ScrollBottomKey) {
                 Spacer(
                     Modifier
@@ -432,7 +507,7 @@ private fun ChatListNormal(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            // 错误消息卡片
+            // 閿欒娑堟伅鍗＄墖
             ErrorCardsDisplay(
                 errors = errors,
                 onDismissError = onDismissError,
@@ -442,7 +517,7 @@ private fun ChatListNormal(
                     .zIndex(5f)
             )
 
-            // 完成选择
+            // 瀹屾垚閫夋嫨
             AnimatedVisibility(
                 visible = selecting,
                 modifier = Modifier
@@ -509,7 +584,7 @@ private fun ChatListNormal(
                 }
             }
 
-            // 导出对话框
+            // 瀵煎嚭瀵硅瘽妗?
             ChatExportSheet(
                 visible = showExportSheet,
                 onDismissRequest = {
@@ -523,7 +598,7 @@ private fun ChatListNormal(
 
             val captureProgress = LocalScrollCaptureInProgress.current
 
-            // 消息快速跳转
+            // 娑堟伅蹇€熻烦杞?
             MessageJumper(
                 show = isRecentScroll && !state.isScrollInProgress && settings.displaySetting.showMessageJumper && !captureProgress,
                 onLeft = settings.displaySetting.messageJumperOnLeft,
@@ -548,12 +623,27 @@ private fun CompressionBoundaryEvent(
     event: CompressionEvent,
     latest: Boolean,
     expanded: Boolean,
+    latestPage: CompressionCardPage,
+    ledgerStatus: String?,
+    ledgerError: String?,
     onRegenerate: (() -> Unit)?,
+    onPageChanged: (CompressionCardPage) -> Unit,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val snapshot = remember(event.summarySnapshot) {
+    val dialogueSnapshot = remember(event.summarySnapshot) {
         parseCompressionSummarySnapshot(event.summarySnapshot)
+    }
+    val ledgerSnapshotRaw = remember(event.ledgerSnapshot, event.summarySnapshot) {
+        event.ledgerSnapshot.ifBlank { event.summarySnapshot }
+    }
+    val ledgerSnapshot = remember(ledgerSnapshotRaw) {
+        parseCompressionSummarySnapshot(ledgerSnapshotRaw)
+    }
+    val dialoguePreview = remember(event.dialogueSummaryPreview, event.dialogueSummaryText, event.summarySnapshot) {
+        event.dialogueSummaryPreview
+            .ifBlank { dialogueSnapshot?.preview.orEmpty() }
+            .ifBlank { event.dialogueSummaryText.trim().replace("\n", " ").take(220) }
     }
     Column(
         modifier = modifier.padding(vertical = 4.dp),
@@ -588,7 +678,7 @@ private fun CompressionBoundaryEvent(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
-                                text = stringResource(R.string.chat_page_compression_boundary_title),
+                                text = stringResource(R.string.chat_page_compression_boundary_title_v2),
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -601,7 +691,15 @@ private fun CompressionBoundaryEvent(
                         if (onRegenerate != null) {
                             TextButton(onClick = onRegenerate) {
                                 Text(
-                                    text = stringResource(R.string.chat_page_regenerate_compression_action),
+                                    text = stringResource(
+                                        if (latestPage == CompressionCardPage.DialogueSummary) {
+                                            R.string.chat_page_regenerate_dialogue_summary_action_v2
+                                        } else if (ledgerStatus == "ready" && ledgerSnapshotRaw.isNotBlank()) {
+                                            R.string.chat_page_regenerate_memory_ledger_action_v2
+                                        } else {
+                                            R.string.chat_page_generate_memory_ledger_action_v2
+                                        }
+                                    ),
                                     style = MaterialTheme.typography.labelMedium
                                 )
                             }
@@ -614,7 +712,7 @@ private fun CompressionBoundaryEvent(
                         )
                     }
 
-                    snapshot?.preview?.takeIf { it.isNotBlank() }?.let { preview ->
+                    dialoguePreview.takeIf { it.isNotBlank() }?.let { preview ->
                         Text(
                             text = preview,
                             style = MaterialTheme.typography.bodyMedium,
@@ -624,28 +722,61 @@ private fun CompressionBoundaryEvent(
                         )
                     }
 
-                    if (expanded && snapshot != null && snapshot.sections.isNotEmpty()) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            snapshot.sections.forEachIndexed { index, section ->
-                                CompressionSummarySectionView(section = section)
-                                if (index != snapshot.sections.lastIndex) {
-                                    Spacer(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(1.dp)
-                                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-                                    )
+                    if (expanded) {
+                        val pagerState = rememberPagerState(
+                            initialPage = if (latestPage == CompressionCardPage.DialogueSummary) 0 else 1,
+                            pageCount = { 2 }
+                        )
+                        LaunchedEffect(pagerState.currentPage) {
+                            onPageChanged(
+                                if (pagerState.currentPage == 0) {
+                                    CompressionCardPage.DialogueSummary
+                                } else {
+                                    CompressionCardPage.MemoryLedger
                                 }
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CompressionPageBadge(
+                                text = stringResource(R.string.chat_page_dialogue_summary_page_v2),
+                                active = pagerState.currentPage == 0
+                            )
+                            CompressionPageBadge(
+                                text = stringResource(R.string.chat_page_memory_ledger_page_v2),
+                                active = pagerState.currentPage == 1
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                text = stringResource(R.string.chat_page_compression_swipe_hint_v2),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { page ->
+                            when (page) {
+                                0 -> DialogueSummaryPage(
+                                    summaryText = event.dialogueSummaryText,
+                                    fallbackSnapshotRaw = event.summarySnapshot,
+                                    fallbackSnapshot = dialogueSnapshot,
+                                )
+
+                                else -> MemoryLedgerPage(
+                                    snapshotRaw = ledgerSnapshotRaw,
+                                    snapshot = ledgerSnapshot,
+                                    ledgerStatus = ledgerStatus,
+                                    ledgerError = ledgerError,
+                                )
                             }
                         }
-                    } else if (expanded && event.summarySnapshot.isNotBlank()) {
-                        Text(
-                            text = event.summarySnapshot,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
                     }
                 }
             }
@@ -673,6 +804,147 @@ private fun CompressionBoundaryEvent(
                         .background(MaterialTheme.colorScheme.outlineVariant)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CompressionPageBadge(text: String, active: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = if (active) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        } else {
+            MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+        }
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+        )
+    }
+}
+
+@Composable
+private fun DialogueSummaryPage(
+    summaryText: String,
+    fallbackSnapshotRaw: String,
+    fallbackSnapshot: me.rerere.rikkahub.data.model.CompressionSummarySnapshot?,
+) {
+    if (summaryText.isNotBlank()) {
+        Text(
+            text = summaryText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        return
+    }
+
+    if (fallbackSnapshot != null && fallbackSnapshot.sections.isNotEmpty()) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            fallbackSnapshot.sections.forEachIndexed { index, section ->
+                CompressionSummarySectionView(section = section)
+                if (index != fallbackSnapshot.sections.lastIndex) {
+                    Spacer(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                    )
+                }
+            }
+        }
+    } else if (fallbackSnapshotRaw.isNotBlank()) {
+        Text(
+            text = fallbackSnapshotRaw,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun MemoryLedgerPage(
+    snapshotRaw: String,
+    snapshot: me.rerere.rikkahub.data.model.CompressionSummarySnapshot?,
+    ledgerStatus: String?,
+    ledgerError: String?,
+) {
+    when {
+        ledgerStatus == "stale" -> {
+            Text(
+                text = stringResource(R.string.chat_page_memory_ledger_stale_v2),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        ledgerStatus == "pending" -> {
+            Text(
+                text = stringResource(R.string.chat_page_memory_ledger_pending_v2),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        ledgerStatus == "running" -> {
+            Text(
+                text = stringResource(R.string.chat_page_memory_ledger_generating_v2),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        ledgerStatus == "failed" -> {
+            Text(
+                text = buildString {
+                    append(stringResource(R.string.chat_page_memory_ledger_failed_v2))
+                    if (!ledgerError.isNullOrBlank()) {
+                        append("\n")
+                        append(ledgerError)
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        snapshot != null && snapshot.sections.isNotEmpty() -> {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                snapshot.sections.forEachIndexed { index, section ->
+                    CompressionSummarySectionView(section = section)
+                    if (index != snapshot.sections.lastIndex) {
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                        )
+                    }
+                }
+            }
+        }
+
+        snapshotRaw.isNotBlank() -> {
+            Text(
+                text = snapshotRaw,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        else -> {
+            Text(
+                text = stringResource(R.string.chat_page_memory_ledger_empty_v2),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -713,7 +985,7 @@ private fun CompressionSummarySectionView(
 }
 
 /**
- * 提取包含搜索词的文本片段，确保匹配词在开头可见
+ * 鎻愬彇鍖呭惈鎼滅储璇嶇殑鏂囨湰鐗囨锛岀‘淇濆尮閰嶈瘝鍦ㄥ紑澶村彲瑙?
  */
 private fun extractMatchingSnippet(
     text: String,
@@ -728,10 +1000,10 @@ private fun extractMatchingSnippet(
         return text
     }
 
-    // 直接从匹配词开始显示，确保匹配词在最前面
+    // 鐩存帴浠庡尮閰嶈瘝寮€濮嬫樉绀猴紝纭繚鍖归厤璇嶅湪鏈€鍓嶉潰
     val snippet = text.substring(matchIndex)
 
-    // 只在前面有内容时添加省略号
+    // 鍙湪鍓嶉潰鏈夊唴瀹规椂娣诲姞鐪佺暐鍙?
     return if (matchIndex > 0) {
         "...$snippet"
     } else {
@@ -753,10 +1025,10 @@ private fun buildHighlightedText(
         var index = text.indexOf(query, startIndex, ignoreCase = true)
 
         while (index >= 0) {
-            // 添加高亮前的文本
+            // 娣诲姞楂樹寒鍓嶇殑鏂囨湰
             append(text.substring(startIndex, index))
 
-            // 添加高亮文本
+            // 娣诲姞楂樹寒鏂囨湰
             withStyle(
                 style = SpanStyle(
                     background = highlightColor,
@@ -770,7 +1042,7 @@ private fun buildHighlightedText(
             index = text.indexOf(query, startIndex, ignoreCase = true)
         }
 
-        // 添加剩余文本
+        // 娣诲姞鍓╀綑鏂囨湰
         if (startIndex < text.length) {
             append(text.substring(startIndex))
         }
@@ -788,7 +1060,7 @@ private fun ChatListPreview(
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    // 过滤消息，同时保留原始 index 避免后续 O(n) indexOf 查找
+    // 杩囨护娑堟伅锛屽悓鏃朵繚鐣欏師濮?index 閬垮厤鍚庣画 O(n) indexOf 鏌ユ壘
     val filteredMessages = remember(conversation.messageNodes, searchQuery) {
         if (searchQuery.isBlank()) {
             conversation.messageNodes.mapIndexed { index, node -> index to node }
@@ -803,7 +1075,7 @@ private fun ChatListPreview(
             .padding(top = innerPadding.calculateTopPadding())
             .fillMaxSize(),
     ) {
-        // 搜索框
+        // 鎼滅储妗?
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -834,7 +1106,7 @@ private fun ChatListPreview(
             maxLines = 1,
         )
 
-        // 消息预览
+        // 娑堟伅棰勮
         LazyColumn(
             contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1030,3 +1302,4 @@ private fun BoxScope.MessageJumper(
         }
     }
 }
+

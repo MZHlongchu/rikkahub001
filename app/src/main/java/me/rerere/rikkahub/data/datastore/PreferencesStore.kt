@@ -23,6 +23,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_DIALOGUE_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
@@ -96,6 +97,7 @@ class SettingsStore(
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
+        val DIALOGUE_COMPRESS_PROMPT = stringPreferencesKey("dialogue_compress_prompt")
         val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
         val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
         val AUTO_COMPRESS_TRIGGER_TOKENS = intPreferencesKey("auto_compress_trigger_tokens")
@@ -184,6 +186,7 @@ class SettingsStore(
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
+                dialogueCompressPrompt = preferences[DIALOGUE_COMPRESS_PROMPT] ?: DEFAULT_DIALOGUE_COMPRESS_PROMPT,
                 embeddingModelId = preferences[EMBEDDING_MODEL]?.takeIf { it.isNotBlank() }?.let { Uuid.parse(it) },
                 autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] == true,
                 autoCompressTriggerTokens = preferences[AUTO_COMPRESS_TRIGGER_TOKENS] ?: 12000,
@@ -437,6 +440,7 @@ class SettingsStore(
             preferences[OCR_PROMPT] = settings.ocrPrompt
             preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
             preferences[COMPRESS_PROMPT] = settings.compressPrompt
+            preferences[DIALOGUE_COMPRESS_PROMPT] = settings.dialogueCompressPrompt
             settings.embeddingModelId?.let {
                 preferences[EMBEDDING_MODEL] = it.toString()
             } ?: preferences.remove(EMBEDDING_MODEL)
@@ -577,6 +581,7 @@ data class Settings(
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val compressModelId: Uuid = Uuid.random(),
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
+    val dialogueCompressPrompt: String = DEFAULT_DIALOGUE_COMPRESS_PROMPT,
     val embeddingModelId: Uuid? = null,
     val autoCompressEnabled: Boolean = false,
     val autoCompressTriggerTokens: Int = 12000,

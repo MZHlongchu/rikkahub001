@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.components.ai
+﻿package me.rerere.rikkahub.ui.components.ai
 
 import android.content.Intent
 import android.graphics.Bitmap
@@ -174,7 +174,8 @@ fun ChatInput(
         additionalPrompt: String,
         keepRecentMessages: Int,
         autoCompressEnabled: Boolean,
-        autoCompressTriggerTokens: Int
+        autoCompressTriggerTokens: Int,
+        generateMemoryLedger: Boolean,
     ) -> Job,
     autoCompressionUiState: me.rerere.rikkahub.service.CompressionUiState? = null,
     onCancelClick: () -> Unit,
@@ -200,6 +201,7 @@ fun ChatInput(
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
     var showInjectionSheet by remember { mutableStateOf(false) }
     var showCompressDialog by remember { mutableStateOf(false) }
+    var manualCompressionJob by remember { mutableStateOf<Job?>(null) }
     fun dismissExpand() {
         expand = ExpandState.Collapsed
         showInjectionSheet = false
@@ -393,6 +395,19 @@ fun ChatInput(
             dismissExpand()
         }
     }
+    LaunchedEffect(manualCompressionJob) {
+        val job = manualCompressionJob ?: return@LaunchedEffect
+        try {
+            job.join()
+        } finally {
+            // Manual compression now hands off to the shared progress dialogs after confirm.
+            // Keep a reference to the launched job here so the generic progress cancel button
+            // can still stop a manually started compression pipeline.
+            if (manualCompressionJob == job) {
+                manualCompressionJob = null
+            }
+        }
+    }
 
     Surface(
         color = Color.Transparent,
@@ -540,13 +555,13 @@ fun ChatInput(
                                 )
                         ) {
                             val containerColor = when {
-                                loading -> MaterialTheme.colorScheme.errorContainer // 加载时，红色
-                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh // 禁用时(输入为空)，灰色
-                                else -> MaterialTheme.colorScheme.primary // 启用时(输入非空)，绿色/主题色
+                                loading -> MaterialTheme.colorScheme.errorContainer // 鍔犺浇鏃讹紝绾㈣壊
+                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh // 绂佺敤鏃?杈撳叆涓虹┖)锛岀伆鑹?
+                                else -> MaterialTheme.colorScheme.primary // 鍚敤鏃?杈撳叆闈炵┖)锛岀豢鑹?涓婚鑹?
                             }
                             val contentColor = when {
                                 loading -> MaterialTheme.colorScheme.onErrorContainer
-                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // 禁用时，内容用带透明度的灰色
+                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // 绂佺敤鏃讹紝鍐呭鐢ㄥ甫閫忔槑搴︾殑鐏拌壊
                                 else -> MaterialTheme.colorScheme.onPrimary
                             }
                             Surface(
@@ -606,6 +621,7 @@ fun ChatInput(
                             assistant = assistant,
                             onOpenSandboxFileManager = onOpenSandboxFileManager,
                             onCompressContext = onCompressContext,
+                            onStartManualCompression = { manualCompressionJob = it },
                             onUpdateAssistant = onUpdateAssistant,
                             showInjectionSheet = showInjectionSheet,
                             onShowInjectionSheetChange = { showInjectionSheet = it },
@@ -627,15 +643,23 @@ fun ChatInput(
     if (autoCompressionUiState != null) {
         val progressMessage = when (autoCompressionUiState.phase) {
             me.rerere.rikkahub.service.CompressionUiPhase.Compressing -> stringResource(R.string.chat_page_compressing)
-            me.rerere.rikkahub.service.CompressionUiPhase.Indexing -> stringResource(R.string.chat_page_memory_index_updating)
+            me.rerere.rikkahub.service.CompressionUiPhase.Indexing -> stringResource(R.string.chat_page_memory_index_updating_v2)
         }
         CompressContextDialog(
             mode = CompressContextDialogMode.AutoProgress,
             onDismiss = {},
             progressMessage = progressMessage,
-            onCancelProgress = onCancelClick,
+            onCancelProgress = {
+                val manualJob = manualCompressionJob
+                if (manualJob != null && manualJob.isActive) {
+                    manualJob.cancel()
+                } else {
+                    onCancelClick()
+                }
+            },
         )
     }
+
 }
 
 @Composable
@@ -1033,8 +1057,10 @@ private fun FilesPicker(
         additionalPrompt: String,
         keepRecentMessages: Int,
         autoCompressEnabled: Boolean,
-        autoCompressTriggerTokens: Int
+        autoCompressTriggerTokens: Int,
+        generateMemoryLedger: Boolean,
     ) -> Job,
+    onStartManualCompression: (Job) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
     showInjectionSheet: Boolean,
     onShowInjectionSheetChange: (Boolean) -> Unit,
@@ -1141,7 +1167,7 @@ private fun FilesPicker(
                 )
             },
             headlineContent = {
-                Text("沙箱文件管理")
+                Text(stringResource(R.string.chat_page_open_sandbox_file_manager))
             },
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
@@ -1171,12 +1197,19 @@ private fun FilesPicker(
             },
             initialAutoCompressEnabled = settings.autoCompressEnabled,
             initialAutoCompressTriggerTokens = settings.autoCompressTriggerTokens,
-            onConfirmManual = { additionalPrompt, keepRecentMessages, autoCompressEnabled, autoCompressTriggerTokens ->
-                onCompressContext(
-                    additionalPrompt,
-                    keepRecentMessages,
-                    autoCompressEnabled,
-                    autoCompressTriggerTokens
+            initialGenerateMemoryLedger = conversation.compressionState.memoryLedgerStatus != "stale",
+            onConfirmManual = { additionalPrompt, keepRecentMessages, autoCompressEnabled, autoCompressTriggerTokens, generateMemoryLedger ->
+                // Close the manual config dialog immediately after confirmation so the user
+                // can see the shared compression -> ledger -> indexing phase dialogs instead
+                // of a stale one-off loading state that hides the split pipeline.
+                onStartManualCompression(
+                    onCompressContext(
+                        additionalPrompt,
+                        keepRecentMessages,
+                        autoCompressEnabled,
+                        autoCompressTriggerTokens,
+                        generateMemoryLedger,
+                    )
                 )
             }
         )
@@ -1327,7 +1360,7 @@ private fun ImagePickButton(onClick: () -> Unit = {}) {
 fun TakePicButton(onLaunchCamera: () -> Unit = {}) {
     val cameraPermission = rememberPermissionState(PermissionCamera)
 
-    // 使用权限管理器包装
+    // 浣跨敤鏉冮檺绠＄悊鍣ㄥ寘瑁?
     PermissionManager(
         permissionState = cameraPermission
     ) {
@@ -1339,7 +1372,7 @@ fun TakePicButton(onLaunchCamera: () -> Unit = {}) {
             if (cameraPermission.allRequiredPermissionsGranted) {
                 onLaunchCamera()
             } else {
-                // 请求权限
+                // 璇锋眰鏉冮檺
                 cameraPermission.requestPermissions()
             }
         }
@@ -1478,3 +1511,4 @@ private fun BigIconTextButtonPreview() {
         }) {}
     }
 }
+

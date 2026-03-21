@@ -52,7 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_DIALOGUE_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
@@ -604,15 +604,15 @@ private fun DefaultCompressModelSetting(
                         Text(stringResource(R.string.setting_model_page_prompt))
                     },
                     description = {
-                        Text(stringResource(R.string.setting_model_page_compress_prompt_vars))
+                        Text(stringResource(R.string.setting_model_page_compress_prompt_vars_v2))
                     }
                 ) {
                     OutlinedTextField(
-                        value = settings.compressPrompt,
+                        value = settings.dialogueCompressPrompt,
                         onValueChange = {
                             vm.updateSettings(
                                 settings.copy(
-                                    compressPrompt = it
+                                    dialogueCompressPrompt = it
                                 )
                             )
                         },
@@ -623,7 +623,7 @@ private fun DefaultCompressModelSetting(
                         onClick = {
                             vm.updateSettings(
                                 settings.copy(
-                                    compressPrompt = DEFAULT_COMPRESS_PROMPT
+                                    dialogueCompressPrompt = DEFAULT_DIALOGUE_COMPRESS_PROMPT
                                 )
                             )
                         }

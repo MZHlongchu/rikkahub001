@@ -9,6 +9,7 @@ import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.MemoryIndexRepository
+import me.rerere.rikkahub.data.repository.PendingLedgerBatchRepository
 import me.rerere.rikkahub.data.repository.ScheduledTaskRunRepository
 import me.rerere.rikkahub.data.repository.SourcePreviewRepository
 import me.rerere.rikkahub.data.skills.SkillsRepository
@@ -17,6 +18,10 @@ import org.koin.dsl.module
 val repositoryModule = module {
     single {
         ConversationRepository(get(), get(), get(), get(), get(), get(), get(), get())
+    }
+
+    single {
+        PendingLedgerBatchRepository(get())
     }
 
     single {

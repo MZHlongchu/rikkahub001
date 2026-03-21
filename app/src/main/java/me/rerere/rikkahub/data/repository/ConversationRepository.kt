@@ -287,8 +287,13 @@ class ConversationRepository(
             chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
             isPinned = conversation.isPinned,
             workflowState = conversation.workflowState?.let { JsonInstant.encodeToString(it) } ?: "",
+            dialogueSummaryText = conversation.compressionState.dialogueSummaryText,
+            dialogueSummaryTokenEstimate = conversation.compressionState.dialogueSummaryTokenEstimate,
+            dialogueSummaryUpdatedAt = conversation.compressionState.dialogueSummaryUpdatedAt.toEpochMilli(),
             rollingSummaryJson = conversation.compressionState.rollingSummaryJson,
             rollingSummaryTokenEstimate = conversation.compressionState.rollingSummaryTokenEstimate,
+            memoryLedgerStatus = conversation.compressionState.memoryLedgerStatus,
+            memoryLedgerError = conversation.compressionState.memoryLedgerError,
             lastCompressedMessageIndex = conversation.compressionState.lastCompressedMessageIndex,
             lastCompressedAt = conversation.compressionState.updatedAt.toEpochMilli(),
             lastIndexStatus = conversation.memoryIndexState.lastIndexStatus,
@@ -315,8 +320,13 @@ class ConversationRepository(
                 JsonInstant.decodeFromString(it)
             },
             compressionState = ConversationCompressionState(
+                dialogueSummaryText = conversationEntity.dialogueSummaryText,
+                dialogueSummaryTokenEstimate = conversationEntity.dialogueSummaryTokenEstimate,
+                dialogueSummaryUpdatedAt = Instant.ofEpochMilli(conversationEntity.dialogueSummaryUpdatedAt),
                 rollingSummaryJson = conversationEntity.rollingSummaryJson,
                 rollingSummaryTokenEstimate = conversationEntity.rollingSummaryTokenEstimate,
+                memoryLedgerStatus = conversationEntity.memoryLedgerStatus,
+                memoryLedgerError = conversationEntity.memoryLedgerError,
                 lastCompressedMessageIndex = conversationEntity.lastCompressedMessageIndex,
                 updatedAt = Instant.ofEpochMilli(conversationEntity.lastCompressedAt)
             ),
@@ -349,12 +359,17 @@ class ConversationRepository(
     suspend fun addCompressionEvent(
         conversationId: Uuid,
         boundaryIndex: Int,
+        dialogueSummaryText: String,
+        dialogueSummaryPreview: String,
+        ledgerSnapshot: String,
         summarySnapshot: String,
         compressStartIndex: Int,
         compressEndIndex: Int,
         keepRecentMessages: Int,
         trigger: String,
         additionalPrompt: String,
+        baseDialogueSummaryText: String,
+        baseLedgerJson: String,
         baseSummaryJson: String,
         createdAt: Instant = Instant.now(),
     ): CompressionEvent {
@@ -362,12 +377,17 @@ class ConversationRepository(
             CompressionEventEntity(
                 conversationId = conversationId.toString(),
                 boundaryIndex = boundaryIndex,
+                dialogueSummaryText = dialogueSummaryText,
+                dialogueSummaryPreview = dialogueSummaryPreview,
+                ledgerSnapshot = ledgerSnapshot,
                 summarySnapshot = summarySnapshot,
                 compressStartIndex = compressStartIndex,
                 compressEndIndex = compressEndIndex,
                 keepRecentMessages = keepRecentMessages,
                 trigger = trigger,
                 additionalPrompt = additionalPrompt,
+                baseDialogueSummaryText = baseDialogueSummaryText,
+                baseLedgerJson = baseLedgerJson,
                 baseSummaryJson = baseSummaryJson,
                 createdAt = createdAt.toEpochMilli()
             )
@@ -375,14 +395,42 @@ class ConversationRepository(
         return CompressionEvent(
             id = id,
             boundaryIndex = boundaryIndex,
+            dialogueSummaryText = dialogueSummaryText,
+            dialogueSummaryPreview = dialogueSummaryPreview,
+            ledgerSnapshot = ledgerSnapshot,
             summarySnapshot = summarySnapshot,
             compressStartIndex = compressStartIndex,
             compressEndIndex = compressEndIndex,
             keepRecentMessages = keepRecentMessages,
             trigger = trigger,
             additionalPrompt = additionalPrompt,
+            baseDialogueSummaryText = baseDialogueSummaryText,
+            baseLedgerJson = baseLedgerJson,
             baseSummaryJson = baseSummaryJson,
             createdAt = createdAt
+        )
+    }
+
+    suspend fun updateCompressionEvent(event: CompressionEvent, conversationId: Uuid) {
+        compressionEventDAO.update(
+            CompressionEventEntity(
+                id = event.id,
+                conversationId = conversationId.toString(),
+                boundaryIndex = event.boundaryIndex,
+                dialogueSummaryText = event.dialogueSummaryText,
+                dialogueSummaryPreview = event.dialogueSummaryPreview,
+                ledgerSnapshot = event.ledgerSnapshot,
+                summarySnapshot = event.summarySnapshot,
+                compressStartIndex = event.compressStartIndex,
+                compressEndIndex = event.compressEndIndex,
+                keepRecentMessages = event.keepRecentMessages,
+                trigger = event.trigger,
+                additionalPrompt = event.additionalPrompt,
+                baseDialogueSummaryText = event.baseDialogueSummaryText,
+                baseLedgerJson = event.baseLedgerJson,
+                baseSummaryJson = event.baseSummaryJson,
+                createdAt = event.createdAt.toEpochMilli()
+            )
         )
     }
 
@@ -447,12 +495,17 @@ class ConversationRepository(
             CompressionEvent(
                 id = entity.id,
                 boundaryIndex = entity.boundaryIndex,
+                dialogueSummaryText = entity.dialogueSummaryText,
+                dialogueSummaryPreview = entity.dialogueSummaryPreview,
+                ledgerSnapshot = entity.ledgerSnapshot,
                 summarySnapshot = entity.summarySnapshot,
                 compressStartIndex = entity.compressStartIndex,
                 compressEndIndex = entity.compressEndIndex,
                 keepRecentMessages = entity.keepRecentMessages,
                 trigger = entity.trigger,
                 additionalPrompt = entity.additionalPrompt,
+                baseDialogueSummaryText = entity.baseDialogueSummaryText,
+                baseLedgerJson = entity.baseLedgerJson,
                 baseSummaryJson = entity.baseSummaryJson,
                 createdAt = Instant.ofEpochMilli(entity.createdAt)
             )

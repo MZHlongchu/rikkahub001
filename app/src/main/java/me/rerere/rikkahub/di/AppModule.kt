@@ -121,6 +121,7 @@ val appModule = module {
             conversationRepo = get(),
             memoryRepository = get(),
             memoryIndexRepository = get(),
+            pendingLedgerBatchRepository = get(),
             sourcePreviewRepository = get(),
             generationHandler = get(),
             templateTransformer = get(),

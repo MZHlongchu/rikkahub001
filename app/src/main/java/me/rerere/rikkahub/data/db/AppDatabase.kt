@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MemoryIndexChunkDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.PendingLedgerBatchDAO
 import me.rerere.rikkahub.data.db.dao.ScheduledTaskRunDAO
 import me.rerere.rikkahub.data.db.dao.SourcePreviewChunkDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
@@ -28,12 +29,15 @@ import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MemoryIndexChunkEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.PendingLedgerBatchEntity
 import me.rerere.rikkahub.data.db.entity.ScheduledTaskRunEntity
 import me.rerere.rikkahub.data.db.entity.SourcePreviewChunkEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_19_20
 import me.rerere.rikkahub.data.db.migrations.Migration_21_22
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
+import me.rerere.rikkahub.data.db.migrations.Migration_23_24
+import me.rerere.rikkahub.data.db.migrations.Migration_24_25
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -46,13 +50,14 @@ import me.rerere.rikkahub.utils.JsonInstant
         ManagedFileEntity::class,
         FavoriteEntity::class,
         CompressionEventEntity::class,
+        PendingLedgerBatchEntity::class,
         MemoryIndexChunkEntity::class,
         SourcePreviewChunkEntity::class,
         ScheduledTaskRunEntity::class,
         KnowledgeBaseDocumentEntity::class,
         KnowledgeBaseChunkEntity::class,
     ],
-    version = 23,
+    version = 25,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -83,6 +88,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDAO
 
     abstract fun compressionEventDao(): CompressionEventDAO
+
+    abstract fun pendingLedgerBatchDao(): PendingLedgerBatchDAO
 
     abstract fun memoryIndexChunkDao(): MemoryIndexChunkDAO
 

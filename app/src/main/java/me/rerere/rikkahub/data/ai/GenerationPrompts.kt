@@ -28,17 +28,33 @@ internal fun buildMemoryPrompt(memories: List<AssistantMemory>) =
         appendLine()
     }
 
-internal fun buildRollingSummaryPrompt(rollingSummaryJson: String): String {
+internal fun buildDialogueSummaryPrompt(dialogueSummaryText: String): String {
+    if (dialogueSummaryText.isBlank()) return ""
+    return buildString {
+        appendLine()
+        append("**Primary Compaction Summary**")
+        appendLine()
+        append(
+            "This is the maintained high-priority continuity summary for the current conversation. " +
+                "Treat it as working state, but let newer messages override stale details."
+        )
+        appendLine()
+        append(dialogueSummaryText)
+        appendLine()
+    }
+}
+
+internal fun buildLegacyRollingSummaryPrompt(rollingSummaryJson: String): String {
     if (rollingSummaryJson.isBlank()) return ""
     val summaryProjection = parseRollingSummaryDocument(rollingSummaryJson).toCurrentViewProjection()
     if (summaryProjection.isBlank()) return ""
     return buildString {
         appendLine()
-        append("**Rolling Summary (Compressed Context)**")
+        append("**Legacy Rolling Summary Fallback**")
         appendLine()
         append(
-            "This is maintained compressed context projected from the structured rolling summary. " +
-                "Treat it as high-priority background state, but let newer messages override stale details."
+            "This conversation has not been re-compressed into the new primary summary format yet. " +
+                "Use this projected legacy summary as fallback background state."
         )
         appendLine()
         append(summaryProjection)

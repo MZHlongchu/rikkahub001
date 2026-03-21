@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.pages.chat
+﻿package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -65,7 +65,9 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.CompressionRegenerationTarget
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.components.ai.LedgerGenerationDialog
 import me.rerere.rikkahub.ui.components.sandbox.SandboxFileManagerDialog
 import me.rerere.rikkahub.ui.components.workflow.WorkflowFloatingPanel
 import me.rerere.rikkahub.ui.components.workflow.WorkflowSidebarHandle
@@ -100,6 +102,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
     val compressionUiState by vm.compressionUiState.collectAsStateWithLifecycle()
+    val ledgerGenerationUiState by vm.ledgerGenerationUiState.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
@@ -124,8 +127,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val inputState = vm.inputState
     val latestConversation by rememberUpdatedState(conversation)
+    var pendingCompressionScrollEventId by rememberSaveable(id) { mutableStateOf<Long?>(null) }
 
-    // 初始化输入状态（处理传入�?files �?text 参数�?
+    // Initialize input state from incoming files/text arguments
     LaunchedEffect(files, text) {
         if (files.isNotEmpty()) {
             val localFiles = filesManager.createChatFilesByContents(files)
@@ -174,13 +178,29 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     LaunchedEffect(vm, id) {
         vm.compressionScrollEvents.collect { (conversationId, eventId) ->
             if (conversationId != id) return@collect
-            var targetIndex: Int? = null
-            repeat(20) {
-                targetIndex = latestConversation.findCompressionScrollIndex(eventId)
-                if (targetIndex != null) return@repeat
-                kotlinx.coroutines.delay(50)
+            // Keep the target event id until the conversation state actually contains the
+            // new compression boundary card. Emitting the scroll event and updating the
+            // conversation flow are asynchronous, so scrolling immediately is easy to lose.
+            pendingCompressionScrollEventId = eventId
+        }
+    }
+
+    LaunchedEffect(
+        pendingCompressionScrollEventId,
+        conversation.compressionEvents,
+        conversation.messageNodes.size
+    ) {
+        val eventId = pendingCompressionScrollEventId ?: return@LaunchedEffect
+        val targetIndex = latestConversation.findCompressionScrollIndex(eventId) ?: return@LaunchedEffect
+
+        // Wait until LazyColumn has laid out the target item before jumping to it.
+        repeat(20) {
+            if (chatListState.layoutInfo.totalItemsCount > targetIndex) {
+                chatListState.animateScrollToItem(targetIndex)
+                pendingCompressionScrollEventId = null
+                return@LaunchedEffect
             }
-            targetIndex?.let { chatListState.animateScrollToItem(it) }
+            kotlinx.coroutines.delay(50)
         }
     }
 
@@ -209,6 +229,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     currentChatModel = currentChatModel,
                     bigScreen = true,
                     compressionUiState = compressionUiState,
+                    ledgerGenerationUiState = ledgerGenerationUiState,
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
@@ -241,6 +262,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     currentChatModel = currentChatModel,
                     bigScreen = false,
                     compressionUiState = compressionUiState,
+                    ledgerGenerationUiState = ledgerGenerationUiState,
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
@@ -267,6 +289,7 @@ private fun ChatPageContent(
     enableWebSearch: Boolean,
     currentChatModel: Model?,
     compressionUiState: me.rerere.rikkahub.service.CompressionUiState?,
+    ledgerGenerationUiState: me.rerere.rikkahub.service.LedgerGenerationUiState?,
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
@@ -345,7 +368,7 @@ private fun ChatPageContent(
                     },
                     onSendClick = {
                         if (currentChatModel == null) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                            toaster.show("璇峰厛閫夋嫨妯″瀷", type = ToastType.Error)
                             return@ChatInput
                         }
                         if (inputState.isEditing()) {
@@ -398,12 +421,13 @@ private fun ChatPageContent(
                             )
                         )
                     },
-                    onCompressContext = { additionalPrompt, keepRecentMessages, autoCompressEnabled, autoCompressTriggerTokens ->
+                    onCompressContext = { additionalPrompt, keepRecentMessages, autoCompressEnabled, autoCompressTriggerTokens, generateMemoryLedger ->
                         vm.handleCompressContext(
                             additionalPrompt = additionalPrompt,
                             keepRecentMessages = keepRecentMessages,
                             autoCompressEnabled = autoCompressEnabled,
-                            autoCompressTriggerTokens = autoCompressTriggerTokens
+                            autoCompressTriggerTokens = autoCompressTriggerTokens,
+                            generateMemoryLedger = generateMemoryLedger,
                         )
                     },
                 )
@@ -421,7 +445,7 @@ private fun ChatPageContent(
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
-                onRegenerateLatestCompression = { vm.regenerateLatestCompression() },
+                onRegenerateLatestCompression = { target -> vm.regenerateLatestCompression(target) },
                 onRegenerate = {
                     vm.regenerateAtMessage(it)
                 },
@@ -512,6 +536,10 @@ private fun ChatPageContent(
                 sandboxId = conversation.id.toString(),
                 onDismiss = { showSandboxFileManager = false }
             )
+        }
+
+        if (ledgerGenerationUiState != null) {
+            LedgerGenerationDialog()
         }
     }
 }
@@ -654,3 +682,4 @@ private fun Conversation.findCompressionScrollIndex(eventId: Long): Int? {
     }
     return null
 }
+

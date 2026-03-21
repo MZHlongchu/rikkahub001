@@ -28,6 +28,12 @@ data class CompressionEventEntity(
     val conversationId: String,
     @ColumnInfo("boundary_index")
     val boundaryIndex: Int,
+    @ColumnInfo("dialogue_summary_text", defaultValue = "")
+    val dialogueSummaryText: String = "",
+    @ColumnInfo("dialogue_summary_preview", defaultValue = "")
+    val dialogueSummaryPreview: String = "",
+    @ColumnInfo("ledger_snapshot", defaultValue = "")
+    val ledgerSnapshot: String = "",
     @ColumnInfo("summary_snapshot", defaultValue = "")
     val summarySnapshot: String = "",
     @ColumnInfo("compress_start_index", defaultValue = "0")
@@ -40,6 +46,10 @@ data class CompressionEventEntity(
     val trigger: String = "",
     @ColumnInfo("additional_prompt", defaultValue = "")
     val additionalPrompt: String = "",
+    @ColumnInfo("base_dialogue_summary_text", defaultValue = "")
+    val baseDialogueSummaryText: String = "",
+    @ColumnInfo("base_ledger_json", defaultValue = "")
+    val baseLedgerJson: String = "",
     @ColumnInfo("base_summary_json", defaultValue = "")
     val baseSummaryJson: String = "",
     @ColumnInfo("created_at")
