@@ -101,6 +101,8 @@ class SettingsStore(
         val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
         val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
         val AUTO_COMPRESS_TRIGGER_TOKENS = intPreferencesKey("auto_compress_trigger_tokens")
+        val MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER =
+            booleanPreferencesKey("manual_compress_generate_memory_ledger")
         val TOKEN_ESTIMATOR_CHARS_PER_TOKEN = stringPreferencesKey("token_estimator_chars_per_token")
 
         // 提供商
@@ -190,6 +192,7 @@ class SettingsStore(
                 embeddingModelId = preferences[EMBEDDING_MODEL]?.takeIf { it.isNotBlank() }?.let { Uuid.parse(it) },
                 autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] == true,
                 autoCompressTriggerTokens = preferences[AUTO_COMPRESS_TRIGGER_TOKENS] ?: 12000,
+                manualCompressGenerateMemoryLedger = preferences[MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER] != false,
                 tokenEstimatorCharsPerToken = preferences[TOKEN_ESTIMATOR_CHARS_PER_TOKEN]?.toFloatOrNull() ?: 4.0f,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
@@ -446,6 +449,7 @@ class SettingsStore(
             } ?: preferences.remove(EMBEDDING_MODEL)
             preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
             preferences[AUTO_COMPRESS_TRIGGER_TOKENS] = settings.autoCompressTriggerTokens.coerceAtLeast(1000)
+            preferences[MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER] = settings.manualCompressGenerateMemoryLedger
             preferences[TOKEN_ESTIMATOR_CHARS_PER_TOKEN] = settings.tokenEstimatorCharsPerToken.toString()
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
@@ -585,6 +589,7 @@ data class Settings(
     val embeddingModelId: Uuid? = null,
     val autoCompressEnabled: Boolean = false,
     val autoCompressTriggerTokens: Int = 12000,
+    val manualCompressGenerateMemoryLedger: Boolean = true,
     val tokenEstimatorCharsPerToken: Float = 4.0f,
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,

@@ -290,7 +290,8 @@ class ChatVM(
             settingsStore.update {
                 it.copy(
                     autoCompressEnabled = autoCompressEnabled,
-                    autoCompressTriggerTokens = autoCompressTriggerTokens
+                    autoCompressTriggerTokens = autoCompressTriggerTokens,
+                    manualCompressGenerateMemoryLedger = generateMemoryLedger,
                 )
             }
             chatService.compressConversation(
@@ -406,6 +407,10 @@ class ChatVM(
                 )
             }
         }
+    }
+
+    fun cancelCompressionWork() {
+        chatService.cancelCompressionWork(_conversationId)
     }
 
     fun translateMessage(message: UIMessage, targetLanguage: Locale) {

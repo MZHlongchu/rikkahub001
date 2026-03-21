@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.MessageRole
@@ -256,6 +257,7 @@ class ChatService(
 
     private val _compressionUiStates = MutableStateFlow<Map<Uuid, CompressionUiState>>(emptyMap())
     private val _ledgerGenerationUiStates = MutableStateFlow<Map<Uuid, LedgerGenerationUiState>>(emptyMap())
+    private val _compressionWorkerJobs = MutableStateFlow<Map<Uuid, Job?>>(emptyMap())
     private val _compressionScrollEvents = MutableSharedFlow<Pair<Uuid, Long>>(extraBufferCapacity = 8)
     val compressionScrollEvents: SharedFlow<Pair<Uuid, Long>> = _compressionScrollEvents.asSharedFlow()
 
@@ -508,6 +510,16 @@ class ChatService(
         _ledgerGenerationUiStates.update { current ->
             if (state == null) current - conversationId else current + (conversationId to state)
         }
+    }
+
+    private fun updateCompressionWorkerJob(conversationId: Uuid, job: Job?) {
+        _compressionWorkerJobs.update { current ->
+            if (job == null) current - conversationId else current + (conversationId to job)
+        }
+    }
+
+    fun cancelCompressionWork(conversationId: Uuid) {
+        _compressionWorkerJobs.value[conversationId]?.cancel()
     }
 
     // 生成完成流
@@ -1318,15 +1330,21 @@ class ChatService(
         additionalPrompt: String,
         keepRecentMessages: Int = 6,
         generateMemoryLedger: Boolean = true,
-    ): Result<Unit> = runCatching {
-        compressConversationInternal(
-            conversationId = conversationId,
-            conversation = conversation,
-            additionalPrompt = additionalPrompt,
-            keepRecentMessages = keepRecentMessages,
-            trigger = "manual",
-            generateMemoryLedger = generateMemoryLedger,
-        )
+    ): Result<Unit> {
+        updateCompressionWorkerJob(conversationId, currentCoroutineContext()[Job])
+        return runCatching<Unit> {
+            compressConversationInternal(
+                conversationId = conversationId,
+                conversation = conversation,
+                additionalPrompt = additionalPrompt,
+                keepRecentMessages = keepRecentMessages,
+                trigger = "manual",
+                generateMemoryLedger = generateMemoryLedger,
+            )
+            Unit
+        }.also {
+            updateCompressionWorkerJob(conversationId, null)
+        }
     }
 
     suspend fun generateMemoryIndex(conversationId: Uuid): Result<Int> = runCatching {
@@ -1362,111 +1380,117 @@ class ChatService(
     suspend fun regenerateLatestCompression(
         conversationId: Uuid,
         target: CompressionRegenerationTarget = CompressionRegenerationTarget.DialogueSummary,
-    ): Result<Unit> = runCatching {
-        val conversation = conversationRepo.getConversationById(conversationId)
-            ?: throw IllegalStateException("Conversation not found")
-        val latestEvent = conversation.compressionEvents.maxByOrNull { it.createdAt }
-            ?: throw IllegalStateException(context.getString(R.string.chat_page_compress_no_latest_summary))
-        when (target) {
-            CompressionRegenerationTarget.DialogueSummary -> {
-                val rebuiltConversation = conversation.copy(
-                    compressionState = conversation.compressionState.copy(
-                        dialogueSummaryText = latestEvent.baseDialogueSummaryText,
-                        dialogueSummaryTokenEstimate = estimateTokenCount(
-                            latestEvent.baseDialogueSummaryText,
-                            settingsStore.settingsFlow.first().tokenEstimatorCharsPerToken
+    ): Result<Unit> {
+        updateCompressionWorkerJob(conversationId, currentCoroutineContext()[Job])
+        return runCatching<Unit> {
+            val conversation = conversationRepo.getConversationById(conversationId)
+                ?: throw IllegalStateException("Conversation not found")
+            val latestEvent = conversation.compressionEvents.maxByOrNull { it.createdAt }
+                ?: throw IllegalStateException(context.getString(R.string.chat_page_compress_no_latest_summary))
+            when (target) {
+                CompressionRegenerationTarget.DialogueSummary -> {
+                    val rebuiltConversation = conversation.copy(
+                        compressionState = conversation.compressionState.copy(
+                            dialogueSummaryText = latestEvent.baseDialogueSummaryText,
+                            dialogueSummaryTokenEstimate = estimateTokenCount(
+                                latestEvent.baseDialogueSummaryText,
+                                settingsStore.settingsFlow.first().tokenEstimatorCharsPerToken
+                            ),
+                            dialogueSummaryUpdatedAt = Instant.now(),
+                            lastCompressedMessageIndex = (latestEvent.compressStartIndex - 1).coerceAtLeast(-1),
+                            memoryLedgerStatus = "stale",
+                            memoryLedgerError = "",
+                            updatedAt = Instant.now()
                         ),
-                        dialogueSummaryUpdatedAt = Instant.now(),
-                        lastCompressedMessageIndex = (latestEvent.compressStartIndex - 1).coerceAtLeast(-1),
-                        memoryLedgerStatus = "stale",
-                        memoryLedgerError = "",
-                        updatedAt = Instant.now()
-                    ),
-                    compressionEvents = conversation.compressionEvents.filterNot { it.id == latestEvent.id }
-                )
-                saveConversation(conversationId, rebuiltConversation)
-                compressConversationInternal(
-                    conversationId = conversationId,
-                    conversation = rebuiltConversation,
-                    additionalPrompt = latestEvent.additionalPrompt,
-                    keepRecentMessages = latestEvent.keepRecentMessages,
-                    trigger = "regenerate-dialogue-summary",
-                    generateMemoryLedger = false,
-                    baseDialogueSummaryTextOverride = latestEvent.baseDialogueSummaryText,
-                    baseRollingSummaryJsonOverride = conversation.compressionState.rollingSummaryJson.ifBlank {
-                        latestEvent.baseLedgerJson.ifBlank { latestEvent.baseSummaryJson.ifBlank { "{}" } }
-                    },
-                    compressStartIndexOverride = latestEvent.compressStartIndex,
-                    compressEndIndexOverride = latestEvent.compressEndIndex
-                )
-            }
-
-            CompressionRegenerationTarget.MemoryLedger -> {
-                val baseLedgerJson = latestEvent.baseLedgerJson.ifBlank { latestEvent.baseSummaryJson.ifBlank { "{}" } }
-                val rebuiltConversation = conversation.copy(
-                    compressionState = conversation.compressionState.copy(
-                        rollingSummaryJson = baseLedgerJson,
-                        rollingSummaryTokenEstimate = estimateTokenCount(
-                            baseLedgerJson,
-                            settingsStore.settingsFlow.first().tokenEstimatorCharsPerToken
-                        ),
-                        memoryLedgerStatus = "pending",
-                        memoryLedgerError = "",
-                        updatedAt = Instant.now()
+                        compressionEvents = conversation.compressionEvents.filterNot { it.id == latestEvent.id }
                     )
-                )
-                saveConversation(conversationId, rebuiltConversation)
-                val incrementalMessages = rebuiltConversation.currentMessages
-                    .subList(latestEvent.compressStartIndex, latestEvent.compressEndIndex + 1)
-                    .joinToString("\n\n") { message -> message.toCompressionText() }
-                pendingLedgerBatchRepository.upsertPendingBatch(
-                    conversationId = conversationId,
-                    eventId = latestEvent.id,
-                    startIndex = latestEvent.compressStartIndex,
-                    endIndex = latestEvent.compressEndIndex,
-                    incrementalMessages = incrementalMessages,
-                )
-                val settings = settingsStore.settingsFlow.first()
-                val model = settings.findModelById(settings.compressModelId)
-                    ?: settings.getCurrentChatModel()
-                    ?: throw IllegalStateException("No model available for compression")
-                val provider = model.findProvider(settings.providers)
-                    ?: throw IllegalStateException("Compression provider not found")
-                val providerHandler = providerManager.getProviderByType(provider)
-
-                updateLedgerGenerationUiState(
-                    conversationId,
-                    LedgerGenerationUiState(conversationId = conversationId, trigger = "regenerate-memory-ledger")
-                )
-                try {
-                    var updatedConversation = processPendingLedgerBatches(
+                    saveConversation(conversationId, rebuiltConversation)
+                    compressConversationInternal(
                         conversationId = conversationId,
                         conversation = rebuiltConversation,
-                        trigger = "regenerate-memory-ledger",
-                        settings = settings,
-                        provider = provider,
-                        providerHandler = providerHandler,
-                        model = model,
+                        additionalPrompt = latestEvent.additionalPrompt,
+                        keepRecentMessages = latestEvent.keepRecentMessages,
+                        trigger = "regenerate-dialogue-summary",
+                        generateMemoryLedger = false,
+                        baseDialogueSummaryTextOverride = latestEvent.baseDialogueSummaryText,
+                        baseRollingSummaryJsonOverride = conversation.compressionState.rollingSummaryJson.ifBlank {
+                            latestEvent.baseLedgerJson.ifBlank { latestEvent.baseSummaryJson.ifBlank { "{}" } }
+                        },
+                        compressStartIndexOverride = latestEvent.compressStartIndex,
+                        compressEndIndexOverride = latestEvent.compressEndIndex
                     )
-                    updateCompressionUiState(
-                        conversationId,
-                        CompressionUiState(
-                            conversationId = conversationId,
-                            trigger = "regenerate-memory-ledger",
-                            phase = CompressionUiPhase.Indexing
+                }
+
+                CompressionRegenerationTarget.MemoryLedger -> {
+                    val baseLedgerJson = latestEvent.baseLedgerJson.ifBlank { latestEvent.baseSummaryJson.ifBlank { "{}" } }
+                    val rebuiltConversation = conversation.copy(
+                        compressionState = conversation.compressionState.copy(
+                            rollingSummaryJson = baseLedgerJson,
+                            rollingSummaryTokenEstimate = estimateTokenCount(
+                                baseLedgerJson,
+                                settingsStore.settingsFlow.first().tokenEstimatorCharsPerToken
+                            ),
+                            memoryLedgerStatus = "pending",
+                            memoryLedgerError = "",
+                            updatedAt = Instant.now()
                         )
                     )
-                    updatedConversation = rebuildIndexesWithRecovery(
+                    saveConversation(conversationId, rebuiltConversation)
+                    val incrementalMessages = rebuiltConversation.currentMessages
+                        .subList(latestEvent.compressStartIndex, latestEvent.compressEndIndex + 1)
+                        .joinToString("\n\n") { message -> message.toCompressionText() }
+                    pendingLedgerBatchRepository.upsertPendingBatch(
                         conversationId = conversationId,
-                        conversation = updatedConversation,
-                        settings = settings,
-                        showSuccessNotice = true,
+                        eventId = latestEvent.id,
+                        startIndex = latestEvent.compressStartIndex,
+                        endIndex = latestEvent.compressEndIndex,
+                        incrementalMessages = incrementalMessages,
                     )
-                } finally {
-                    updateLedgerGenerationUiState(conversationId, null)
-                    updateCompressionUiState(conversationId, null)
+                    val settings = settingsStore.settingsFlow.first()
+                    val model = settings.findModelById(settings.compressModelId)
+                        ?: settings.getCurrentChatModel()
+                        ?: throw IllegalStateException("No model available for compression")
+                    val provider = model.findProvider(settings.providers)
+                        ?: throw IllegalStateException("Compression provider not found")
+                    val providerHandler = providerManager.getProviderByType(provider)
+
+                    updateLedgerGenerationUiState(
+                        conversationId,
+                        LedgerGenerationUiState(conversationId = conversationId, trigger = "regenerate-memory-ledger")
+                    )
+                    try {
+                        var updatedConversation = processPendingLedgerBatches(
+                            conversationId = conversationId,
+                            conversation = rebuiltConversation,
+                            trigger = "regenerate-memory-ledger",
+                            settings = settings,
+                            provider = provider,
+                            providerHandler = providerHandler,
+                            model = model,
+                        )
+                        updateCompressionUiState(
+                            conversationId,
+                            CompressionUiState(
+                                conversationId = conversationId,
+                                trigger = "regenerate-memory-ledger",
+                                phase = CompressionUiPhase.Indexing
+                            )
+                        )
+                        updatedConversation = rebuildIndexesWithRecovery(
+                            conversationId = conversationId,
+                            conversation = updatedConversation,
+                            settings = settings,
+                            showSuccessNotice = true,
+                        )
+                    } finally {
+                        updateLedgerGenerationUiState(conversationId, null)
+                        updateCompressionUiState(conversationId, null)
+                    }
                 }
             }
+            Unit
+        }.also {
+            updateCompressionWorkerJob(conversationId, null)
         }
     }
 
@@ -1843,12 +1867,12 @@ class ChatService(
             val result = providerHandler.generateText(
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
-                params = compressionGenerationParams(model = model, maxTokens = 6_000),
+                params = compressionGenerationParams(model = model),
             )
             return normalizeCompressionJsonText(result.choices.firstOrNull()?.message?.toText().orEmpty())
         }
 
-        suspend fun runLedgerRewrite(forceConvergence: Boolean = false): String {
+        suspend fun runLedgerRewrite(): String {
             val prompt = DEFAULT_MEMORY_LEDGER_PROMPT.applyPlaceholders(
                 "rolling_summary_json" to currentRollingSummary,
                 "incremental_messages" to batch.incrementalMessages,
@@ -1858,18 +1882,13 @@ class ChatService(
                 "hard_cap_tokens" to budget.hardCapTokens.toString(),
                 "min_chronology_items" to budget.minChronologyItems.toString(),
                 "min_detail_capsules" to budget.minDetailCapsules.toString(),
-                "additional_context" to if (forceConvergence) {
-                    additionalContext +
-                        "\nForce convergence: keep the minimum chronology/detail capsule coverage and stay within the hard cap."
-                } else {
-                    additionalContext
-                },
+                "additional_context" to additionalContext,
                 "locale" to Locale.getDefault().displayName
             )
             val result = providerHandler.generateText(
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
-                params = compressionGenerationParams(model = model, maxTokens = budget.hardCapTokens),
+                params = compressionGenerationParams(model = model),
             )
             val rawSummary = normalizeCompressionJsonText(result.choices.firstOrNull()?.message?.toText().orEmpty())
             if (rawSummary.isBlank()) {
@@ -1883,6 +1902,8 @@ class ChatService(
         }
 
         val nextRollingSummaryJson = runCatching {
+            // Patch is only a fast path. If it fails, fall back to a full ledger rewrite
+            // rather than forcing a lower-quality partial result into the persisted ledger.
             val patchDocument: LedgerPatchDocument = parseLedgerPatchDocument(runPatchPrompt())
             val baseDocument = parseRollingSummaryDocument(currentRollingSummary)
             applyLedgerPatchDocument(
@@ -1892,22 +1913,7 @@ class ChatService(
                 updatedAt = Instant.now()
             ).toJson()
         }.getOrElse {
-            var rewritten = runLedgerRewrite(forceConvergence = false)
-            var tokenEstimate = estimateTokenCount(
-                text = rewritten,
-                charsPerToken = settings.tokenEstimatorCharsPerToken
-            )
-            if (tokenEstimate > budget.hardCapTokens) {
-                rewritten = runLedgerRewrite(forceConvergence = true)
-                tokenEstimate = estimateTokenCount(
-                    text = rewritten,
-                    charsPerToken = settings.tokenEstimatorCharsPerToken
-                )
-                if (tokenEstimate > budget.hardCapTokens) {
-                    throw IllegalStateException("Memory ledger still exceeded hard cap after convergence")
-                }
-            }
-            rewritten
+            runLedgerRewrite()
         }
 
         val ledgerSnapshot = buildSummarySnapshot(nextRollingSummaryJson)

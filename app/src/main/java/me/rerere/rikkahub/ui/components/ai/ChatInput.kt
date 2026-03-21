@@ -178,6 +178,7 @@ fun ChatInput(
         generateMemoryLedger: Boolean,
     ) -> Job,
     autoCompressionUiState: me.rerere.rikkahub.service.CompressionUiState? = null,
+    onCancelCompressionProgress: () -> Unit = {},
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
@@ -653,9 +654,8 @@ fun ChatInput(
                 val manualJob = manualCompressionJob
                 if (manualJob != null && manualJob.isActive) {
                     manualJob.cancel()
-                } else {
-                    onCancelClick()
                 }
+                onCancelCompressionProgress()
             },
         )
     }
@@ -1197,7 +1197,9 @@ private fun FilesPicker(
             },
             initialAutoCompressEnabled = settings.autoCompressEnabled,
             initialAutoCompressTriggerTokens = settings.autoCompressTriggerTokens,
-            initialGenerateMemoryLedger = conversation.compressionState.memoryLedgerStatus != "stale",
+            // Persist the user's last manual choice so reopening the dialog does not silently
+            // flip the ledger toggle based on the conversation's transient stale/ready status.
+            initialGenerateMemoryLedger = settings.manualCompressGenerateMemoryLedger,
             onConfirmManual = { additionalPrompt, keepRecentMessages, autoCompressEnabled, autoCompressTriggerTokens, generateMemoryLedger ->
                 // Close the manual config dialog immediately after confirmation so the user
                 // can see the shared compression -> ledger -> indexing phase dialogs instead

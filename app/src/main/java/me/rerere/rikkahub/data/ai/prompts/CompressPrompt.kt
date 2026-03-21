@@ -171,21 +171,6 @@ internal val DEFAULT_MEMORY_LEDGER_PROMPT = """
       "status": "active" | "done" | "blocked" | "superseded" | "historical"
     }
 
-    预算提醒：
-    - incremental_input_tokens: {incremental_input_tokens}
-    - minimum output tokens: {min_output_tokens}
-    - target output tokens: {target_output_tokens}
-    - hard cap tokens: {hard_cap_tokens}
-    - minimum chronology items: {min_chronology_items}
-    - minimum detail capsules: {min_detail_capsules}
-
-    如果必须继续收缩，按这个顺序处理：
-    - 先合并最弱、最旧的 chronology
-    - 再压缩低价值 timeline
-    - 再压缩低价值 open_questions
-    - 再压缩低价值 detail_capsules
-    - 尽量保护 constraints、artifacts、decisions、当前有效 facts，以及带有明确 locator / identifiers / source_message_ids 的条目
-
     {additional_context}
 
     <current_memory_ledger_json>

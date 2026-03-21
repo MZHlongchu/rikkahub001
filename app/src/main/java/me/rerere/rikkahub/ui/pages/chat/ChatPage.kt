@@ -350,6 +350,9 @@ private fun ChatPageContent(
                     onCancelClick = {
                         loadingJob?.cancel()
                     },
+                    onCancelCompressionProgress = {
+                        vm.cancelCompressionWork()
+                    },
                     enableSearch = enableWebSearch,
                     onToggleSearch = {
                         vm.updateSettings(setting.copy(enableWebSearch = !enableWebSearch))
@@ -539,7 +542,11 @@ private fun ChatPageContent(
         }
 
         if (ledgerGenerationUiState != null) {
-            LedgerGenerationDialog()
+            LedgerGenerationDialog(
+                onCancel = {
+                    vm.cancelCompressionWork()
+                }
+            )
         }
     }
 }
