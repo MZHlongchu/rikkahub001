@@ -96,10 +96,11 @@ import me.rerere.rikkahub.data.memory.sourceRef
 import me.rerere.rikkahub.data.model.applyLedgerPatchDocument
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.CompressionEvent
 import me.rerere.rikkahub.data.model.ConversationCompressionState
 import me.rerere.rikkahub.data.model.LedgerPatchDocument
 import me.rerere.rikkahub.data.model.MemoryIndexChunk
+import me.rerere.rikkahub.data.model.compressionEventOrder
+import me.rerere.rikkahub.data.model.latestCompressionEvent
 import me.rerere.rikkahub.data.model.parseLedgerPatchDocument
 import me.rerere.rikkahub.data.model.PendingLedgerBatch
 import me.rerere.rikkahub.data.model.ScheduledPromptTask
@@ -1385,7 +1386,7 @@ class ChatService(
         return runCatching<Unit> {
             val conversation = conversationRepo.getConversationById(conversationId)
                 ?: throw IllegalStateException("Conversation not found")
-            val latestEvent = conversation.compressionEvents.maxByOrNull { it.createdAt }
+            val latestEvent = conversation.compressionEvents.latestCompressionEvent()
                 ?: throw IllegalStateException(context.getString(R.string.chat_page_compress_no_latest_summary))
             when (target) {
                 CompressionRegenerationTarget.DialogueSummary -> {
@@ -1401,11 +1402,12 @@ class ChatService(
                             memoryLedgerStatus = "stale",
                             memoryLedgerError = "",
                             updatedAt = Instant.now()
-                        ),
-                        compressionEvents = conversation.compressionEvents.filterNot { it.id == latestEvent.id }
+                        )
                     )
-                    saveConversation(conversationId, rebuiltConversation)
-                    compressConversationInternal(
+                    // Keep the previous compression event alive until the regenerated summary
+                    // has been persisted successfully. If we remove it first and generation
+                    // fails, the latest card loses its original base summary / ledger lineage.
+                    val regeneratedConversation = compressConversationInternal(
                         conversationId = conversationId,
                         conversation = rebuiltConversation,
                         additionalPrompt = latestEvent.additionalPrompt,
@@ -1418,6 +1420,11 @@ class ChatService(
                         },
                         compressStartIndexOverride = latestEvent.compressStartIndex,
                         compressEndIndexOverride = latestEvent.compressEndIndex
+                    )
+                    removeSupersededCompressionArtifacts(
+                        conversationId = conversationId,
+                        conversation = regeneratedConversation,
+                        supersededEventId = latestEvent.id,
                     )
                 }
 
@@ -1653,7 +1660,7 @@ class ChatService(
                     lastCompressedMessageIndex = compressEndIndex,
                     updatedAt = Instant.now()
                 ),
-                compressionEvents = (conversation.compressionEvents + event).sortedBy { it.createdAt },
+                compressionEvents = (conversation.compressionEvents + event).sortedWith(compressionEventOrder),
                 chatSuggestions = emptyList(),
             )
             saveConversation(conversationId, updatedConversation)
@@ -1797,6 +1804,18 @@ class ChatService(
 
         processableBatches.forEach { batch ->
             val batchStartedAt = System.currentTimeMillis()
+            if (currentConversation.compressionEvents.none { it.id == batch.eventId }) {
+                // Older buggy regenerations could leave behind pending-ledger rows whose
+                // source compression event has already been replaced. Drop those stale rows
+                // instead of letting them poison every later ledger rebuild attempt.
+                pendingLedgerBatchRepository.deleteByConversationAndEvent(conversationId, batch.eventId)
+                logLedgerStep(
+                    conversationId,
+                    trigger,
+                    "batch ${batch.id} dropped because source event ${batch.eventId} no longer exists"
+                )
+                return@forEach
+            }
             logLedgerStep(
                 conversationId,
                 trigger,
@@ -2021,7 +2040,7 @@ class ChatService(
             ),
             compressionEvents = conversation.compressionEvents.map {
                 if (it.id == updatedEvent.id) updatedEvent else it
-            }.sortedBy { it.createdAt },
+            }.sortedWith(compressionEventOrder),
             chatSuggestions = emptyList(),
         )
         saveConversation(conversationId, updatedConversation)
@@ -2041,6 +2060,25 @@ class ChatService(
             .take(3)
             .joinToString(" | ")
             .take(220)
+    }
+
+    private suspend fun removeSupersededCompressionArtifacts(
+        conversationId: Uuid,
+        conversation: Conversation,
+        supersededEventId: Long,
+    ): Conversation {
+        // Summary regeneration now creates a replacement event from the exact same base
+        // summary + incremental range. Once the replacement exists, we can safely remove
+        // the superseded event row and its old pending-ledger batch together.
+        pendingLedgerBatchRepository.deleteByConversationAndEvent(conversationId, supersededEventId)
+        conversationRepo.deleteCompressionEvent(conversationId, supersededEventId)
+        val cleanedConversation = conversation.copy(
+                compressionEvents = conversation.compressionEvents
+                    .filterNot { it.id == supersededEventId }
+                    .sortedWith(compressionEventOrder),
+        )
+        saveConversation(conversationId, cleanedConversation)
+        return cleanedConversation
     }
 
     private fun logLedgerStep(

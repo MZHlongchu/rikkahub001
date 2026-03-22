@@ -103,6 +103,7 @@ class SettingsStore(
         val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
         val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
         val AUTO_COMPRESS_TRIGGER_TOKENS = intPreferencesKey("auto_compress_trigger_tokens")
+        val MANUAL_COMPRESS_KEEP_RECENT_MESSAGES = intPreferencesKey("manual_compress_keep_recent_messages")
         val MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER =
             booleanPreferencesKey("manual_compress_generate_memory_ledger")
         val TOKEN_ESTIMATOR_CHARS_PER_TOKEN = stringPreferencesKey("token_estimator_chars_per_token")
@@ -195,6 +196,7 @@ class SettingsStore(
                 embeddingModelId = preferences[EMBEDDING_MODEL]?.takeIf { it.isNotBlank() }?.let { Uuid.parse(it) },
                 autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] == true,
                 autoCompressTriggerTokens = preferences[AUTO_COMPRESS_TRIGGER_TOKENS] ?: 12000,
+                manualCompressKeepRecentMessages = preferences[MANUAL_COMPRESS_KEEP_RECENT_MESSAGES] ?: 6,
                 manualCompressGenerateMemoryLedger = preferences[MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER] != false,
                 tokenEstimatorCharsPerToken = preferences[TOKEN_ESTIMATOR_CHARS_PER_TOKEN]?.toFloatOrNull() ?: 4.0f,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
@@ -453,6 +455,8 @@ class SettingsStore(
             } ?: preferences.remove(EMBEDDING_MODEL)
             preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
             preferences[AUTO_COMPRESS_TRIGGER_TOKENS] = settings.autoCompressTriggerTokens.coerceAtLeast(1000)
+            preferences[MANUAL_COMPRESS_KEEP_RECENT_MESSAGES] =
+                settings.manualCompressKeepRecentMessages.coerceAtLeast(0)
             preferences[MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER] = settings.manualCompressGenerateMemoryLedger
             preferences[TOKEN_ESTIMATOR_CHARS_PER_TOKEN] = settings.tokenEstimatorCharsPerToken.toString()
 
@@ -594,6 +598,7 @@ data class Settings(
     val embeddingModelId: Uuid? = null,
     val autoCompressEnabled: Boolean = false,
     val autoCompressTriggerTokens: Int = 12000,
+    val manualCompressKeepRecentMessages: Int = 6,
     val manualCompressGenerateMemoryLedger: Boolean = true,
     val tokenEstimatorCharsPerToken: Float = 4.0f,
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,

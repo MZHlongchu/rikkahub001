@@ -17,6 +17,9 @@ interface CompressionEventDAO {
     @Update
     suspend fun update(event: CompressionEventEntity)
 
+    @Query("DELETE FROM compression_event WHERE conversation_id = :conversationId AND id = :eventId")
+    suspend fun deleteByConversationAndId(conversationId: String, eventId: Long)
+
     @Query("DELETE FROM compression_event WHERE conversation_id = :conversationId")
     suspend fun deleteByConversation(conversationId: String)
 }

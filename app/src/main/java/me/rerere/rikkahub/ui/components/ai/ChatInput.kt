@@ -1197,6 +1197,7 @@ private fun FilesPicker(
             },
             initialAutoCompressEnabled = settings.autoCompressEnabled,
             initialAutoCompressTriggerTokens = settings.autoCompressTriggerTokens,
+            initialKeepRecentMessages = settings.manualCompressKeepRecentMessages,
             // Persist the user's last manual choice so reopening the dialog does not silently
             // flip the ledger toggle based on the conversation's transient stale/ready status.
             initialGenerateMemoryLedger = settings.manualCompressGenerateMemoryLedger,

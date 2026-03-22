@@ -98,6 +98,7 @@ import me.rerere.rikkahub.data.model.CompressionEvent
 import me.rerere.rikkahub.data.model.CompressionSummarySection
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.compressionEventOrder
 import me.rerere.rikkahub.data.model.parseCompressionSummarySnapshot
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.CompressionRegenerationTarget
@@ -257,7 +258,7 @@ private fun ChatListNormal(
             .map { event ->
                 event.copy(boundaryIndex = event.boundaryIndex.coerceIn(0, conversation.messageNodes.size))
             }
-            .sortedBy { it.createdAt }
+            .sortedWith(compressionEventOrder)
     }
     val latestCompressionEventId = normalizedCompressionEvents.lastOrNull()?.id
     var expandedCompressionEventId by rememberSaveable(conversation.id) { mutableStateOf(latestCompressionEventId) }

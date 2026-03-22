@@ -434,6 +434,10 @@ class ConversationRepository(
         )
     }
 
+    suspend fun deleteCompressionEvent(conversationId: Uuid, eventId: Long) {
+        compressionEventDAO.deleteByConversationAndId(conversationId.toString(), eventId)
+    }
+
     suspend fun getCompressionEvents(conversationId: Uuid): List<CompressionEvent> {
         return loadCompressionEvents(conversationId.toString())
     }

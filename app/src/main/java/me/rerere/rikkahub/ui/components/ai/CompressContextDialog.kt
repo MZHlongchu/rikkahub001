@@ -39,6 +39,7 @@ fun CompressContextDialog(
     onDismiss: () -> Unit,
     initialAutoCompressEnabled: Boolean = false,
     initialAutoCompressTriggerTokens: Int = 12000,
+    initialKeepRecentMessages: Int = 6,
     progressMessage: String = "",
     regenerateTitle: String? = null,
     regenerateDescription: String? = null,
@@ -55,7 +56,9 @@ fun CompressContextDialog(
     onConfirmRegenerate: (() -> Unit)? = null,
 ) {
     var additionalPrompt by remember { mutableStateOf("") }
-    var keepRecentMessagesInput by remember { mutableStateOf("6") }
+    var keepRecentMessagesInput by remember(initialKeepRecentMessages) {
+        mutableStateOf(initialKeepRecentMessages.toString())
+    }
     var autoCompressEnabled by remember { mutableStateOf(initialAutoCompressEnabled) }
     var autoCompressTriggerTokensInput by remember { mutableStateOf(initialAutoCompressTriggerTokens.toString()) }
     var generateMemoryLedger by remember { mutableStateOf(initialGenerateMemoryLedger) }

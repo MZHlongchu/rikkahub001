@@ -63,6 +63,10 @@ class PendingLedgerBatchRepository(
         return updated
     }
 
+    suspend fun deleteByConversationAndEvent(conversationId: Uuid, eventId: Long) {
+        dao.deleteByConversationAndEvent(conversationId.toString(), eventId)
+    }
+
     private fun entityToModel(entity: PendingLedgerBatchEntity): PendingLedgerBatch {
         return PendingLedgerBatch(
             id = entity.id,

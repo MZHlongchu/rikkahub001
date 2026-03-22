@@ -27,6 +27,9 @@ interface PendingLedgerBatchDAO {
     @Update
     suspend fun update(batch: PendingLedgerBatchEntity)
 
+    @Query("DELETE FROM pending_ledger_batch WHERE conversation_id = :conversationId AND event_id = :eventId")
+    suspend fun deleteByConversationAndEvent(conversationId: String, eventId: Long)
+
     @Query("DELETE FROM pending_ledger_batch WHERE conversation_id = :conversationId")
     suspend fun deleteByConversation(conversationId: String)
 }

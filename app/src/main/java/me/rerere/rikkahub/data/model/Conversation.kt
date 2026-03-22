@@ -161,6 +161,12 @@ data class CompressionEvent(
     val createdAt: Instant = Instant.now()
 )
 
+val compressionEventOrder: Comparator<CompressionEvent> =
+    compareBy<CompressionEvent>({ it.createdAt }, { it.id })
+
+fun List<CompressionEvent>.latestCompressionEvent(): CompressionEvent? =
+    maxWithOrNull(compressionEventOrder)
+
 @Serializable
 data class MessageNode(
     val id: Uuid = Uuid.random(),

@@ -291,6 +291,7 @@ class ChatVM(
                 it.copy(
                     autoCompressEnabled = autoCompressEnabled,
                     autoCompressTriggerTokens = autoCompressTriggerTokens,
+                    manualCompressKeepRecentMessages = keepRecentMessages,
                     manualCompressGenerateMemoryLedger = generateMemoryLedger,
                 )
             }
