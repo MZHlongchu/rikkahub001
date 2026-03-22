@@ -121,7 +121,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
         containerColor = CustomColors.topBarColors.containerColor
     ) {
         val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-            // providers_header 已移除，搜索服务从索�?0 开�?
+            // Search services start at visual index 0 after the header removal.
             val offset = 0
             val fromIndex = from.index - offset
             val toIndex = to.index - offset
@@ -147,7 +147,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
             state = lazyListState
         ) {
-            // 搜索提供商列�?
+            // Search service list.
             items(settings.searchServices, key = { it.id }) { service ->
                 val index = settings.searchServices.indexOf(service)
                 ReorderableItem(
@@ -198,7 +198,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            // 通用选项
+            // Common search options.
             item("common_options") {
                 CommonOptions(
                     settings = settings,
@@ -454,8 +454,9 @@ private fun TavilyOptions(
     options: SearchServiceOptions.TavilyOptions,
     onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit
 ) {
-    TavilyApiKeysEditor(
+    SearchApiKeysEditor(
         apiKeysRaw = options.apiKey,
+        poolLabel = "Tavily Key Pool",
         onUpdate = { updated ->
             onUpdateOptions(options.copy(apiKey = updated))
         }
@@ -490,8 +491,9 @@ private fun TavilyOptions(
 }
 
 @Composable
-private fun TavilyApiKeysEditor(
+private fun SearchApiKeysEditor(
     apiKeysRaw: String,
+    poolLabel: String,
     onUpdate: (String) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -510,7 +512,7 @@ private fun TavilyApiKeysEditor(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Tavily Key Pool",
+                    text = poolLabel,
                     modifier = Modifier.weight(1f)
                 )
                 Text(text = "${keyInputs.size}/$MAX_SEARCH_API_KEYS")
@@ -787,23 +789,15 @@ private fun SearchLinkUpOptions(
     options: SearchServiceOptions.LinkUpOptions,
     onUpdateOptions: (SearchServiceOptions.LinkUpOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text("API Key")
+    // LinkUp rotates over a newline-delimited key pool just like Tavily, so exposing only a
+    // single input here silently breaks the rotation feature at the configuration layer.
+    SearchApiKeysEditor(
+        apiKeysRaw = options.apiKey,
+        poolLabel = "LinkUp Key Pool",
+        onUpdate = { updated ->
+            onUpdateOptions(options.copy(apiKey = updated))
         }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(
-                    options.copy(
-                        apiKey = it
-                    )
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    )
 
     FormItem(
         label = {
