@@ -1,5 +1,6 @@
 package me.rerere.search
 
+import android.content.Context
 import android.util.Log
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,6 +16,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.KeyCursorStore
+import me.rerere.ai.util.KeyRoulette
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -22,9 +25,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 private const val TAG = "LinkUpService"
+private const val LINKUP_CURSOR_PREF = "search_linkup_key_cursor"
 
 object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
     override val name: String = "LinkUp"
+    private var keyRoulette: KeyRoulette? = null
 
     @Composable
     override fun Description() {
@@ -78,7 +83,7 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
             val request = Request.Builder()
                 .url("https://api.linkup.so/v1/search")
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Authorization", "Bearer ${nextApiKey(context, serviceOptions)}")
                 .addHeader("Content-Type", "application/json")
                 .build()
 
@@ -126,7 +131,7 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
             val request = Request.Builder()
                 .url("https://api.linkup.so/v1/fetch")
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Authorization", "Bearer ${nextApiKey(context, serviceOptions)}")
                 .addHeader("Content-Type", "application/json")
                 .build()
 
@@ -169,4 +174,25 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
     data class LinkUpFetchResponse(
         val markdown: String
     )
+
+    private fun nextApiKey(context: Context, options: SearchServiceOptions.LinkUpOptions): String {
+        val roulette = keyRoulette ?: synchronized(this) {
+            keyRoulette ?: KeyRoulette.default(
+                cursorStore = LinkUpKeyCursorStore(context.applicationContext)
+            ).also { keyRoulette = it }
+        }
+        return roulette.next("search:linkup:${options.id}", options.apiKey)
+    }
+}
+
+private class LinkUpKeyCursorStore(context: Context) : KeyCursorStore {
+    private val preferences = context.getSharedPreferences(LINKUP_CURSOR_PREF, Context.MODE_PRIVATE)
+
+    override fun get(scopeKey: String): Int {
+        return preferences.getInt(scopeKey, 0)
+    }
+
+    override fun put(scopeKey: String, nextIndex: Int) {
+        preferences.edit().putInt(scopeKey, nextIndex).commit()
+    }
 }

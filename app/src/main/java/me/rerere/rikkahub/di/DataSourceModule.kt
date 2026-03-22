@@ -242,20 +242,24 @@ val dataSourceModule = module {
 
                 chain.proceed(requestBuilder.build())
             }
-            .addInterceptor { chain ->
+            // Strip charset from Content-Type at the network layer so providers that compare the
+            // header strictly still receive plain "application/json" after okhttp finalizes it.
+            .addNetworkInterceptor { chain ->
                 val request = chain.request()
-                val contentType = request.body?.contentType()
-                if (contentType?.charset() != null) {
+                val contentTypeHeader = request.header("Content-Type")
+                if (contentTypeHeader != null && contentTypeHeader.contains(";")) {
                     chain.proceed(
                         request.newBuilder()
-                            .header("Content-Type", "${contentType.type}/${contentType.subtype}")
+                            .header("Content-Type", contentTypeHeader.substringBefore(";").trim())
                             .build()
                     )
                 } else {
                     chain.proceed(request)
                 }
             }
-            .addInterceptor(RequestLoggingInterceptor())
+            // Logging also needs the finalized network request/response pair, otherwise the
+            // interceptor misses what actually reaches the provider after header normalization.
+            .addNetworkInterceptor(RequestLoggingInterceptor())
             .addInterceptor(AIRequestInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.HEADERS
