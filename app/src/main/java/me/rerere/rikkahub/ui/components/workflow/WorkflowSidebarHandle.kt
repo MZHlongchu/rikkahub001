@@ -7,13 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -23,8 +20,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -36,8 +31,8 @@ import kotlin.math.roundToInt
 
 /**
  * 自定义工作流悬浮手柄
- * - 使用圆形渐变背景
- * - 可拖拽定位
+ * - 灰色外圈，内圆透明
+ * - 可拖拽到全屏任意位置
  * - 点击展开工作流面板
  */
 @Composable
@@ -46,31 +41,40 @@ fun WorkflowSidebarHandle(
     modifier: Modifier = Modifier,
 ) {
     val handleSize = 48.dp
+    val handleSizePx = with(LocalDensity.current) { handleSize.toPx() }
 
     BoxWithConstraints(
         modifier = modifier.fillMaxSize()
     ) {
         val density = LocalDensity.current
+        val maxX = with(density) { (maxWidth - handleSize).toPx().coerceAtLeast(0f) }
         val maxY = with(density) { (maxHeight - handleSize).toPx().coerceAtLeast(0f) }
+        
+        var offsetX by rememberSaveable { mutableFloatStateOf(0f) }
         var offsetY by rememberSaveable { mutableFloatStateOf(0f) }
         var initialized by rememberSaveable { mutableStateOf(false) }
 
-        LaunchedEffect(maxY) {
+        LaunchedEffect(maxX, maxY) {
             if (!initialized) {
+                // 初始位置：右侧偏上
+                offsetX = maxX
                 offsetY = maxY * 0.35f
                 initialized = true
             } else {
+                // 确保在边界内
+                offsetX = offsetX.coerceIn(0f, maxX)
                 offsetY = offsetY.coerceIn(0f, maxY)
             }
         }
 
         Box(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset { IntOffset(0, offsetY.roundToInt()) }
-                .pointerInput(maxY) {
+                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                .pointerInput(Unit) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
+                        // 允许拖到全屏任意位置
+                        offsetX = (offsetX + dragAmount.x).coerceIn(0f, maxX)
                         offsetY = (offsetY + dragAmount.y).coerceIn(0f, maxY)
                     }
                 }
@@ -78,32 +82,25 @@ fun WorkflowSidebarHandle(
                     detectTapGestures(onTap = { onClick() })
                 }
         ) {
-            // 外层阴影
+            // 灰色圆圈外框，内部透明
             Box(
                 modifier = Modifier
                     .size(handleSize)
-                    .shadow(
-                        elevation = 12.dp,
-                        shape = CircleShape,
-                        ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                    .background(
+                        color = Color.Transparent,
+                        shape = CircleShape
                     )
                     .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.tertiary
-                            )
-                        ),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
                         shape = CircleShape
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                // 内层白色图标
+                // 灰色图标
                 Icon(
                     imageVector = Lucide.GripVertical,
                     contentDescription = "工作流",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(24.dp)
                 )
             }

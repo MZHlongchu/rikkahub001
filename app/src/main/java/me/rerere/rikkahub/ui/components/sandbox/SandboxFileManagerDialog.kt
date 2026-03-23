@@ -862,7 +862,7 @@ private fun FileSystemItemRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = item.subtitle ?: if (item.isDirectory) item.path else formatFileSize(item.size),
+                    text = item.subtitle ?: formatFileSubtitle(item, item.isDirectory),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
@@ -954,3 +954,36 @@ private fun formatFileSize(size: Long): String {
         else -> "${size / (1024 * 1024 * 1024)} GB"
     }
 }
+
+/**
+ * 格式化文件副标题（大小 + 修改时间）
+ */
+private fun formatFileSubtitle(item: FileSystemItem, isDirectory: Boolean): String {
+    if (isDirectory) return item.path
+    val sizeText = formatFileSize(item.size)
+    val timeText = formatCompactTime(item.modifiedTime)
+    return "$sizeText  $timeText"
+}
+
+/**
+ * 格式化时间为精简格式：1月2日 13:04 → 01021304
+ */
+private fun formatCompactTime(timestamp: Long): String {
+    if (timestamp <= 0) return ""
+    val date = java.util.Date(timestamp)
+    val cal = java.util.Calendar.getInstance()
+    cal.time = date
+    val month = cal.get(java.util.Calendar.MONTH) + 1 // 0-based
+    val day = cal.get(java.util.Calendar.DAY_OF_MONTH)
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    val minute = cal.get(java.util.Calendar.MINUTE)
+    return String.format("%02d%02d%02d%02d", month, day, hour, minute)
+}
+
+data class SandboxFileInfo(
+    val name: String,
+    val path: String,
+    val isDirectory: Boolean,
+    val size: Long,
+    val modified: Long,
+)

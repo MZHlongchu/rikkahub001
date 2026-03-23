@@ -3,8 +3,8 @@ package me.rerere.rikkahub.ui.components.workflow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -32,10 +31,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.FileCode
 import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.Sparkles
 import com.composables.icons.lucide.X
@@ -43,6 +40,7 @@ import me.rerere.rikkahub.data.model.WorkflowPhase
 
 /**
  * 工作流悬浮面板
+ * - 贴齐屏幕下边缘、左右边缘
  * - 显示当前工作流阶段选择
  * - 提供沙箱文件管理入口
  */
@@ -56,13 +54,13 @@ fun WorkflowFloatingPanel(
 ) {
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn() + slideInHorizontally(initialOffsetX = { it / 3 }),
-        exit = fadeOut() + slideOutHorizontally(targetOffsetX = { it / 3 }),
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.12f))
+                .background(Color.Black.copy(alpha = 0.5f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -70,21 +68,23 @@ fun WorkflowFloatingPanel(
                 )
         ) {
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(
+                    topStart = 20.dp,
+                    topEnd = 20.dp
+                ),
                 tonalElevation = 8.dp,
                 color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 108.dp, end = 48.dp)
-                    .widthIn(min = 260.dp, max = 320.dp)
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {}
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     // 标题栏
                     Row(
