@@ -532,6 +532,7 @@ private fun ChatPageContent(
                 onPhaseChange = { phase ->
                     vm.updateWorkflowPhase(phase)
                 },
+                onOpenSandboxFileManager = { showSandboxFileManager = true },
             )
         }
 
@@ -690,4 +691,3 @@ private fun Conversation.findCompressionScrollIndex(eventId: Long): Int? {
     }
     return null
 }
-
