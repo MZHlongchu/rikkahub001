@@ -368,7 +368,7 @@ class GoogleProvider(
             }
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
                 put("thinkingConfig", buildJsonObject {
-                    put("includeThoughts", true)
+                    put("includeThoughts", params.includeThoughtsInResponse ?: true)
 
                     val isGeminiPro =
                         params.model.modelId.contains(Regex("2\\.5.*pro", RegexOption.IGNORE_CASE))

@@ -13,6 +13,7 @@ import me.rerere.rikkahub.ui.pages.stats.StatsVM
 import me.rerere.rikkahub.ui.pages.imggen.ImgGenVM
 import me.rerere.rikkahub.ui.pages.extensions.PromptVM
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesVM
+import me.rerere.rikkahub.ui.pages.extensions.SkillDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.SkillsVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
@@ -37,14 +38,23 @@ val viewModelModule = module {
     viewModelOf(::SettingVM)
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
-    viewModelOf(::AssistantVM)
+    viewModel {
+        AssistantVM(
+            settingsStore = get(),
+            memoryRepository = get(),
+            conversationRepo = get(),
+            filesManager = get(),
+            knowledgeBaseService = get(),
+        )
+    }
     viewModel<AssistantDetailVM> {
         AssistantDetailVM(
             id = it.get(),
             settingsStore = get(),
             memoryRepository = get(),
             filesManager = get(),
-            skillManager = get(),
+            skillsRepository = get(),
+            knowledgeBaseService = get(),
         )
     }
     viewModelOf(::TranslatorVM)
@@ -59,7 +69,14 @@ val viewModelModule = module {
     viewModelOf(::DeveloperVM)
     viewModelOf(::PromptVM)
     viewModelOf(::QuickMessagesVM)
-    viewModelOf(::SkillsVM)
+    viewModel {
+        SkillsVM(
+            context = get(),
+            skillsRepository = get(),
+            skillManager = get(),
+        )
+    }
+    viewModelOf(::SkillDetailVM)
     viewModelOf(::FavoriteVM)
     viewModelOf(::SearchVM)
     viewModelOf(::StatsVM)

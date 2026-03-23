@@ -51,6 +51,7 @@ data class TextGenerationParams(
     val maxTokens: Int? = null,
     val tools: List<Tool> = emptyList(),
     val thinkingBudget: Int? = null,
+    val includeThoughtsInResponse: Boolean? = null,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
 )

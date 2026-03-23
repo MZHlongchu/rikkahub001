@@ -69,7 +69,8 @@ class GenerationHandler(
         outputTransformers: List<OutputMessageTransformer> = emptyList(),
         assistant: Assistant,
         memories: List<AssistantMemory>? = null,
-        rollingSummaryJson: String? = null,
+        dialogueSummaryText: String? = null,
+        legacyRollingSummaryJson: String? = null,
         tools: List<Tool> = emptyList(),
         maxSteps: Int = 256,
     ): Flow<GenerationChunk> = flow {
@@ -144,7 +145,8 @@ class GenerationHandler(
                     provider = provider,
                     tools = toolsInternal,
                     memories = memories ?: emptyList(),
-                    rollingSummaryJson = rollingSummaryJson.orEmpty(),
+                    dialogueSummaryText = dialogueSummaryText.orEmpty(),
+                    legacyRollingSummaryJson = legacyRollingSummaryJson.orEmpty(),
                     stream = assistant.streamOutput
                 )
                 messages = messages.visualTransforms(
@@ -328,7 +330,8 @@ class GenerationHandler(
         provider: ProviderSetting,
         tools: List<Tool>,
         memories: List<AssistantMemory>,
-        rollingSummaryJson: String,
+        dialogueSummaryText: String,
+        legacyRollingSummaryJson: String,
         stream: Boolean
     ) {
         val internalMessages = buildList {
@@ -343,9 +346,12 @@ class GenerationHandler(
                     appendLine()
                     append(buildMemoryPrompt(memories = memories))
                 }
-                if (rollingSummaryJson.isNotBlank()) {
+                if (dialogueSummaryText.isNotBlank()) {
                     appendLine()
-                    append(buildRollingSummaryPrompt(rollingSummaryJson))
+                    append(buildDialogueSummaryPrompt(dialogueSummaryText))
+                } else if (legacyRollingSummaryJson.isNotBlank()) {
+                    appendLine()
+                    append(buildLegacyRollingSummaryPrompt(legacyRollingSummaryJson))
                 }
                 if (assistant.enableRecentChatsReference) {
                     appendLine()
@@ -469,7 +475,7 @@ class GenerationHandler(
                 messages = messages,
                 params = TextGenerationParams(
                     model = model,
-                    temperature = 0.3f,
+                    thinkingBudget = settings.translateThinkingBudget,
                 ),
             ).collect { chunk ->
                 messages = messages.handleMessageChunk(chunk)

@@ -273,10 +273,21 @@ class ClaudeProvider(
         stream: Boolean = false
     ): JsonObject {
         fun cacheControlEphemeral() = buildJsonObject { put("type", "ephemeral") }
+        val reasoningLevel = ReasoningLevel.fromBudgetTokens(params.thinkingBudget ?: 0)
+        val kimiToolReplayReasoningCompat = isKimiClaudeCodingEndpoint(providerSetting) &&
+            params.model.abilities.contains(ModelAbility.REASONING) &&
+            reasoningLevel.isEnabled
 
         return buildJsonObject {
             put("model", params.model.modelId)
-            put("messages", buildMessages(messages, providerSetting.promptCaching))
+            put(
+                "messages",
+                buildMessages(
+                    messages = messages,
+                    promptCaching = providerSetting.promptCaching,
+                    kimiToolReplayReasoningCompat = kimiToolReplayReasoningCompat,
+                )
+            )
             put("max_tokens", params.maxTokens ?: 64_000)
 
             if (params.temperature != null && (params.thinkingBudget ?: 0) == 0) put(
@@ -306,9 +317,8 @@ class ClaudeProvider(
 
             // 处理 thinking budget
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
-                val level = ReasoningLevel.fromBudgetTokens(params.thinkingBudget ?: 0)
                 put("thinking", buildJsonObject {
-                    when (level) {
+                    when (reasoningLevel) {
                         ReasoningLevel.OFF -> {
                             put("type", "disabled")
                         }
@@ -344,14 +354,22 @@ class ClaudeProvider(
     }
 
     // Kept for tests and internal callers that don't care about prompt caching.
-    private fun buildMessages(messages: List<UIMessage>) = buildMessages(messages, promptCaching = false)
+    private fun buildMessages(messages: List<UIMessage>) = buildMessages(
+        messages = messages,
+        promptCaching = false,
+        kimiToolReplayReasoningCompat = false,
+    )
 
-    private fun buildMessages(messages: List<UIMessage>, promptCaching: Boolean) = buildJsonArray {
+    private fun buildMessages(
+        messages: List<UIMessage>,
+        promptCaching: Boolean,
+        kimiToolReplayReasoningCompat: Boolean,
+    ) = buildJsonArray {
         messages
             .filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
             .forEach { message ->
                 if (message.role == MessageRole.ASSISTANT) {
-                    addAssistantMessage(message)
+                    addAssistantMessage(message, kimiToolReplayReasoningCompat)
                 } else {
                     addUserMessage(message)
                 }
@@ -402,18 +420,31 @@ class ClaudeProvider(
         })
     }
 
-    private fun JsonArrayBuilder.addAssistantMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addAssistantMessage(
+        message: UIMessage,
+        kimiToolReplayReasoningCompat: Boolean,
+    ) {
         val groups = groupPartsByToolBoundary(message.parts)
         val contentBuffer = mutableListOf<JsonObject>()
+        var lastReasoningPart: UIMessagePart.Reasoning? = null
 
         for (group in groups) {
             when (group) {
                 is PartGroup.Content -> {
+                    group.parts.filterIsInstance<UIMessagePart.Reasoning>().lastOrNull()?.let {
+                        lastReasoningPart = it
+                    }
                     group.parts.mapNotNull { it.toContentBlock() }.forEach { contentBuffer.add(it) }
                 }
 
                 is PartGroup.Tools -> {
                     // 添加 tool_use 到内容缓冲
+                    maybeInjectKimiReplayReasoning(
+                        contentBuffer = contentBuffer,
+                        lastReasoningPart = lastReasoningPart,
+                        tools = group.tools,
+                        enabled = kimiToolReplayReasoningCompat,
+                    )
                     group.tools.forEach { contentBuffer.add(it.toToolUseBlock()) }
 
                     // 输出 assistant 消息
@@ -493,6 +524,45 @@ class ClaudeProvider(
         put("type", "tool_result")
         put("tool_use_id", toolCallId)
         put("content", output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
+    }
+
+    private fun maybeInjectKimiReplayReasoning(
+        contentBuffer: MutableList<JsonObject>,
+        lastReasoningPart: UIMessagePart.Reasoning?,
+        tools: List<UIMessagePart.Tool>,
+        enabled: Boolean,
+    ) {
+        if (!enabled) return
+        if (contentBuffer.any { it["type"]?.jsonPrimitive?.contentOrNull == "thinking" }) return
+
+        if (lastReasoningPart == null) {
+            safeLogWarn(
+                "Kimi Claude replay: missing reusable reasoning for tools=" +
+                    tools.joinToString(",") { it.toolName }
+            )
+            return
+        }
+
+        contentBuffer.add(0, lastReasoningPart.toContentBlock() ?: return)
+        safeLogInfo(
+            "Kimi Claude replay: reused prior reasoning for tools=" +
+                tools.joinToString(",") { it.toolName }
+        )
+    }
+
+    private fun isKimiClaudeCodingEndpoint(providerSetting: ProviderSetting.Claude): Boolean {
+        return providerSetting.baseUrl.trimEnd('/').equals(
+            "https://api.kimi.com/coding/v1",
+            ignoreCase = true
+        )
+    }
+
+    private fun safeLogInfo(message: String) {
+        runCatching { Log.i(TAG, message) }
+    }
+
+    private fun safeLogWarn(message: String) {
+        runCatching { Log.w(TAG, message) }
     }
 
     private fun parseMessage(content: JsonArray): UIMessage {

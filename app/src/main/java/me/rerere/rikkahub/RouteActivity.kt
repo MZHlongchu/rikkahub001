@@ -71,6 +71,7 @@ import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantBasicPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantExtensionsPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantKnowledgeBasePage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantLocalToolPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMemoryPage
@@ -85,12 +86,14 @@ import me.rerere.rikkahub.ui.pages.history.HistoryPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.extensions.ExtensionsPage
+import me.rerere.rikkahub.ui.pages.extensions.SkillDetailPage
 import me.rerere.rikkahub.ui.pages.extensions.SkillsPage
 import me.rerere.rikkahub.ui.pages.extensions.PromptPage
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAdvancedPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDisplayPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
@@ -99,10 +102,14 @@ import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderPage
+import me.rerere.rikkahub.ui.pages.setting.SettingScheduledTaskPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingTTSPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
+import me.rerere.rikkahub.ui.pages.setting.SettingWorkflowControlPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
+import me.rerere.rikkahub.ui.pages.scheduled.ScheduledTaskRunDetailPage
+import me.rerere.rikkahub.ui.pages.scheduled.ScheduledTaskRunsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -112,6 +119,8 @@ import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.db.MigrationState
+import me.rerere.rikkahub.ui.activity.SafeModeActivity
+import me.rerere.rikkahub.utils.CrashHandler
 import okhttp3.OkHttpClient
 import org.koin.android.ext.android.inject
 import org.koin.compose.koinInject
@@ -129,6 +138,11 @@ class RouteActivity : ComponentActivity() {
         enableEdgeToEdge()
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
+        if (CrashHandler.hasCrashed(this)) {
+            startActivity(Intent(this, SafeModeActivity::class.java))
+            finish()
+            return
+        }
 
         val prootManager: PRootManager by inject()
         lifecycleScope.launch {
@@ -188,10 +202,18 @@ class RouteActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Navigate to the chat screen if a conversation ID is provided
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))
-        }    }
+        }
+        intent.getStringExtra("scheduledTaskRunId")?.let { runId ->
+            navStack?.add(Screen.ScheduledTaskRunDetail(runId))
+            intent.removeExtra("scheduledTaskRunId")
+        }
+        if (intent.getBooleanExtra("openScheduledTaskSettings", false)) {
+            navStack?.add(Screen.SettingScheduledTasks)
+            intent.removeExtra("openScheduledTaskSettings")
+        }
+    }
 
     @Composable
     fun AppRoutes() {
@@ -221,6 +243,17 @@ class RouteActivity : ComponentActivity() {
 
         val backStack = rememberNavBackStack(startScreen)
         SideEffect { this@RouteActivity.navStack = backStack }
+
+        LaunchedEffect(backStack) {
+            intent?.getStringExtra("scheduledTaskRunId")?.let { runId ->
+                backStack.add(Screen.ScheduledTaskRunDetail(runId))
+                intent?.removeExtra("scheduledTaskRunId")
+            }
+            if (intent?.getBooleanExtra("openScheduledTaskSettings", false) == true) {
+                backStack.add(Screen.SettingScheduledTasks)
+                intent?.removeExtra("openScheduledTaskSettings")
+            }
+        }
 
         ShareHandler(backStack)
 
@@ -329,6 +362,10 @@ class RouteActivity : ComponentActivity() {
                                 AssistantLocalToolPage(key.id)
                             }
 
+                            entry<Screen.AssistantKnowledgeBase> { key ->
+                                AssistantKnowledgeBasePage(key.id)
+                            }
+
                             entry<Screen.AssistantInjections> { key ->
                                 AssistantExtensionsPage(key.id)
                             }
@@ -339,6 +376,18 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.Setting> {
                                 SettingPage()
+                            }
+
+                            entry<Screen.SettingAdvanced> {
+                                SettingAdvancedPage()
+                            }
+
+                            entry<Screen.SettingWorkflowControl> {
+                                SettingWorkflowControlPage()
+                            }
+
+                            entry<Screen.SettingScheduledTasks> {
+                                SettingScheduledTaskPage()
                             }
 
                             entry<Screen.Backup> {
@@ -425,12 +474,24 @@ class RouteActivity : ComponentActivity() {
                                 SkillsPage()
                             }
 
+                            entry<Screen.SkillDetail> { key ->
+                                SkillDetailPage(skillName = key.skillName)
+                            }
+
                             entry<Screen.MessageSearch> {
                                 SearchPage()
                             }
 
                             entry<Screen.Stats> {
                                 StatsPage()
+                            }
+
+                            entry<Screen.ScheduledTaskRuns> {
+                                ScheduledTaskRunsPage()
+                            }
+
+                            entry<Screen.ScheduledTaskRunDetail> { key ->
+                                ScheduledTaskRunDetailPage(key.id)
                             }
                         }
                     )
@@ -525,6 +586,9 @@ sealed interface Screen : NavKey {
     data class AssistantLocalTool(val id: String) : Screen
 
     @Serializable
+    data class AssistantKnowledgeBase(val id: String) : Screen
+
+    @Serializable
     data class AssistantInjections(val id: String) : Screen
 
     @Serializable
@@ -532,6 +596,15 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Setting : Screen
+
+    @Serializable
+    data object SettingAdvanced : Screen
+
+    @Serializable
+    data object SettingWorkflowControl : Screen
+
+    @Serializable
+    data object SettingScheduledTasks : Screen
 
     @Serializable
     data object Backup : Screen
@@ -594,6 +667,15 @@ sealed interface Screen : NavKey {
     data object Prompts : Screen
     @Serializable
     data object Skills : Screen
+
+    @Serializable
+    data class SkillDetail(val skillName: String) : Screen
+
+    @Serializable
+    data object ScheduledTaskRuns : Screen
+
+    @Serializable
+    data class ScheduledTaskRunDetail(val id: String) : Screen
 
     @Serializable
     data object MessageSearch : Screen

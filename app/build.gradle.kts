@@ -10,7 +10,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    id("com.chaquo.python") version "17.0.0"
 }
 
 android {
@@ -25,8 +24,8 @@ android {
         applicationId = "me.rerere.rikkahub.dev"
         minSdk = 26
         targetSdk = 28
-        versionCode = 146
-        versionName = "2.13"
+        versionCode = 151
+        versionName = "2.1.62"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -63,7 +62,8 @@ android {
     buildTypes {
         release {
             applicationIdSuffix = ".mod"
-            signingConfig = signingConfigs.getByName("debug")
+            // Release builds must use the locally managed private keystore from ignored local.properties.
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -184,14 +184,6 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
-chaquopy {
-    defaultConfig {
-        version = "3.11"
-        pip {
-            install("-r", "src/main/python/requirements.txt")
-        }
-    }
-}
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)

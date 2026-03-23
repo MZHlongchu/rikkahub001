@@ -207,6 +207,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingAdvanced) },
+                        leadingContent = { Icon(HugeIcons.Settings03, null) },
+                        supportingContent = { Text("工作流控制、定时任务与后续 AI Code 流程入口") },
+                        headlineContent = { Text("高级") },
+                    )
                 }
             }
 
@@ -309,7 +315,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                             ) {
                                 IconButton(
                                     onClick = {
-                                        context.joinQQGroup("wMdqlDETtzIz6o49HrBR2TeQlwcX6RH9")
+                                        context.joinQQGroup("Qsm0whzbPsm1UyNpR683ulLyMZ2Pqrw0")
                                     }
                                 ) {
                                     Icon(

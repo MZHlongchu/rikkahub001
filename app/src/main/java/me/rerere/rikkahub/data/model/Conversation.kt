@@ -111,13 +111,25 @@ data class Conversation(
 
 @Serializable
 data class ConversationCompressionState(
+    val dialogueSummaryText: String = "",
+    val dialogueSummaryTokenEstimate: Int = 0,
+    @Serializable(with = InstantSerializer::class)
+    val dialogueSummaryUpdatedAt: Instant = Instant.EPOCH,
     val rollingSummaryJson: String = "",
     val rollingSummaryTokenEstimate: Int = 0,
+    val memoryLedgerStatus: String = "idle",
+    val memoryLedgerError: String = "",
     val lastCompressedMessageIndex: Int = -1,
     @Serializable(with = InstantSerializer::class)
     val updatedAt: Instant = Instant.EPOCH
 ) {
     val hasSummary: Boolean
+        get() = hasDialogueSummary || hasLedger
+
+    val hasDialogueSummary: Boolean
+        get() = dialogueSummaryText.isNotBlank()
+
+    val hasLedger: Boolean
         get() = rollingSummaryJson.isNotBlank()
 }
 
@@ -133,16 +145,27 @@ data class ConversationMemoryIndexState(
 data class CompressionEvent(
     val id: Long = 0L,
     val boundaryIndex: Int,
+    val dialogueSummaryText: String = "",
+    val dialogueSummaryPreview: String = "",
+    val ledgerSnapshot: String = "",
     val summarySnapshot: String = "",
     val compressStartIndex: Int = 0,
     val compressEndIndex: Int = -1,
     val keepRecentMessages: Int = 0,
     val trigger: String = "",
     val additionalPrompt: String = "",
+    val baseDialogueSummaryText: String = "",
+    val baseLedgerJson: String = "",
     val baseSummaryJson: String = "",
     @Serializable(with = InstantSerializer::class)
     val createdAt: Instant = Instant.now()
 )
+
+val compressionEventOrder: Comparator<CompressionEvent> =
+    compareBy<CompressionEvent>({ it.createdAt }, { it.id })
+
+fun List<CompressionEvent>.latestCompressionEvent(): CompressionEvent? =
+    maxWithOrNull(compressionEventOrder)
 
 @Serializable
 data class MessageNode(

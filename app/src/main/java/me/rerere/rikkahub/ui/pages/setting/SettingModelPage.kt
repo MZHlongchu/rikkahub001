@@ -52,11 +52,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_DIALOGUE_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
+import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -181,6 +182,19 @@ private fun DefaultTranslationModelSetting(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                FormItem(
+                    label = {
+                        Text(stringResource(R.string.assistant_page_thinking_budget))
+                    },
+                ) {
+                    ReasoningButton(
+                        reasoningTokens = settings.translateThinkingBudget,
+                        onUpdateReasoningTokens = {
+                            vm.updateSettings(settings.copy(translateThinkingBudget = it))
+                        }
+                    )
+                }
+
                 FormItem(
                     label = {
                         Text(stringResource(R.string.setting_model_page_prompt))
@@ -604,15 +618,15 @@ private fun DefaultCompressModelSetting(
                         Text(stringResource(R.string.setting_model_page_prompt))
                     },
                     description = {
-                        Text(stringResource(R.string.setting_model_page_compress_prompt_vars))
+                        Text(stringResource(R.string.setting_model_page_compress_prompt_vars_v2))
                     }
                 ) {
                     OutlinedTextField(
-                        value = settings.compressPrompt,
+                        value = settings.dialogueCompressPrompt,
                         onValueChange = {
                             vm.updateSettings(
                                 settings.copy(
-                                    compressPrompt = it
+                                    dialogueCompressPrompt = it
                                 )
                             )
                         },
@@ -623,7 +637,7 @@ private fun DefaultCompressModelSetting(
                         onClick = {
                             vm.updateSettings(
                                 settings.copy(
-                                    compressPrompt = DEFAULT_COMPRESS_PROMPT
+                                    dialogueCompressPrompt = DEFAULT_DIALOGUE_COMPRESS_PROMPT
                                 )
                             )
                         }

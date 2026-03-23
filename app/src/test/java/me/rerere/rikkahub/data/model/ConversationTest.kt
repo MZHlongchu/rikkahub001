@@ -2,8 +2,11 @@ package me.rerere.rikkahub.data.model
 
 import me.rerere.ai.ui.UIMessage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 import kotlin.uuid.Uuid
 
 class ConversationTest {
@@ -65,5 +68,32 @@ class ConversationTest {
         assertEquals(2, updatedConversation.messageNodes[1].messages.size)
         assertSame(preservedBranchB, updatedConversation.messageNodes[1].currentMessage)
         assertEquals("tail assistant updated", updatedConversation.messageNodes[3].currentMessage.toText())
+    }
+
+    @Test
+    fun `compression state treats dialogue summary or ledger as available summary`() {
+        val dialogueOnly = ConversationCompressionState(dialogueSummaryText = "Current State:\n- Continue work")
+        val ledgerOnly = ConversationCompressionState(rollingSummaryJson = """{"facts":[{"text":"Port is 6432"}]}""")
+
+        assertTrue(dialogueOnly.hasSummary)
+        assertTrue(dialogueOnly.hasDialogueSummary)
+        assertTrue(ledgerOnly.hasSummary)
+        assertTrue(ledgerOnly.hasLedger)
+    }
+
+    @Test
+    fun `latest compression event prefers higher id when timestamps are equal`() {
+        val createdAt = Instant.parse("2026-03-23T10:15:30Z")
+        val olderInsertedEvent = CompressionEvent(id = 7L, boundaryIndex = 4, createdAt = createdAt)
+        val newerInsertedEvent = CompressionEvent(id = 8L, boundaryIndex = 6, createdAt = createdAt)
+
+        val latest = listOf(olderInsertedEvent, newerInsertedEvent).latestCompressionEvent()
+
+        assertEquals(newerInsertedEvent.id, latest?.id)
+    }
+
+    @Test
+    fun `latest compression event returns null for empty lists`() {
+        assertNull(emptyList<CompressionEvent>().latestCompressionEvent())
     }
 }

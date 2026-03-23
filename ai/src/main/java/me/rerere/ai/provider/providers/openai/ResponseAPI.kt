@@ -80,7 +80,6 @@ class ResponseAPI(
                 "Authorization",
                 "Bearer ${keyRoulette.next(providerSetting.id.toString(), providerSetting.apiKey)}"
             )
-            .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
@@ -118,7 +117,6 @@ class ResponseAPI(
                 "Authorization",
                 "Bearer ${keyRoulette.next(providerSetting.id.toString(), providerSetting.apiKey)}"
             )
-            .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
