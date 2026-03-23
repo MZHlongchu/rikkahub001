@@ -532,6 +532,7 @@ private fun ChatPageContent(
                 onPhaseChange = { phase ->
                     vm.updateWorkflowPhase(phase)
                 },
+                onOpenSandboxFileManager = { showSandboxFileManager = true },
             )
         }
 
