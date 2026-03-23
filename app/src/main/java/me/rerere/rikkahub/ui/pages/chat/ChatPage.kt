@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.pages.chat
+﻿package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
@@ -33,69 +32,67 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavHostController
-import com.composables.icons.lucide.List
-import com.composables.icons.lucide.ListTree
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.MessageCirclePlus
-import com.composables.icons.lucide.Option
-import com.composables.icons.lucide.Sparkles
-import com.composables.icons.lucide.X
 import com.dokar.sonner.ToastType
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.LeftToRightListBullet
+import me.rerere.hugeicons.stroke.Menu03
+import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.CompressionRegenerationTarget
 import me.rerere.rikkahub.ui.components.ai.ChatInput
-import me.rerere.rikkahub.ui.components.container.ContainerManagerSheet
-import me.rerere.rikkahub.ui.components.workflow.DraggableWorkflowFab
-import me.rerere.rikkahub.ui.components.workflow.WorkflowMenuSheet
-import me.rerere.ai.core.MessageRole
+import me.rerere.rikkahub.ui.components.ai.LedgerGenerationDialog
+import me.rerere.rikkahub.ui.components.sandbox.SandboxFileManagerDialog
+import me.rerere.rikkahub.ui.components.workflow.WorkflowFloatingPanel
+import me.rerere.rikkahub.ui.components.workflow.WorkflowSidebarHandle
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.data.ai.tools.LocalToolOption
-import me.rerere.rikkahub.data.container.PRootManager
-import org.koin.compose.koinInject
-import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.base64Decode
-import me.rerere.rikkahub.utils.createChatFilesByContents
-import me.rerere.rikkahub.utils.getFileMimeType
 import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
 
 @Composable
-fun ChatPage(id: Uuid, text: String?, files: List<Uri>) {
+fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val vm: ChatVM = koinViewModel(
         parameters = {
             parametersOf(id.toString())
         }
     )
+    val filesManager: FilesManager = koinInject()
     val navController = LocalNavController.current
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     val setting by vm.settings.collectAsStateWithLifecycle()
@@ -104,6 +101,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>) {
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
+    val compressionUiState by vm.compressionUiState.collectAsStateWithLifecycle()
+    val ledgerGenerationUiState by vm.ledgerGenerationUiState.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
@@ -127,13 +126,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>) {
         windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
 
     val inputState = vm.inputState
+    val latestConversation by rememberUpdatedState(conversation)
+    var pendingCompressionScrollEventId by rememberSaveable(id) { mutableStateOf<Long?>(null) }
 
-    // 初始化输入状态（处理传入的 files 和 text 参数）
+    // Initialize input state from incoming files/text arguments
     LaunchedEffect(files, text) {
         if (files.isNotEmpty()) {
-            val localFiles = context.createChatFilesByContents(files)
+            val localFiles = filesManager.createChatFilesByContents(files)
             val contentTypes = files.mapNotNull { file ->
-                context.getFileMimeType(file)
+                filesManager.getFileMimeType(file)
             }
             val parts = buildList {
                 localFiles.forEachIndexed { index, file ->
@@ -158,9 +159,48 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>) {
 
     val chatListState = rememberLazyListState()
     LaunchedEffect(vm) {
-        if (!vm.chatListInitialized && chatListState.layoutInfo.totalItemsCount > 0) {
+        if (nodeId == null && !vm.chatListInitialized && chatListState.layoutInfo.totalItemsCount > 0) {
             chatListState.scrollToItem(chatListState.layoutInfo.totalItemsCount)
             vm.chatListInitialized = true
+        }
+    }
+
+    LaunchedEffect(nodeId, conversation.messageNodes.size) {
+        if (nodeId != null && conversation.messageNodes.isNotEmpty() && !vm.chatListInitialized) {
+            val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
+            if (index >= 0) {
+                chatListState.scrollToItem(index)
+            }
+            vm.chatListInitialized = true
+        }
+    }
+
+    LaunchedEffect(vm, id) {
+        vm.compressionScrollEvents.collect { (conversationId, eventId) ->
+            if (conversationId != id) return@collect
+            // Keep the target event id until the conversation state actually contains the
+            // new compression boundary card. Emitting the scroll event and updating the
+            // conversation flow are asynchronous, so scrolling immediately is easy to lose.
+            pendingCompressionScrollEventId = eventId
+        }
+    }
+
+    LaunchedEffect(
+        pendingCompressionScrollEventId,
+        conversation.compressionEvents,
+        conversation.messageNodes.size
+    ) {
+        val eventId = pendingCompressionScrollEventId ?: return@LaunchedEffect
+        val targetIndex = latestConversation.findCompressionScrollIndex(eventId) ?: return@LaunchedEffect
+
+        // Wait until LazyColumn has laid out the target item before jumping to it.
+        repeat(20) {
+            if (chatListState.layoutInfo.totalItemsCount > targetIndex) {
+                chatListState.animateScrollToItem(targetIndex)
+                pendingCompressionScrollEventId = null
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(50)
         }
     }
 
@@ -188,6 +228,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>) {
                     enableWebSearch = enableWebSearch,
                     currentChatModel = currentChatModel,
                     bigScreen = true,
+                    compressionUiState = compressionUiState,
+                    ledgerGenerationUiState = ledgerGenerationUiState,
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
@@ -219,6 +261,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>) {
                     enableWebSearch = enableWebSearch,
                     currentChatModel = currentChatModel,
                     bigScreen = false,
+                    compressionUiState = compressionUiState,
+                    ledgerGenerationUiState = ledgerGenerationUiState,
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
@@ -239,11 +283,13 @@ private fun ChatPageContent(
     bigScreen: Boolean,
     conversation: Conversation,
     drawerState: DrawerState,
-    navController: NavHostController,
+    navController: Navigator,
     vm: ChatVM,
     chatListState: LazyListState,
     enableWebSearch: Boolean,
     currentChatModel: Model?,
+    compressionUiState: me.rerere.rikkahub.service.CompressionUiState?,
+    ledgerGenerationUiState: me.rerere.rikkahub.service.LedgerGenerationUiState?,
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
@@ -251,29 +297,22 @@ private fun ChatPageContent(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     var previewMode by rememberSaveable { mutableStateOf(false) }
-
-    LaunchedEffect(loadingJob) {
-        inputState.loading = loadingJob != null
-    }
+    val hazeState = rememberHazeState()
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
-
-    // 判断 Workflow 是否启用：使用对话绑定的 Assistant 检查是否包含 ChaquoPy
     val assistant = setting.assistants.find { it.id == conversation.assistantId }
         ?: setting.getCurrentAssistant()
-    // 工作流在启用 ChaquoPy、容器工具或 WorkflowTodo 时可用
-    val workflowEnabled = assistant.localTools.contains(LocalToolOption.ChaquoPy) ||
-                          assistant.localTools.contains(LocalToolOption.Container) ||
-                          assistant.localTools.contains(LocalToolOption.WorkflowTodo)
-
-    // 容器运行时 - 注入管理器并监听状态
-    val prootManager: PRootManager = koinInject()
-    val containerState by prootManager.containerState.collectAsStateWithLifecycle()
-
-    // 工作流菜单和沙箱文件管理弹窗状态
-    var showWorkflowMenu by rememberSaveable { mutableStateOf(false) }
+    val workflowEnabled = assistant.localTools.contains(LocalToolOption.WorkflowControl)
+    val currentWorkflowState = conversation.workflowState
+    val workflowActive = currentWorkflowState != null
+    var showWorkflowPanel by rememberSaveable { mutableStateOf(false) }
     var showSandboxFileManager by rememberSaveable { mutableStateOf(false) }
-    var showContainerManager by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(workflowEnabled, workflowActive) {
+        if (!workflowEnabled || !workflowActive) {
+            showWorkflowPanel = false
+        }
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -302,18 +341,24 @@ private fun ChatPageContent(
             bottomBar = {
                 ChatInput(
                     state = inputState,
+                    loading = loadingJob != null,
                     settings = setting,
                     conversation = conversation,
                     mcpManager = vm.mcpManager,
+                    hazeState = hazeState,
+                    autoCompressionUiState = compressionUiState,
                     onCancelClick = {
                         loadingJob?.cancel()
+                    },
+                    onCancelCompressionProgress = {
+                        vm.cancelCompressionWork()
                     },
                     enableSearch = enableWebSearch,
                     onToggleSearch = {
                         vm.updateSettings(setting.copy(enableWebSearch = !enableWebSearch))
                     },
                     workflowEnabled = workflowEnabled,
-                    workflowActive = conversation.workflowState != null,
+                    workflowActive = workflowActive,
                     onToggleWorkflow = {
                         if (conversation.workflowState == null) {
                             vm.initializeWorkflowState()
@@ -321,9 +366,12 @@ private fun ChatPageContent(
                             vm.disableWorkflowState()
                         }
                     },
+                    onOpenSandboxFileManager = {
+                        showSandboxFileManager = true
+                    },
                     onSendClick = {
                         if (currentChatModel == null) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                            toaster.show("璇峰厛閫夋嫨妯″瀷", type = ToastType.Error)
                             return@ChatInput
                         }
                         if (inputState.isEditing()) {
@@ -376,11 +424,14 @@ private fun ChatPageContent(
                             )
                         )
                     },
-                    onClearContext = {
-                        vm.handleMessageTruncate()
-                    },
-                    onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages, compressType ->
-                        vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages, compressType)
+                    onCompressContext = { additionalPrompt, keepRecentMessages, autoCompressEnabled, autoCompressTriggerTokens, generateMemoryLedger ->
+                        vm.handleCompressContext(
+                            additionalPrompt = additionalPrompt,
+                            keepRecentMessages = keepRecentMessages,
+                            autoCompressEnabled = autoCompressEnabled,
+                            autoCompressTriggerTokens = autoCompressTriggerTokens,
+                            generateMemoryLedger = generateMemoryLedger,
+                        )
                     },
                 )
             },
@@ -393,9 +444,12 @@ private fun ChatPageContent(
                 loading = loadingJob != null,
                 previewMode = previewMode,
                 settings = setting,
+                hazeState = hazeState,
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
+                onRegenerateLatestCompression = { target -> vm.regenerateLatestCompression(target) },
+                onEditLatestDialogueSummary = { summary -> vm.editLatestDialogueSummary(summary) },
                 onRegenerate = {
                     vm.regenerateAtMessage(it)
                 },
@@ -410,7 +464,11 @@ private fun ChatPageContent(
                     }
                 },
                 onDelete = {
-                    vm.deleteMessage(it)
+                    if (loadingJob != null) {
+                        vm.showDeleteBlockedWhileGeneratingError()
+                    } else {
+                        vm.deleteMessage(it)
+                    }
                 },
                 onUpdateMessage = { newNode ->
                     vm.updateConversation(
@@ -444,60 +502,52 @@ private fun ChatPageContent(
                 onToolApproval = { toolCallId, approved, reason ->
                     vm.handleToolApproval(toolCallId, approved, reason)
                 },
+                onToolAnswer = { toolCallId, answer ->
+                    vm.handleToolAnswer(toolCallId, answer)
+                },
+                onToggleFavorite = { node ->
+                    vm.toggleMessageFavorite(node)
+                },
             )
         }
 
-        // Workflow 悬浮按钮和菜单（放在 Scaffold 之后，确保在最上层）
-        if (workflowEnabled && conversation.workflowState != null) {
+        if (workflowEnabled && workflowActive) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = 80.dp, end = 16.dp),
+                    .padding(top = 96.dp, end = 8.dp, bottom = 120.dp),
                 contentAlignment = Alignment.TopEnd
             ) {
-                // 可拖动悬浮按钮
-                DraggableWorkflowFab(
-                    onClick = { showWorkflowMenu = true },
-                    modifier = Modifier.padding(top = 80.dp, end = 16.dp)
+                WorkflowSidebarHandle(
+                    onClick = {
+                        showWorkflowPanel = !showWorkflowPanel
+                    }
                 )
             }
 
-            // 展开式菜单
-            WorkflowMenuSheet(
-                visible = showWorkflowMenu,
-                onDismiss = { showWorkflowMenu = false },
-                currentPhase = conversation.workflowState.phase,
+            WorkflowFloatingPanel(
+                visible = showWorkflowPanel,
+                onDismiss = { showWorkflowPanel = false },
+                currentPhase = currentWorkflowState.phase,
                 onPhaseChange = { phase ->
                     vm.updateWorkflowPhase(phase)
                 },
-                onOpenSandbox = {
-                    showSandboxFileManager = true
-                    showWorkflowMenu = false
-                },
-                containerState = containerState,
-                onOpenContainerManager = {
-                    // 打开容器管理器
-                    showContainerManager = true
-                    showWorkflowMenu = false
+            )
+        }
+
+        if (showSandboxFileManager) {
+            SandboxFileManagerDialog(
+                sandboxId = conversation.id.toString(),
+                onDismiss = { showSandboxFileManager = false }
+            )
+        }
+
+        if (ledgerGenerationUiState != null) {
+            LedgerGenerationDialog(
+                onCancel = {
+                    vm.cancelCompressionWork()
                 }
             )
-
-            // 沙箱文件管理对话框
-            if (showSandboxFileManager) {
-                me.rerere.rikkahub.ui.components.sandbox.SandboxFileManagerDialog(
-                    sandboxId = conversation.id.toString(),
-                    onDismiss = { showSandboxFileManager = false }
-                )
-            }
-
-            // 容器管理弹窗
-            if (showContainerManager) {
-                ContainerManagerSheet(
-                    visible = showContainerManager,
-                    onDismiss = { showContainerManager = false },
-                    prootManager = prootManager
-                )
-            }
         }
     }
 }
@@ -528,7 +578,7 @@ private fun TopBar(
                         scope.launch { drawerState.open() }
                     }
                 ) {
-                    Icon(Lucide.ListTree, "Messages")
+                    Icon(HugeIcons.Menu03, "Messages")
                 }
             }
         },
@@ -574,7 +624,7 @@ private fun TopBar(
                     onClickMenu()
                 }
             ) {
-                Icon(if (previewMode) Lucide.X else Lucide.List, "Chat Options")
+                Icon(if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet, "Chat Options")
             }
 
             IconButton(
@@ -582,7 +632,7 @@ private fun TopBar(
                     onNewChat()
                 }
             ) {
-                Icon(Lucide.MessageCirclePlus, "New Message")
+                Icon(HugeIcons.MessageAdd01, "New Message")
             }
         },
     )
@@ -623,3 +673,21 @@ private fun TopBar(
         )
     }
 }
+
+private fun Conversation.findCompressionScrollIndex(eventId: Long): Int? {
+    val normalizedEvents = compressionEvents
+        .map { event -> event.copy(boundaryIndex = event.boundaryIndex.coerceIn(0, messageNodes.size)) }
+        .sortedBy { it.createdAt }
+    var listIndex = 0
+    for (boundary in 0..messageNodes.size) {
+        normalizedEvents.filter { it.boundaryIndex == boundary }.forEach { event ->
+            if (event.id == eventId) return listIndex
+            listIndex++
+        }
+        if (boundary < messageNodes.size) {
+            listIndex++
+        }
+    }
+    return null
+}
+

@@ -1,6 +1,5 @@
-package me.rerere.rikkahub.ui.components.ai
+﻿package me.rerere.rikkahub.ui.components.ai
 
-import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -10,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,24 +45,17 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProvideTextStyle
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,23 +63,26 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -96,105 +92,117 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
-import com.composables.icons.lucide.ArrowUp
-import com.composables.icons.lucide.BookOpen
-import com.composables.icons.lucide.Camera
-import com.composables.icons.lucide.Eraser
-import com.composables.icons.lucide.FileArchive
-import com.composables.icons.lucide.FileAudio
-import com.composables.icons.lucide.Files
-import com.composables.icons.lucide.Folder
-import com.composables.icons.lucide.Fullscreen
-import com.composables.icons.lucide.GitBranch
-import com.composables.icons.lucide.Image
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Music
-import com.composables.icons.lucide.Package2
-import com.composables.icons.lucide.Plus
-import com.composables.icons.lucide.Video
-import com.composables.icons.lucide.X
-import com.composables.icons.lucide.Zap
 import com.dokar.sonner.ToastType
 import com.yalantis.ucrop.UCrop
 import com.yalantis.ucrop.UCropActivity
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.hugeicons.stroke.ArrowUp02
+import me.rerere.hugeicons.stroke.Book03
+import me.rerere.hugeicons.stroke.Camera01
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Files02
+import me.rerere.hugeicons.stroke.FullScreen
+import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.Package
+import me.rerere.hugeicons.stroke.Package01
+import me.rerere.hugeicons.stroke.Video01
+import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
+import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.ui.components.ui.InjectionSelector
+import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.ui.components.ui.ExtensionSelector
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
-import me.rerere.rikkahub.ui.components.ui.RandomGridLoading
+import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
-import me.rerere.rikkahub.utils.createChatFilesByContents
-import me.rerere.rikkahub.utils.createChatTextFile
-import me.rerere.rikkahub.utils.deleteChatFiles
-import me.rerere.rikkahub.utils.getFileMimeType
-import me.rerere.rikkahub.utils.getFileNameFromUri
+import org.koin.compose.koinInject
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
 
 enum class ExpandState {
-    Collapsed,
-    Files,
+    Collapsed, Files,
 }
 
 @Composable
 fun ChatInput(
     state: ChatInputState,
+    loading: Boolean,
     conversation: Conversation,
     settings: Settings,
     mcpManager: McpManager,
+    hazeState: HazeState,
     enableSearch: Boolean,
     onToggleSearch: (Boolean) -> Unit,
-    workflowEnabled: Boolean = false,
-    workflowActive: Boolean = false,
-    onToggleWorkflow: () -> Unit = {},
     modifier: Modifier = Modifier,
     onUpdateChatModel: (Model) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
-    onClearContext: () -> Unit,
-    onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int, compressType: CompressType) -> Job,
+    workflowEnabled: Boolean = false,
+    workflowActive: Boolean = false,
+    onToggleWorkflow: () -> Unit = {},
+    onOpenSandboxFileManager: () -> Unit,
+    onCompressContext: (
+        additionalPrompt: String,
+        keepRecentMessages: Int,
+        autoCompressEnabled: Boolean,
+        autoCompressTriggerTokens: Int,
+        generateMemoryLedger: Boolean,
+    ) -> Job,
+    autoCompressionUiState: me.rerere.rikkahub.service.CompressionUiState? = null,
+    onCancelCompressionProgress: () -> Unit = {},
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
 ) {
-    val context = LocalContext.current
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
+    val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
 
     val keyboardController = LocalSoftwareKeyboardController.current
 
     fun sendMessage() {
         keyboardController?.hide()
-        if (state.loading) onCancelClick() else onSendClick()
+        if (loading) onCancelClick() else onSendClick()
     }
 
     fun sendMessageWithoutAnswer() {
         keyboardController?.hide()
-        if (state.loading) onCancelClick() else onLongSendClick()
+        if (loading) onCancelClick() else onLongSendClick()
     }
 
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
     var showInjectionSheet by remember { mutableStateOf(false) }
     var showCompressDialog by remember { mutableStateOf(false) }
+    var manualCompressionJob by remember { mutableStateOf<Job?>(null) }
     fun dismissExpand() {
         expand = ExpandState.Collapsed
         showInjectionSheet = false
@@ -209,11 +217,196 @@ fun ChatInput(
         }
     }
 
+    val context = LocalContext.current
+    val filesManager: FilesManager = koinInject()
+
+    // Camera launcher
+    var cameraOutputUri by remember { mutableStateOf<Uri?>(null) }
+    var cameraOutputFile by remember { mutableStateOf<File?>(null) }
+    val (_, launchCameraCrop) = useCropLauncher(
+        onCroppedImageReady = { croppedUri ->
+            state.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            dismissExpand()
+        },
+        onCleanup = {
+            cameraOutputFile?.delete()
+            cameraOutputFile = null
+            cameraOutputUri = null
+        }
+    )
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captureSuccessful ->
+        if (captureSuccessful && cameraOutputUri != null) {
+            if (settings.displaySetting.skipCropImage) {
+                state.addImages(filesManager.createChatFilesByContents(listOf(cameraOutputUri!!)))
+                cameraOutputFile?.delete()
+                cameraOutputFile = null
+                cameraOutputUri = null
+                dismissExpand()
+            } else {
+                launchCameraCrop(cameraOutputUri!!)
+            }
+        } else {
+            cameraOutputFile?.delete()
+            cameraOutputFile = null
+            cameraOutputUri = null
+        }
+    }
+    val onLaunchCamera: () -> Unit = {
+        cameraOutputFile = context.cacheDir.resolve("camera_${Uuid.random()}.jpg")
+        cameraOutputUri = FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", cameraOutputFile!!
+        )
+        cameraLauncher.launch(cameraOutputUri!!)
+    }
+
+    // Image picker launcher
+    var preCropTempFile by remember { mutableStateOf<File?>(null) }
+    val (_, launchImageCrop) = useCropLauncher(
+        onCroppedImageReady = { croppedUri ->
+            state.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            dismissExpand()
+        },
+        onCleanup = {
+            preCropTempFile?.delete()
+            preCropTempFile = null
+        }
+    )
+    val imagePickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
+            if (selectedUris.isNotEmpty()) {
+                Log.d("ImagePickButton", "Selected URIs: $selectedUris")
+                if (settings.displaySetting.skipCropImage) {
+                    state.addImages(filesManager.createChatFilesByContents(selectedUris))
+                    dismissExpand()
+                } else {
+                    if (selectedUris.size == 1) {
+                        val tempFile = File(context.appTempFolder, "pick_temp_${System.currentTimeMillis()}.jpg")
+                        runCatching {
+                            context.contentResolver.openInputStream(selectedUris.first())?.use { input ->
+                                tempFile.outputStream().use { output -> input.copyTo(output) }
+                            }
+                            preCropTempFile = tempFile
+                            launchImageCrop(tempFile.toUri())
+                        }.onFailure {
+                            Log.e("ImagePickButton", "Failed to copy image to temp, falling back", it)
+                            launchImageCrop(selectedUris.first())
+                        }
+                    } else {
+                        state.addImages(filesManager.createChatFilesByContents(selectedUris))
+                        dismissExpand()
+                    }
+                }
+            } else {
+                Log.d("ImagePickButton", "No images selected")
+            }
+        }
+
+    // Video picker launcher
+    val videoPickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
+            if (selectedUris.isNotEmpty()) {
+                state.addVideos(filesManager.createChatFilesByContents(selectedUris))
+                dismissExpand()
+            }
+        }
+
+    // Audio picker launcher
+    val audioPickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
+            if (selectedUris.isNotEmpty()) {
+                state.addAudios(filesManager.createChatFilesByContents(selectedUris))
+                dismissExpand()
+            }
+        }
+
+    // File picker launcher
+    val filePickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isNotEmpty()) {
+                val allowedMimeTypes = setOf(
+                    "text/plain", "text/html", "text/css", "text/javascript", "text/csv", "text/xml",
+                    "application/json", "application/javascript", "application/pdf",
+                    "application/msword",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/vnd.ms-excel",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-powerpoint",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "application/zip",
+                    "application/x-tar",
+                    "application/gzip",
+                    "application/x-bzip2",
+                    "application/x-7z-compressed",
+                    "application/vnd.rar",
+                    "application/x-xz",
+                )
+                val documents = uris.mapNotNull { uri ->
+                    val fileName = filesManager.getFileNameFromUri(uri) ?: "file"
+                    val mime = filesManager.resolveMimeType(uri, fileName)
+                    val isAllowed = allowedMimeTypes.contains(mime) || mime.startsWith("text/") ||
+                        mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                        mime == "application/pdf" ||
+                        fileName.endsWith(".txt", ignoreCase = true) ||
+                        fileName.endsWith(".md", ignoreCase = true) ||
+                        fileName.endsWith(".csv", ignoreCase = true) ||
+                        fileName.endsWith(".json", ignoreCase = true) ||
+                        fileName.endsWith(".js", ignoreCase = true) ||
+                        fileName.endsWith(".html", ignoreCase = true) ||
+                        fileName.endsWith(".css", ignoreCase = true) ||
+                        fileName.endsWith(".xml", ignoreCase = true) ||
+                        fileName.endsWith(".py", ignoreCase = true) ||
+                        fileName.endsWith(".java", ignoreCase = true) ||
+                        fileName.endsWith(".kt", ignoreCase = true) ||
+                        fileName.endsWith(".ts", ignoreCase = true) ||
+                        fileName.endsWith(".tsx", ignoreCase = true) ||
+                        fileName.endsWith(".markdown", ignoreCase = true) ||
+                        fileName.endsWith(".mdx", ignoreCase = true) ||
+                        fileName.endsWith(".yml", ignoreCase = true) ||
+                        fileName.endsWith(".yaml", ignoreCase = true) ||
+                        fileName.endsWith(".zip", ignoreCase = true) ||
+                        fileName.endsWith(".tar", ignoreCase = true) ||
+                        fileName.endsWith(".tgz", ignoreCase = true) ||
+                        fileName.endsWith(".gz", ignoreCase = true) ||
+                        fileName.endsWith(".bz2", ignoreCase = true) ||
+                        fileName.endsWith(".7z", ignoreCase = true) ||
+                        fileName.endsWith(".rar", ignoreCase = true) ||
+                        fileName.endsWith(".xz", ignoreCase = true)
+                    if (isAllowed) {
+                        val localUri = filesManager.createChatFilesByContents(listOf(uri))[0]
+                        UIMessagePart.Document(url = localUri.toString(), fileName = fileName, mime = mime)
+                    } else {
+                        toaster.show(
+                            context.getString(R.string.chat_input_unsupported_file_type, fileName),
+                            type = ToastType.Error
+                        )
+                        null
+                    }
+                }
+                if (documents.isNotEmpty()) {
+                    state.addFiles(documents)
+                    dismissExpand()
+                }
+            }
+        }
+
     // Collapse when ime is visible
     val imeVisile = WindowInsets.isImeVisible
     LaunchedEffect(imeVisile, showInjectionSheet, showCompressDialog) {
         if (imeVisile && !showInjectionSheet && !showCompressDialog) {
             dismissExpand()
+        }
+    }
+    LaunchedEffect(manualCompressionJob) {
+        val job = manualCompressionJob ?: return@LaunchedEffect
+        try {
+            job.join()
+        } finally {
+            // Manual compression now hands off to the shared progress dialogs after confirm.
+            // Keep a reference to the launched job here so the generic progress cancel button
+            // can still stop a manually started compression pipeline.
+            if (manualCompressionJob == job) {
+                manualCompressionJob = null
+            }
         }
     }
 
@@ -223,151 +416,175 @@ fun ChatInput(
         Column(
             modifier = modifier
                 .imePadding()
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .navigationBarsPadding()
+                .padding(horizontal = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Medias
-            MediaFileInputRow(state = state, context = context)
-
-            // Text Input Row
-            TextInputRow(
-                state = state,
-                context = context,
-                onSendMessage = { sendMessage() }
-            )
-
-            // Actions Row
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.largeIncreased)
+                    .then(
+                        if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
+                            state = hazeState,
+                            style = HazeMaterials.ultraThin(containerColor = hazeTintColor)
+                        )
+                        else Modifier
+                    ),
+                shape = MaterialTheme.shapes.largeIncreased,
+                tonalElevation = 0.dp,
+                color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Column(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // Model Picker
-                    ModelSelector(
-                        modelId = assistant.chatModelId ?: settings.chatModelId,
-                        providers = settings.providers,
-                        onSelect = {
-                            onUpdateChatModel(it)
-                            dismissExpand()
-                        },
-                        type = ModelType.CHAT,
-                        onlyIcon = true,
-                        modifier = Modifier,
+                    if (state.messageContent.isNotEmpty()) {
+                        MediaFileInputRow(state = state)
+                    }
+
+                    TextInputRow(
+                        state = state,
+                        onSendMessage = { sendMessage() }
                     )
 
-                    // Search
-                    val enableSearchMsg = stringResource(R.string.web_search_enabled)
-                    val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                    val chatModel = settings.getCurrentChatModel()
-                    SearchPickerButton(
-                        enableSearch = enableSearch,
-                        settings = settings,
-                        onToggleSearch = { enabled ->
-                            onToggleSearch(enabled)
-                            toaster.show(
-                                message = if (enabled) enableSearchMsg else disableSearchMsg,
-                                duration = 1.seconds,
-                                type = if (enabled) {
-                                    ToastType.Success
-                                } else {
-                                    ToastType.Normal
-                                }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // Model Picker
+                            ModelSelector(
+                                modelId = assistant.chatModelId ?: settings.chatModelId,
+                                providers = settings.providers,
+                                onSelect = {
+                                    onUpdateChatModel(it)
+                                    dismissExpand()
+                                },
+                                type = ModelType.CHAT,
+                                onlyIcon = true,
+                                modifier = Modifier,
                             )
-                        },
-                        onUpdateSearchService = onUpdateSearchService,
-                        model = chatModel,
-                    )
 
-                    // Reasoning
-                    val model = settings.getCurrentChatModel()
-                    if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
-                        ReasoningButton(
-                            reasoningTokens = assistant.thinkingBudget ?: 0,
-                            onUpdateReasoningTokens = {
-                                onUpdateAssistant(assistant.copy(thinkingBudget = it))
-                            },
-                            onlyIcon = true,
-                        )
-                    }
+                            // Search
+                            val enableSearchMsg = stringResource(R.string.web_search_enabled)
+                            val disableSearchMsg = stringResource(R.string.web_search_disabled)
+                            val chatModel = settings.getCurrentChatModel()
+                            SearchPickerButton(
+                                enableSearch = enableSearch,
+                                settings = settings,
+                                onToggleSearch = { enabled ->
+                                    onToggleSearch(enabled)
+                                    toaster.show(
+                                        message = if (enabled) enableSearchMsg else disableSearchMsg,
+                                        duration = 1.seconds,
+                                        type = if (enabled) {
+                                            ToastType.Success
+                                        } else {
+                                            ToastType.Normal
+                                        }
+                                    )
+                                },
+                                onUpdateSearchService = onUpdateSearchService,
+                                model = chatModel,
+                            )
 
-                    // Workflow
-                    if (workflowEnabled) {
-                        WorkflowButton(
-                            active = workflowActive,
-                            onToggle = onToggleWorkflow,
-                        )
-                    }
-
-                    // MCP
-                    if (settings.mcpServers.isNotEmpty()) {
-                        McpPickerButton(
-                            assistant = assistant,
-                            servers = settings.mcpServers,
-                            mcpManager = mcpManager,
-                            onUpdateAssistant = {
-                                onUpdateAssistant(it)
-                            },
-                        )
-                    }
-                }
-
-                // Insert files
-                IconButton(
-                    onClick = {
-                        expandToggle(ExpandState.Files)
-                    }
-                ) {
-                    Icon(
-                        if (expand == ExpandState.Files) Lucide.X else Lucide.Plus,
-                        stringResource(R.string.more_options)
-                    )
-                }
-
-                // Send Button
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .combinedClickable(
-                            enabled = state.loading || !state.isEmpty(),
-                            onClick = {
-                                dismissExpand()
-                                sendMessage()
-                            },
-                            onLongClick = {
-                                dismissExpand()
-                                sendMessageWithoutAnswer()
+                            // Reasoning
+                            val model = settings.getCurrentChatModel()
+                            if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                ReasoningButton(
+                                    reasoningTokens = assistant.thinkingBudget ?: 0,
+                                    onUpdateReasoningTokens = {
+                                        onUpdateAssistant(assistant.copy(thinkingBudget = it))
+                                    },
+                                    onlyIcon = true,
+                                )
                             }
-                        )
-                ) {
-                    val containerColor = when {
-                        state.loading -> MaterialTheme.colorScheme.errorContainer // 加载时，红色
-                        state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh // 禁用时(输入为空)，灰色
-                        else -> MaterialTheme.colorScheme.primary // 启用时(输入非空)，绿色/主题色
-                    }
-                    val contentColor = when {
-                        state.loading -> MaterialTheme.colorScheme.onErrorContainer
-                        state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // 禁用时，内容用带透明度的灰色
-                        else -> MaterialTheme.colorScheme.onPrimary
-                    }
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        shape = CircleShape,
-                        color = containerColor,
-                        content = {}
-                    )
-                    if (state.loading) {
-                        KeepScreenOn()
-                        Icon(Lucide.X, stringResource(R.string.stop), tint = contentColor)
-                    } else {
-                        Icon(Lucide.ArrowUp, stringResource(R.string.send), tint = contentColor)
+
+                            if (workflowEnabled) {
+                                WorkflowButton(
+                                    active = workflowActive,
+                                    onToggle = onToggleWorkflow,
+                                )
+                            }
+
+                            // MCP
+                            if (settings.mcpServers.isNotEmpty()) {
+                                McpPickerButton(
+                                    assistant = assistant,
+                                    servers = settings.mcpServers,
+                                    mcpManager = mcpManager,
+                                    onUpdateAssistant = {
+                                        onUpdateAssistant(it)
+                                    },
+                                )
+                            }
+                        }
+
+                        ActionIconButton(
+                            onClick = {
+                                expandToggle(ExpandState.Files)
+                            }) {
+                            Icon(
+                                imageVector = if (expand == ExpandState.Files) HugeIcons.Cancel01 else HugeIcons.Add01,
+                                contentDescription = stringResource(R.string.more_options)
+                            )
+                        }
+
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .combinedClickable(
+                                    enabled = loading || !state.isEmpty(),
+                                    onClick = {
+                                        dismissExpand()
+                                        sendMessage()
+                                    }, onLongClick = {
+                                        dismissExpand()
+                                        sendMessageWithoutAnswer()
+                                    }
+                                )
+                        ) {
+                            val containerColor = when {
+                                loading -> MaterialTheme.colorScheme.errorContainer // 鍔犺浇鏃讹紝绾㈣壊
+                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh // 绂佺敤鏃?杈撳叆涓虹┖)锛岀伆鑹?
+                                else -> MaterialTheme.colorScheme.primary // 鍚敤鏃?杈撳叆闈炵┖)锛岀豢鑹?涓婚鑹?
+                            }
+                            val contentColor = when {
+                                loading -> MaterialTheme.colorScheme.onErrorContainer
+                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // 绂佺敤鏃讹紝鍐呭鐢ㄥ甫閫忔槑搴︾殑鐏拌壊
+                                else -> MaterialTheme.colorScheme.onPrimary
+                            }
+                            Surface(
+                                modifier = Modifier.fillMaxSize(),
+                                shape = CircleShape,
+                                color = containerColor,
+                                content = {})
+                            if (loading) {
+                                KeepScreenOn()
+                                Icon(
+                                    imageVector = HugeIcons.Cancel01,
+                                    contentDescription = stringResource(R.string.stop),
+                                    tint = contentColor
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = HugeIcons.ArrowUp02,
+                                    contentDescription = stringResource(R.string.send),
+                                    tint = contentColor
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -387,23 +604,80 @@ fun ChatInput(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .then(
+                                if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
+                                    state = hazeState,
+                                    style = HazeMaterials.ultraThin()
+                                )
+                                else Modifier
+                            ),
+                        shape = RoundedCornerShape(20.dp),
+                        tonalElevation = 0.dp,
+                        color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
                     ) {
                         FilesPicker(
                             conversation = conversation,
                             state = state,
                             assistant = assistant,
-                            onClearContext = onClearContext,
+                            onOpenSandboxFileManager = onOpenSandboxFileManager,
                             onCompressContext = onCompressContext,
+                            onStartManualCompression = { manualCompressionJob = it },
                             onUpdateAssistant = onUpdateAssistant,
                             showInjectionSheet = showInjectionSheet,
                             onShowInjectionSheetChange = { showInjectionSheet = it },
                             showCompressDialog = showCompressDialog,
                             onShowCompressDialogChange = { showCompressDialog = it },
-                            onDismiss = { dismissExpand() }
+                            onDismiss = { dismissExpand() },
+                            onTakePic = onLaunchCamera,
+                            onPickImage = { imagePickerLauncher.launch("image/*") },
+                            onPickVideo = { videoPickerLauncher.launch("video/*") },
+                            onPickAudio = { audioPickerLauncher.launch("audio/*") },
+                            onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
                         )
                     }
                 }
             }
+        }
+    }
+
+    if (autoCompressionUiState != null) {
+        val progressMessage = when (autoCompressionUiState.phase) {
+            me.rerere.rikkahub.service.CompressionUiPhase.Compressing -> stringResource(R.string.chat_page_compressing)
+            me.rerere.rikkahub.service.CompressionUiPhase.Indexing -> stringResource(R.string.chat_page_memory_index_updating_v2)
+        }
+        CompressContextDialog(
+            mode = CompressContextDialogMode.AutoProgress,
+            onDismiss = {},
+            progressMessage = progressMessage,
+            onCancelProgress = {
+                val manualJob = manualCompressionJob
+                if (manualJob != null && manualJob.isActive) {
+                    manualJob.cancel()
+                }
+                onCancelCompressionProgress()
+            },
+        )
+    }
+
+}
+
+@Composable
+private fun ActionIconButton(
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.size(36.dp),
+        shape = CircleShape,
+        tonalElevation = 0.dp,
+        color = Color.Transparent,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center
+        ) {
+            content()
         }
     }
 }
@@ -411,136 +685,125 @@ fun ChatInput(
 @Composable
 private fun TextInputRow(
     state: ChatInputState,
-    context: Context,
     onSendMessage: () -> Unit,
 ) {
     val settings = LocalSettings.current
+    val filesManager: FilesManager = koinInject()
     val assistant = settings.getCurrentAssistant()
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp),
+    val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
+        settings.getQuickMessagesOfAssistant(assistant)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // TextField
-        Surface(
-            shape = RoundedCornerShape(32.dp),
-            tonalElevation = 4.dp,
-            modifier = Modifier.weight(1f)
-        ) {
-            Column {
-                if (state.isEditing()) {
-                    Surface(
-                        tonalElevation = 8.dp
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = stringResource(R.string.editing),
-                            )
-                            Spacer(Modifier.weight(1f))
-                            Icon(
-                                Lucide.X, stringResource(R.string.cancel_edit),
-                                modifier = Modifier
-                                    .clickable {
-                                        state.clearInput()
-                                    }
-                            )
-                        }
-                    }
-                }
-                var isFocused by remember { mutableStateOf(false) }
-                var isFullScreen by remember { mutableStateOf(false) }
-                val receiveContentListener = remember(settings.displaySetting.pasteLongTextAsFile, settings.displaySetting.pasteLongTextThreshold) {
-                    ReceiveContentListener { transferableContent ->
-                        when {
-                            transferableContent.hasMediaType(MediaType.Image) -> {
-                                transferableContent.consume { item ->
-                                    val uri = item.uri
-                                    if (uri != null) {
-                                        state.addImages(
-                                            context.createChatFilesByContents(
-                                                listOf(
-                                                    uri
-                                                )
-                                            )
-                                        )
-                                    }
-                                    uri != null
-                                }
-                            }
-
-                            settings.displaySetting.pasteLongTextAsFile &&
-                                transferableContent.hasMediaType(MediaType.Text) -> {
-                                transferableContent.consume { item ->
-                                    val text = item.text?.toString()
-                                    if (text != null && text.length > settings.displaySetting.pasteLongTextThreshold) {
-                                        val document = context.createChatTextFile(text)
-                                        state.addFiles(listOf(document))
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                }
-                            }
-
-                            else -> transferableContent
-                        }
-                    }
-                }
-                TextField(
-                    state = state.textContent,
+        if (state.isEditing()) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .contentReceiver(receiveContentListener)
-                        .onFocusChanged {
-                            isFocused = it.isFocused
-                        },
-                    shape = RoundedCornerShape(32.dp),
-                    placeholder = {
-                        Text(stringResource(R.string.chat_input_placeholder))
-                    },
-                    lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
-                    keyboardOptions = KeyboardOptions(
-                        imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
-                    ),
-                    onKeyboardAction = {
-                        if (settings.displaySetting.sendOnEnter && !state.isEmpty()) {
-                            onSendMessage()
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = stringResource(R.string.editing))
+                    Spacer(Modifier.weight(1f))
+                    Icon(
+                        imageVector = HugeIcons.Cancel01,
+                        contentDescription = stringResource(R.string.cancel_edit),
+                        modifier = Modifier.clickable { state.clearInput() }
+                    )
+                }
+            }
+        }
+
+        var isFocused by remember { mutableStateOf(false) }
+        var isFullScreen by remember { mutableStateOf(false) }
+        val receiveContentListener = remember(
+            settings.displaySetting.pasteLongTextAsFile, settings.displaySetting.pasteLongTextThreshold
+        ) {
+            ReceiveContentListener { transferableContent ->
+                when {
+                    transferableContent.hasMediaType(MediaType.Image) -> {
+                        transferableContent.consume { item ->
+                            val uri = item.uri
+                            if (uri != null) {
+                                state.addImages(
+                                    filesManager.createChatFilesByContents(
+                                        listOf(uri)
+                                    )
+                                )
+                            }
+                            uri != null
                         }
-                    },
-                    colors = TextFieldDefaults.colors().copy(
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                    ),
-                    trailingIcon = {
-                        if (isFocused) {
-                            IconButton(
-                                onClick = {
-                                    isFullScreen = !isFullScreen
-                                }
-                            ) {
-                                Icon(Lucide.Fullscreen, null)
+                    }
+
+                    settings.displaySetting.pasteLongTextAsFile && transferableContent.hasMediaType(MediaType.Text) -> {
+                        transferableContent.consume { item ->
+                            val text = item.text?.toString()
+                            if (text != null && text.length > settings.displaySetting.pasteLongTextThreshold) {
+                                val document = filesManager.createChatTextFile(text)
+                                state.addFiles(listOf(document))
+                                true
+                            } else {
+                                false
                             }
                         }
-                    },
-                    leadingIcon = if (assistant.quickMessages.isNotEmpty()) {
-                        {
-                            QuickMessageButton(assistant = assistant, state = state)
-                        }
-                    } else null,
-                )
-                if (isFullScreen) {
-                    FullScreenEditor(state = state) {
-                        isFullScreen = false
+                    }
+
+                    else -> transferableContent
+                }
+            }
+        }
+        TextField(
+            state = state.textContent,
+            modifier = Modifier
+                .fillMaxWidth()
+                .contentReceiver(receiveContentListener)
+                .onFocusChanged {
+                    isFocused = it.isFocused
+                },
+            shape = MaterialTheme.shapes.largeIncreased,
+            placeholder = {
+                Text(stringResource(R.string.chat_input_placeholder))
+            },
+            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
+            keyboardOptions = KeyboardOptions(
+                imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
+            ),
+            onKeyboardAction = {
+                if (settings.displaySetting.sendOnEnter && !state.isEmpty()) {
+                    onSendMessage()
+                }
+            },
+            colors = TextFieldDefaults.colors().copy(
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+            ),
+            trailingIcon = {
+                if (isFocused) {
+                    IconButton(
+                        onClick = {
+                            isFullScreen = !isFullScreen
+                        }) {
+                        Icon(HugeIcons.FullScreen, null)
                     }
                 }
+            },
+            leadingIcon = if (quickMessages.isNotEmpty()) {
+                {
+                    QuickMessageButton(quickMessages = quickMessages, state = state)
+                }
+            } else null,
+        )
+        if (isFullScreen) {
+            FullScreenEditor(state = state) {
+                isFullScreen = false
             }
         }
     }
@@ -548,16 +811,15 @@ private fun TextInputRow(
 
 @Composable
 private fun QuickMessageButton(
-    assistant: Assistant,
+    quickMessages: List<QuickMessage>,
     state: ChatInputState,
 ) {
     var expanded by remember { mutableStateOf(false) }
     IconButton(
         onClick = {
             expanded = !expanded
-        }
-    ) {
-        Icon(Lucide.Zap, null)
+        }) {
+        Icon(HugeIcons.Zap, null)
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
@@ -565,10 +827,11 @@ private fun QuickMessageButton(
                 .widthIn(min = 200.dp)
                 .width(IntrinsicSize.Min)
         ) {
-            assistant.quickMessages.forEach { quickMessage ->
+            quickMessages.forEach { quickMessage ->
                 Surface(
                     onClick = {
                         state.appendText(quickMessage.content)
+                        expanded = false
                     },
                     color = Color.Transparent,
                     modifier = Modifier.fillMaxWidth(),
@@ -598,159 +861,190 @@ private fun QuickMessageButton(
 @Composable
 private fun MediaFileInputRow(
     state: ChatInputState,
-    context: Context
 ) {
+    val filesManager: FilesManager = koinInject()
+    val managedFiles by filesManager.observe().collectAsState(initial = emptyList())
+    val displayNameByRelativePath = remember(managedFiles) {
+        managedFiles.associate { it.relativePath to it.displayName }
+    }
+    val displayNameByFileName = remember(managedFiles) {
+        managedFiles.associate { it.relativePath.substringAfterLast('/') to it.displayName }
+    }
+
+    fun removePart(part: UIMessagePart, url: String) {
+        state.messageContent = state.messageContent.filterNot { it == part }
+        if (state.shouldDeleteFileOnRemove(part)) {
+            filesManager.deleteChatFiles(listOf(url.toUri()))
+        }
+    }
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = 6.dp, vertical = 6.dp)
             .horizontalScroll(rememberScrollState())
     ) {
-        state.messageContent.filterIsInstance<UIMessagePart.Image>().fastForEach { image ->
-            Box {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    tonalElevation = 4.dp
-                ) {
-                    AsyncImage(
-                        model = image.url,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                Icon(
-                    imageVector = Lucide.X,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .size(20.dp)
-                        .clickable {
-                            // Remove image
-                            state.messageContent =
-                                state.messageContent.filterNot { it == image }
-                            // Delete image
-                            context.deleteChatFiles(listOf(image.url.toUri()))
-                        }
-                        .align(Alignment.TopEnd)
-                        .background(MaterialTheme.colorScheme.secondary),
-                    tint = MaterialTheme.colorScheme.onSecondary
-                )
-            }
-        }
-        state.messageContent.filterIsInstance<UIMessagePart.Video>().fastForEach { video ->
-            Box {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    tonalElevation = 4.dp
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Lucide.Video, null)
-                    }
-                }
-                Icon(
-                    imageVector = Lucide.X,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .size(20.dp)
-                        .clickable {
-                            // Remove image
-                            state.messageContent =
-                                state.messageContent.filterNot { it == video }
-                            // Delete image
-                            context.deleteChatFiles(listOf(video.url.toUri()))
-                        }
-                        .align(Alignment.TopEnd)
-                        .background(MaterialTheme.colorScheme.secondary),
-                    tint = MaterialTheme.colorScheme.onSecondary
-                )
-            }
-        }
-        state.messageContent.filterIsInstance<UIMessagePart.Audio>().fastForEach { audio ->
-            Box {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    tonalElevation = 4.dp
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Lucide.FileAudio, null)
-                    }
-                }
-                Icon(
-                    imageVector = Lucide.X,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .size(20.dp)
-                        .clickable {
-                            // Remove image
-                            state.messageContent =
-                                state.messageContent.filterNot { it == audio }
-                            // Delete image
-                            context.deleteChatFiles(listOf(audio.url.toUri()))
-                        }
-                        .align(Alignment.TopEnd)
-                        .background(MaterialTheme.colorScheme.secondary),
-                    tint = MaterialTheme.colorScheme.onSecondary
-                )
-            }
-        }
-        state.messageContent.filterIsInstance<UIMessagePart.Document>()
-            .fastForEach { document ->
-                Box {
-                    Surface(
-                        modifier = Modifier
-                            .height(48.dp)
-                            .widthIn(max = 128.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        tonalElevation = 4.dp
-                    ) {
-                        CompositionLocalProvider(
-                            LocalContentColor provides MaterialTheme.colorScheme.onSurface.copy(
-                                0.8f
-                            )
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(4.dp)
+        state.messageContent.fastForEach { part ->
+            when (part) {
+                is UIMessagePart.Image -> {
+                    AttachmentChip(
+                        title = attachmentNameFromUrl(
+                            url = part.url,
+                            fallback = "image",
+                            displayNameByRelativePath = displayNameByRelativePath,
+                            displayNameByFileName = displayNameByFileName
+                        ),
+                        leading = {
+                            Surface(
+                                modifier = Modifier.size(34.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             ) {
-                                Text(
-                                    text = document.fileName,
-                                    overflow = TextOverflow.Ellipsis,
+                                AsyncImage(
+                                    model = part.url,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
                                 )
                             }
-                        }
-                    }
-                    Icon(
-                        imageVector = Lucide.X,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .size(20.dp)
-                            .clickable {
-                                // Remove image
-                                state.messageContent =
-                                    state.messageContent.filterNot { it == document }
-                                // Delete image
-                                context.deleteChatFiles(listOf(document.url.toUri()))
-                            }
-                            .align(Alignment.TopEnd)
-                            .background(MaterialTheme.colorScheme.secondary),
-                        tint = MaterialTheme.colorScheme.onSecondary
+                        },
+                        onRemove = { removePart(part, part.url) }
                     )
                 }
+
+                is UIMessagePart.Video -> {
+                    AttachmentChip(
+                        title = attachmentNameFromUrl(
+                            url = part.url,
+                            fallback = "video",
+                            displayNameByRelativePath = displayNameByRelativePath,
+                            displayNameByFileName = displayNameByFileName
+                        ),
+                        leading = { AttachmentLeadingIcon(icon = HugeIcons.Video01) },
+                        onRemove = { removePart(part, part.url) }
+                    )
+                }
+
+                is UIMessagePart.Audio -> {
+                    AttachmentChip(
+                        title = attachmentNameFromUrl(
+                            url = part.url,
+                            fallback = "audio",
+                            displayNameByRelativePath = displayNameByRelativePath,
+                            displayNameByFileName = displayNameByFileName
+                        ),
+                        leading = { AttachmentLeadingIcon(icon = HugeIcons.MusicNote03) },
+                        onRemove = { removePart(part, part.url) }
+                    )
+                }
+
+                is UIMessagePart.Document -> {
+                    AttachmentChip(
+                        title = attachmentNameFromUrl(
+                            url = part.url,
+                            fallback = part.fileName,
+                            displayNameByRelativePath = displayNameByRelativePath,
+                            displayNameByFileName = displayNameByFileName
+                        ),
+                        leading = { AttachmentLeadingIcon(icon = HugeIcons.Files02) },
+                        onRemove = { removePart(part, part.url) }
+                    )
+                }
+
+                else -> Unit
             }
+        }
     }
+}
+
+@Composable
+private fun AttachmentChip(
+    title: String,
+    leading: @Composable () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 1.dp,
+        shadowElevation = 0.dp,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+    ) {
+        Row(
+            modifier = Modifier
+                .height(44.dp)
+                .padding(start = 8.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            leading()
+            Text(
+                text = title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.widthIn(min = 40.dp, max = 180.dp),
+            )
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .size(26.dp)
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Cancel01,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentLeadingIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+) {
+    Surface(
+        modifier = Modifier.size(34.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun attachmentNameFromUrl(
+    url: String,
+    fallback: String,
+    displayNameByRelativePath: Map<String, String>,
+    displayNameByFileName: Map<String, String>,
+): String {
+    val parsed = runCatching { url.toUri() }.getOrNull()
+    val relativePath = parsed?.path?.substringAfter("/files/", missingDelimiterValue = "")?.takeIf { it.isNotBlank() }
+    if (relativePath != null) {
+        displayNameByRelativePath[relativePath]?.let { return it }
+    }
+
+    val storedFileName = parsed?.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+    if (storedFileName != null) {
+        displayNameByFileName[storedFileName]?.let { return it }
+        return storedFileName
+    }
+
+    return fallback
 }
 
 @Composable
@@ -758,14 +1052,26 @@ private fun FilesPicker(
     conversation: Conversation,
     assistant: Assistant,
     state: ChatInputState,
-    onClearContext: () -> Unit,
-    onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int, compressType: CompressType) -> Job,
+    onOpenSandboxFileManager: () -> Unit,
+    onCompressContext: (
+        additionalPrompt: String,
+        keepRecentMessages: Int,
+        autoCompressEnabled: Boolean,
+        autoCompressTriggerTokens: Int,
+        generateMemoryLedger: Boolean,
+    ) -> Job,
+    onStartManualCompression: (Job) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
     showInjectionSheet: Boolean,
     onShowInjectionSheetChange: (Boolean) -> Unit,
     showCompressDialog: Boolean,
     onShowCompressDialogChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onTakePic: () -> Unit,
+    onPickImage: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickAudio: () -> Unit,
+    onPickFile: () -> Unit,
 ) {
     val settings = LocalSettings.current
     val provider = settings.getCurrentChatModel()?.findProvider(providers = settings.providers)
@@ -773,87 +1079,78 @@ private fun FilesPicker(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         FlowRow(
-            modifier = Modifier
-                .fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            TakePicButton {
-                state.addImages(it)
-                onDismiss()
-            }
+            TakePicButton(onLaunchCamera = onTakePic)
 
-            ImagePickButton {
-                state.addImages(it)
-                onDismiss()
-            }
-
-            VideoPickButton {
-                state.addVideos(it)
-                onDismiss()
-            }
+            ImagePickButton(onClick = onPickImage)
 
             if (provider != null && provider is ProviderSetting.Google) {
-                AudioPickButton {
-                    state.addAudios(it)
-                    onDismiss()
-                }
+                VideoPickButton(onClick = onPickVideo)
+
+                AudioPickButton(onClick = onPickAudio)
             }
 
-            FilePickButton {
-                state.addFiles(it)
-                onDismiss()
-            }
+            FilePickButton(onClick = onPickFile)
         }
 
         HorizontalDivider(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Prompt Injections
-        if (settings.modeInjections.isNotEmpty() || settings.lorebooks.isNotEmpty()) {
-            val activeCount = assistant.modeInjectionIds.size + assistant.lorebookIds.size
-            ListItem(
-                leadingContent = {
-                    Icon(
-                        imageVector = Lucide.BookOpen,
-                        contentDescription = stringResource(R.string.chat_page_prompt_injections),
+        // Extensions (Quick Messages + Prompt Injections + Skills)
+        val activeCount =
+            assistant.quickMessageIds.size + assistant.modeInjectionIds.size + assistant.lorebookIds.size + assistant.enabledSkills.size
+        ListItem(
+            leadingContent = {
+                Icon(
+                    imageVector = HugeIcons.Package,
+                    contentDescription = stringResource(R.string.assistant_page_tab_extensions),
+                )
+            },
+            headlineContent = {
+                Text(stringResource(R.string.assistant_page_tab_extensions))
+            },
+            trailingContent = {
+                if (activeCount > 0) {
+                    Text(
+                        text = activeCount.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
                     )
+                }
+            },
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable {
+                    onShowInjectionSheetChange(true)
                 },
-                headlineContent = {
-                    Text(stringResource(R.string.chat_page_prompt_injections))
-                },
-                trailingContent = {
-                    if (activeCount > 0) {
-                        Text(
-                            text = activeCount.toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                },
-                modifier = Modifier
-                    .clip(MaterialTheme.shapes.large)
-                    .clickable {
-                        onShowInjectionSheetChange(true)
-                    },
-            )
-        }
+        )
 
         // Compress History Button
         ListItem(
             leadingContent = {
                 Icon(
-                    imageVector = Lucide.Package2,
+                    imageVector = HugeIcons.Package01,
                     contentDescription = stringResource(R.string.chat_page_compress_context),
                 )
             },
             headlineContent = {
                 Text(stringResource(R.string.chat_page_compress_context))
+            },
+            trailingContent = {
+                if (conversation.messageNodes.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.chat_page_message_count, conversation.messageNodes.size),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             },
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
@@ -865,36 +1162,19 @@ private fun FilesPicker(
         ListItem(
             leadingContent = {
                 Icon(
-                    imageVector = Lucide.Eraser,
-                    contentDescription = stringResource(R.string.chat_page_clear_context),
+                    imageVector = HugeIcons.Files02,
+                    contentDescription = "Sandbox File Manager",
                 )
             },
             headlineContent = {
-                Text(stringResource(R.string.chat_page_clear_context))
-            },
-            trailingContent = {
-                // Context Size
-                val settings = LocalSettings.current
-                if (settings.displaySetting.showTokenUsage && conversation.messageNodes.isNotEmpty()) {
-                    val configuredContextSize = assistant.contextMessageSize
-                    val effectiveMessagesAfterTruncation =
-                        conversation.messageNodes.size - conversation.truncateIndex.coerceAtLeast(0)
-                    val actualContextMessageCount =
-                        minOf(effectiveMessagesAfterTruncation, configuredContextSize)
-                    Text(
-                        text = "$actualContextMessageCount/$configuredContextSize",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
-                }
+                Text(stringResource(R.string.chat_page_open_sandbox_file_manager))
             },
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
-                .clickable(
-                    onClick = {
-                        onClearContext()
-                    }
-                ),
+                .clickable {
+                    onOpenSandboxFileManager()
+                    onDismiss()
+                },
         )
     }
 
@@ -904,36 +1184,79 @@ private fun FilesPicker(
             assistant = assistant,
             settings = settings,
             onUpdateAssistant = onUpdateAssistant,
-            onDismiss = { onShowInjectionSheetChange(false) }
-        )
+            onDismiss = { onShowInjectionSheetChange(false) })
     }
 
     // Compress Context Dialog
     if (showCompressDialog) {
         CompressContextDialog(
+            mode = CompressContextDialogMode.Manual,
             onDismiss = {
                 onShowCompressDialogChange(false)
                 onDismiss()
             },
-            onConfirm = { additionalPrompt, targetTokens, keepRecentMessages, compressType ->
-                onCompressContext(additionalPrompt, targetTokens, keepRecentMessages, compressType)
+            initialAutoCompressEnabled = settings.autoCompressEnabled,
+            initialAutoCompressTriggerTokens = settings.autoCompressTriggerTokens,
+            initialKeepRecentMessages = settings.manualCompressKeepRecentMessages,
+            // Persist the user's last manual choice so reopening the dialog does not silently
+            // flip the ledger toggle based on the conversation's transient stale/ready status.
+            initialGenerateMemoryLedger = settings.manualCompressGenerateMemoryLedger,
+            onConfirmManual = { additionalPrompt, keepRecentMessages, autoCompressEnabled, autoCompressTriggerTokens, generateMemoryLedger ->
+                // Close the manual config dialog immediately after confirmation so the user
+                // can see the shared compression -> ledger -> indexing phase dialogs instead
+                // of a stale one-off loading state that hides the split pipeline.
+                onStartManualCompression(
+                    onCompressContext(
+                        additionalPrompt,
+                        keepRecentMessages,
+                        autoCompressEnabled,
+                        autoCompressTriggerTokens,
+                        generateMemoryLedger,
+                    )
+                )
             }
         )
+    }
+
+}
+
+@Composable
+private fun WorkflowButton(
+    active: Boolean,
+    onToggle: () -> Unit,
+) {
+    ToggleSurface(
+        checked = active,
+        onClick = onToggle,
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Zap,
+                    contentDescription = "Workflow",
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun FullScreenEditor(
-    state: ChatInputState,
-    onDone: () -> Unit
+    state: ChatInputState, onDone: () -> Unit
 ) {
     BasicAlertDialog(
         onDismissRequest = {
             onDone()
         },
         properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
+            usePlatformDefaultWidth = false, decorFitsSystemWindows = false
         ),
     ) {
         Column(
@@ -960,8 +1283,7 @@ private fun FullScreenEditor(
                         TextButton(
                             onClick = {
                                 onDone()
-                            }
-                        ) {
+                            }) {
                             Text(stringResource(R.string.chat_page_save))
                         }
                     }
@@ -989,8 +1311,7 @@ private fun FullScreenEditor(
 
 @Composable
 private fun useCropLauncher(
-    onCroppedImageReady: (Uri) -> Unit,
-    onCleanup: (() -> Unit)? = null
+    onCroppedImageReady: (Uri) -> Unit, onCleanup: (() -> Unit)? = null
 ): Pair<ActivityResultLauncher<Intent>, (Uri) -> Unit> {
     val context = LocalContext.current
     var cropOutputUri by remember { mutableStateOf<Uri?>(null) }
@@ -1013,18 +1334,13 @@ private fun useCropLauncher(
         val outputFile = File(context.appTempFolder, "crop_output_${System.currentTimeMillis()}.jpg")
         cropOutputUri = Uri.fromFile(outputFile)
 
-        val cropIntent = UCrop.of(sourceUri, cropOutputUri!!)
-            .withOptions(UCrop.Options().apply {
-                setFreeStyleCropEnabled(true)
-                setAllowedGestures(
-                    UCropActivity.SCALE,
-                    UCropActivity.ROTATE,
-                    UCropActivity.NONE
-                )
-                setCompressionFormat(Bitmap.CompressFormat.PNG)
-            })
-            .withMaxResultSize(4096, 4096)
-            .getIntent(context)
+        val cropIntent = UCrop.of(sourceUri, cropOutputUri!!).withOptions(UCrop.Options().apply {
+            setFreeStyleCropEnabled(true)
+            setAllowedGestures(
+                UCropActivity.SCALE, UCropActivity.ROTATE, UCropActivity.NONE
+            )
+            setCompressionFormat(Bitmap.CompressFormat.PNG)
+        }).withMaxResultSize(4096, 4096).getIntent(context)
 
         cropActivityLauncher.launch(cropIntent)
     }
@@ -1033,120 +1349,33 @@ private fun useCropLauncher(
 }
 
 @Composable
-private fun ImagePickButton(onAddImages: (List<Uri>) -> Unit = {}) {
-    val context = LocalContext.current
-    val settings = LocalSettings.current
-
-    val (_, launchCrop) = useCropLauncher(
-        onCroppedImageReady = { croppedUri ->
-            onAddImages(context.createChatFilesByContents(listOf(croppedUri)))
-        }
-    )
-
-    val imagePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
-    ) { selectedUris ->
-        if (selectedUris.isNotEmpty()) {
-            Log.d("ImagePickButton", "Selected URIs: $selectedUris")
-            // Check if we should skip crop based on settings
-            if (settings.displaySetting.skipCropImage) {
-                // Skip crop, directly add images
-                onAddImages(context.createChatFilesByContents(selectedUris))
-            } else {
-                // Show crop interface
-                if (selectedUris.size == 1) {
-                    // Single image - offer crop
-                    launchCrop(selectedUris.first())
-                } else {
-                    // Multiple images - no crop
-                    onAddImages(context.createChatFilesByContents(selectedUris))
-                }
-            }
-        } else {
-            Log.d("ImagePickButton", "No images selected")
-        }
-    }
-
-    BigIconTextButton(
-        icon = {
-            Icon(Lucide.Image, null)
-        },
-        text = {
-            Text(stringResource(R.string.photo))
-        }
-    ) {
-        imagePickerLauncher.launch("image/*")
+private fun ImagePickButton(onClick: () -> Unit = {}) {
+    BigIconTextButton(icon = {
+        Icon(HugeIcons.Image02, null)
+    }, text = {
+        Text(stringResource(R.string.photo))
+    }) {
+        onClick()
     }
 }
 
 @Composable
-fun TakePicButton(onAddImages: (List<Uri>) -> Unit = {}) {
+fun TakePicButton(onLaunchCamera: () -> Unit = {}) {
     val cameraPermission = rememberPermissionState(PermissionCamera)
 
-    val context = LocalContext.current
-    val settings = LocalSettings.current
-    var cameraOutputUri by remember { mutableStateOf<Uri?>(null) }
-    var cameraOutputFile by remember { mutableStateOf<File?>(null) }
-
-    val (_, launchCrop) = useCropLauncher(
-        onCroppedImageReady = { croppedUri ->
-            onAddImages(context.createChatFilesByContents(listOf(croppedUri)))
-        },
-        onCleanup = {
-            // Clean up camera temp file after cropping is done
-            cameraOutputFile?.delete()
-            cameraOutputFile = null
-            cameraOutputUri = null
-        }
-    )
-
-    val cameraLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { captureSuccessful ->
-        if (captureSuccessful && cameraOutputUri != null) {
-            // Check if we should skip crop based on settings
-            if (settings.displaySetting.skipCropImage) {
-                // Skip crop, directly add image
-                onAddImages(context.createChatFilesByContents(listOf(cameraOutputUri!!)))
-                // Clean up camera temp file
-                cameraOutputFile?.delete()
-                cameraOutputFile = null
-                cameraOutputUri = null
-            } else {
-                // Show crop interface
-                launchCrop(cameraOutputUri!!)
-            }
-        } else {
-            // Clean up camera temp file if capture failed
-            cameraOutputFile?.delete()
-            cameraOutputFile = null
-            cameraOutputUri = null
-        }
-    }
-
-    // 使用权限管理器包装
+    // 浣跨敤鏉冮檺绠＄悊鍣ㄥ寘瑁?
     PermissionManager(
         permissionState = cameraPermission
     ) {
-        BigIconTextButton(
-            icon = {
-                Icon(Lucide.Camera, null)
-            },
-            text = {
-                Text(stringResource(R.string.take_picture))
-            }
-        ) {
+        BigIconTextButton(icon = {
+            Icon(HugeIcons.Camera01, null)
+        }, text = {
+            Text(stringResource(R.string.take_picture))
+        }) {
             if (cameraPermission.allRequiredPermissionsGranted) {
-                // 权限已授权，直接启动相机
-                cameraOutputFile = context.cacheDir.resolve("camera_${Uuid.random()}.jpg")
-                cameraOutputUri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    cameraOutputFile!!
-                )
-                cameraLauncher.launch(cameraOutputUri!!)
+                onLaunchCamera()
             } else {
-                // 请求权限
+                // 璇锋眰鏉冮檺
                 cameraPermission.requestPermissions()
             }
         }
@@ -1154,160 +1383,35 @@ fun TakePicButton(onAddImages: (List<Uri>) -> Unit = {}) {
 }
 
 @Composable
-fun VideoPickButton(onAddVideos: (List<Uri>) -> Unit = {}) {
-    val context = LocalContext.current
-    val videoPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
-    ) { selectedUris ->
-        if (selectedUris.isNotEmpty()) {
-            onAddVideos(context.createChatFilesByContents(selectedUris))
-        }
-    }
-
-    BigIconTextButton(
-        icon = {
-            Icon(Lucide.Video, null)
-        },
-        text = {
-            Text(stringResource(R.string.video))
-        }
-    ) {
-        videoPickerLauncher.launch("video/*")
+fun VideoPickButton(onClick: () -> Unit = {}) {
+    BigIconTextButton(icon = {
+        Icon(HugeIcons.Video01, null)
+    }, text = {
+        Text(stringResource(R.string.video))
+    }) {
+        onClick()
     }
 }
 
 @Composable
-fun AudioPickButton(onAddAudios: (List<Uri>) -> Unit = {}) {
-    val context = LocalContext.current
-    val audioPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
-    ) { selectedUris ->
-        if (selectedUris.isNotEmpty()) {
-            onAddAudios(context.createChatFilesByContents(selectedUris))
-        }
-    }
-
-    BigIconTextButton(
-        icon = {
-            Icon(Lucide.Music, null)
-        },
-        text = {
-            Text(stringResource(R.string.audio))
-        }
-    ) {
-        audioPickerLauncher.launch("audio/*")
+fun AudioPickButton(onClick: () -> Unit = {}) {
+    BigIconTextButton(icon = {
+        Icon(HugeIcons.MusicNote03, null)
+    }, text = {
+        Text(stringResource(R.string.audio))
+    }) {
+        onClick()
     }
 }
 
 @Composable
-fun FilePickButton(onAddFiles: (List<UIMessagePart.Document>) -> Unit = {}) {
-    val context = LocalContext.current
-    val toaster = LocalToaster.current
-    val pickMedia =
-        rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-            if (uris.isNotEmpty()) {
-                val allowedMimeTypes = setOf(
-                    "text/plain",
-                    "text/html",
-                    "text/css",
-                    "text/javascript",
-                    "text/csv",
-                    "text/xml",
-                    "application/json",
-                    "application/javascript",
-                    "application/pdf",
-                    "application/msword",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "application/vnd.ms-excel",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "application/vnd.ms-powerpoint",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    // 压缩文件类型
-                    "application/zip",
-                    "application/x-zip-compressed",
-                    "application/x-tar",
-                    "application/gzip",
-                    "application/x-gzip",
-                    "application/x-7z-compressed",
-                    "application/x-rar-compressed",
-                    "application/x-bzip2",
-                    "application/x-xz"
-                )
-
-                val documents = uris.mapNotNull { uri ->
-                    val fileName = context.getFileNameFromUri(uri) ?: "file"
-                    val mime = context.getFileMimeType(uri) ?: "text/plain"
-
-                    // Filter by MIME type or file extension
-                    val isAllowed = allowedMimeTypes.contains(mime) ||
-                        mime.startsWith("text/") ||
-                        mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-                        mime == "application/pdf" ||
-                        // 压缩文件扩展名
-                        fileName.endsWith(".zip", ignoreCase = true) ||
-                        fileName.endsWith(".tar", ignoreCase = true) ||
-                        fileName.endsWith(".gz", ignoreCase = true) ||
-                        fileName.endsWith(".tgz", ignoreCase = true) ||
-                        fileName.endsWith(".bz2", ignoreCase = true) ||
-                        fileName.endsWith(".7z", ignoreCase = true) ||
-                        fileName.endsWith(".rar", ignoreCase = true) ||
-                        fileName.endsWith(".xz", ignoreCase = true) ||
-                        // 代码文件扩展名
-                        fileName.endsWith(".txt", ignoreCase = true) ||
-                        fileName.endsWith(".md", ignoreCase = true) ||
-                        fileName.endsWith(".csv", ignoreCase = true) ||
-                        fileName.endsWith(".json", ignoreCase = true) ||
-                        fileName.endsWith(".js", ignoreCase = true) ||
-                        fileName.endsWith(".html", ignoreCase = true) ||
-                        fileName.endsWith(".css", ignoreCase = true) ||
-                        fileName.endsWith(".xml", ignoreCase = true) ||
-                        fileName.endsWith(".py", ignoreCase = true) ||
-                        fileName.endsWith(".java", ignoreCase = true) ||
-                        fileName.endsWith(".kt", ignoreCase = true) ||
-                        fileName.endsWith(".ts", ignoreCase = true) ||
-                        fileName.endsWith(".tsx", ignoreCase = true) ||
-                        fileName.endsWith(".md", ignoreCase = true) ||
-                        fileName.endsWith(".markdown", ignoreCase = true) ||
-                        fileName.endsWith(".mdx", ignoreCase = true) ||
-                        fileName.endsWith(".yml", ignoreCase = true) ||
-                        fileName.endsWith(".yaml", ignoreCase = true) ||
-                        fileName.endsWith(".c", ignoreCase = true) ||
-                        fileName.endsWith(".cpp", ignoreCase = true) ||
-                        fileName.endsWith(".h", ignoreCase = true) ||
-                        fileName.endsWith(".hpp", ignoreCase = true) ||
-                        fileName.endsWith(".rs", ignoreCase = true) ||
-                        fileName.endsWith(".go", ignoreCase = true) ||
-                        fileName.endsWith(".rb", ignoreCase = true) ||
-                        fileName.endsWith(".php", ignoreCase = true) ||
-                        fileName.endsWith(".swift", ignoreCase = true)
-
-                    if (isAllowed) {
-                        val localUri = context.createChatFilesByContents(listOf(uri))[0]
-                        UIMessagePart.Document(
-                            url = localUri.toString(),
-                            fileName = fileName,
-                            mime = mime
-                        )
-                    } else {
-                        toaster.show("不支持的文件类型: $fileName", type = ToastType.Error)
-                        null
-                    }
-                }
-
-                if (documents.isNotEmpty()) {
-                    onAddFiles(documents)
-                }
-            }
-        }
-    BigIconTextButton(
-        icon = {
-            Icon(Lucide.Files, null)
-        },
-        text = {
-            Text(stringResource(R.string.upload_file))
-        }
-    ) {
-        pickMedia.launch(arrayOf("*/*"))
+fun FilePickButton(onClick: () -> Unit = {}) {
+    BigIconTextButton(icon = {
+        Icon(HugeIcons.Files02, null)
+    }, text = {
+        Text(stringResource(R.string.upload_file))
+    }) {
+        onClick()
     }
 }
 
@@ -1324,24 +1428,19 @@ private fun BigIconTextButton(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = onClick
+                interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick
             )
             .semantics {
                 role = Role.Button
             }
             .wrapContentWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
+        verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Surface(
-            tonalElevation = 2.dp,
-            shape = RoundedCornerShape(8.dp)
+            tonalElevation = 2.dp, shape = RoundedCornerShape(8.dp)
         ) {
             Box(
-                modifier = Modifier
-                    .padding(horizontal = 32.dp, vertical = 16.dp)
+                modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp)
             ) {
                 icon()
             }
@@ -1354,12 +1453,11 @@ private fun BigIconTextButton(
 
 @Composable
 private fun InjectionQuickConfigSheet(
-    assistant: Assistant,
-    settings: Settings,
-    onUpdateAssistant: (Assistant) -> Unit,
-    onDismiss: () -> Unit
+    assistant: Assistant, settings: Settings, onUpdateAssistant: (Assistant) -> Unit, onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val navController = LocalNavController.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1371,30 +1469,35 @@ private fun InjectionQuickConfigSheet(
                 .fillMaxHeight(0.75f)
                 .padding(horizontal = 16.dp),
         ) {
-            InjectionSelector(
+            ExtensionSelector(
                 assistant = assistant,
                 settings = settings,
                 onUpdate = onUpdateAssistant,
-                modifier = Modifier.weight(1f)
-            )
+                modifier = Modifier.weight(1f),
+                onNavigateToQuickMessages = {
+                    scope.launch {
+                        sheetState.hide()
+                        onDismiss()
+                        navController.navigate(Screen.QuickMessages)
+                    }
+                },
+                onNavigateToPrompts = {
+                    scope.launch {
+                        sheetState.hide()
+                        onDismiss()
+                        navController.navigate(Screen.Prompts)
+                    }
+                },
+                onNavigateToSkills = {
+                    scope.launch {
+                        sheetState.hide()
+                        onDismiss()
+                        navController.navigate(Screen.Skills)
+                    }
+                })
 
             Spacer(modifier = Modifier.height(16.dp))
         }
-    }
-}
-
-@Composable
-private fun WorkflowButton(
-    active: Boolean,
-    onToggle: () -> Unit,
-) {
-    IconButton(onClick = onToggle) {
-        Icon(
-            imageVector = Lucide.GitBranch,
-            contentDescription = "Workflow",
-            tint = if (active) MaterialTheme.colorScheme.primary
-                   else LocalContentColor.current.copy(alpha = 0.6f)
-        )
     }
 }
 
@@ -1404,13 +1507,11 @@ private fun BigIconTextButtonPreview() {
     Row(
         modifier = Modifier.padding(16.dp)
     ) {
-        BigIconTextButton(
-            icon = {
-                Icon(Lucide.Image, null)
-            },
-            text = {
-                Text(stringResource(R.string.photo))
-            }
-        ) {}
+        BigIconTextButton(icon = {
+            Icon(HugeIcons.Image02, null)
+        }, text = {
+            Text(stringResource(R.string.photo))
+        }) {}
     }
 }
+

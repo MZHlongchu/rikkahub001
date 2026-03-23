@@ -6,9 +6,12 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.files.SkillPaths
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
+import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.utils.fileSizeToString
 import java.io.File
 import java.io.FileInputStream
@@ -162,18 +165,22 @@ class WebDavSync(
                 }
             }
 
-            // Backup chat files
+            // Backup app files
             if (config.items.contains(WebDavConfig.BackupItem.FILES)) {
-                val uploadFolder = File(context.filesDir, "upload")
-                if (uploadFolder.exists() && uploadFolder.isDirectory) {
-                    Log.i(TAG, "prepareBackupFile: Backing up files from ${uploadFolder.absolutePath}")
-                    uploadFolder.listFiles()?.forEach { file ->
-                        if (file.isFile) {
-                            addFileToZip(zipOut, file, "upload/${file.name}")
-                        }
-                    }
+                backupFlatFolderToZip(zipOut, FileFolders.UPLOAD)
+                backupFlatFolderToZip(zipOut, FileFolders.KNOWLEDGE_BASE)
+
+                val skillsFolder = File(context.filesDir, FileFolders.SKILLS)
+                if (skillsFolder.exists() && skillsFolder.isDirectory) {
+                    Log.i(TAG, "prepareBackupFile: Backing up skills from ${skillsFolder.absolutePath}")
+                    addDirectoryToZip(
+                        zipOut = zipOut,
+                        rootDir = skillsFolder,
+                        currentDir = skillsFolder,
+                        entryPrefix = "${FileFolders.SKILLS}/"
+                    )
                 } else {
-                    Log.w(TAG, "prepareBackupFile: Upload folder does not exist or is not a directory")
+                    Log.w(TAG, "prepareBackupFile: Skills folder does not exist or is not a directory")
                 }
             }
         }
@@ -199,7 +206,8 @@ class WebDavSync(
                             val settingsJson = zipIn.readBytes().toString(Charsets.UTF_8)
                             Log.i(TAG, "restoreFromBackupFile: Restoring settings")
                             try {
-                                val settings = json.decodeFromString<Settings>(settingsJson)
+                                val migratedJson = SettingsJsonMigrator.migrate(settingsJson)
+                                val settings = json.decodeFromString<Settings>(migratedJson)
                                 settingsStore.update(settings)
                                 Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
                             } catch (e: Exception) {
@@ -243,34 +251,24 @@ class WebDavSync(
                         }
 
                         else -> {
-                            if (config.items.contains(WebDavConfig.BackupItem.FILES) && zipEntry.name.startsWith("upload/")) {
-                                val fileName = zipEntry.name.substringAfter("upload/")
-                                if (fileName.isNotEmpty()) {
-                                    val uploadFolder = File(context.filesDir, "upload")
-                                    if (!uploadFolder.exists()) {
-                                        uploadFolder.mkdirs()
-                                        Log.i(TAG, "restoreFromBackupFile: Created upload directory")
-                                    }
-
-                                    val targetFile = File(uploadFolder, fileName)
-                                    Log.i(
-                                        TAG,
-                                        "restoreFromBackupFile: Restoring file ${zipEntry.name} to ${targetFile.absolutePath}"
-                                    )
-
-                                    try {
-                                        FileOutputStream(targetFile).use { outputStream ->
-                                            zipIn.copyTo(outputStream)
-                                        }
-                                        Log.i(
-                                            TAG,
-                                            "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
-                                        )
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "restoreFromBackupFile: Failed to restore file ${zipEntry.name}", e)
-                                        throw Exception("Failed to restore file ${zipEntry.name}: ${e.message}")
-                                    }
-                                }
+                            if (config.items.contains(WebDavConfig.BackupItem.FILES) && restoreFlatFolderEntry(
+                                    zipIn = zipIn,
+                                    entryName = zipEntry.name,
+                                    folder = FileFolders.UPLOAD,
+                                )
+                            ) {
+                                Unit
+                            } else if (config.items.contains(WebDavConfig.BackupItem.FILES) && restoreFlatFolderEntry(
+                                    zipIn = zipIn,
+                                    entryName = zipEntry.name,
+                                    folder = FileFolders.KNOWLEDGE_BASE,
+                                )
+                            ) {
+                                Unit
+                            } else if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
+                                zipEntry.name.startsWith("${FileFolders.SKILLS}/")
+                            ) {
+                                restoreSkillEntry(zipIn, zipEntry.name)
                             } else {
                                 Log.i(TAG, "restoreFromBackupFile: Skipping entry ${zipEntry.name}")
                             }
@@ -292,6 +290,107 @@ class WebDavSync(
             fis.copyTo(zipOut)
             zipOut.closeEntry()
             Log.d(TAG, "addFileToZip: Added $entryName (${file.length()} bytes) to zip")
+        }
+    }
+
+    private fun addDirectoryToZip(
+        zipOut: ZipOutputStream,
+        rootDir: File,
+        currentDir: File,
+        entryPrefix: String,
+    ) {
+        currentDir.listFiles()?.forEach { file ->
+            if (file.isDirectory) {
+                addDirectoryToZip(
+                    zipOut = zipOut,
+                    rootDir = rootDir,
+                    currentDir = file,
+                    entryPrefix = entryPrefix,
+                )
+            } else if (file.isFile) {
+                val relativePath = file.relativeTo(rootDir).invariantSeparatorsPath
+                addFileToZip(zipOut, file, "$entryPrefix$relativePath")
+            }
+        }
+    }
+
+    private fun backupFlatFolderToZip(zipOut: ZipOutputStream, folder: String) {
+        val dir = File(context.filesDir, folder)
+        if (dir.exists() && dir.isDirectory) {
+            Log.i(TAG, "prepareBackupFile: Backing up files from ${dir.absolutePath}")
+            dir.listFiles()?.forEach { file ->
+                if (file.isFile) {
+                    addFileToZip(zipOut, file, "$folder/${file.name}")
+                }
+            }
+        } else {
+            Log.w(TAG, "prepareBackupFile: Folder does not exist or is not a directory: $folder")
+        }
+    }
+
+    private fun restoreFlatFolderEntry(
+        zipIn: ZipInputStream,
+        entryName: String,
+        folder: String,
+    ): Boolean {
+        if (!entryName.startsWith("$folder/")) return false
+        val fileName = entryName.substringAfter("$folder/")
+        if (fileName.isEmpty()) return true
+
+        val targetFolder = File(context.filesDir, folder)
+        if (!targetFolder.exists()) {
+            targetFolder.mkdirs()
+            Log.i(TAG, "restoreFromBackupFile: Created $folder directory")
+        }
+
+        val targetFile = File(targetFolder, fileName)
+        Log.i(
+            TAG,
+            "restoreFromBackupFile: Restoring file $entryName to ${targetFile.absolutePath}"
+        )
+
+        try {
+            FileOutputStream(targetFile).use { outputStream ->
+                zipIn.copyTo(outputStream)
+            }
+            Log.i(
+                TAG,
+                "restoreFromBackupFile: Restored $entryName (${targetFile.length()} bytes)"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "restoreFromBackupFile: Failed to restore file $entryName", e)
+            throw Exception("Failed to restore file $entryName: ${e.message}")
+        }
+        return true
+    }
+
+    private fun restoreSkillEntry(zipIn: ZipInputStream, entryName: String) {
+        val relativePath = entryName.substringAfter("${FileFolders.SKILLS}/")
+        val skillName = relativePath.substringBefore('/', missingDelimiterValue = "")
+        val skillRelativePath = relativePath.substringAfter('/', missingDelimiterValue = "")
+
+        if (skillName.isBlank() || skillRelativePath.isBlank()) {
+            Log.w(TAG, "restoreFromBackupFile: Invalid skill entry $entryName")
+            return
+        }
+
+        val skillsRoot = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() }
+        val skillDir = SkillPaths.resolveSkillDir(skillsRoot, skillName)
+            ?: throw Exception("Invalid skill directory: $entryName")
+        val targetFile = SkillPaths.resolveSkillFile(skillDir, skillRelativePath)
+            ?: throw Exception("Invalid skill file path: $entryName")
+
+        skillDir.mkdirs()
+        targetFile.parentFile?.mkdirs()
+
+        try {
+            FileOutputStream(targetFile).use { outputStream ->
+                zipIn.copyTo(outputStream)
+            }
+            Log.i(TAG, "restoreFromBackupFile: Restored skill file $entryName (${targetFile.length()} bytes)")
+        } catch (e: Exception) {
+            Log.e(TAG, "restoreFromBackupFile: Failed to restore skill file $entryName", e)
+            throw Exception("Failed to restore skill file $entryName: ${e.message}")
         }
     }
 

@@ -39,7 +39,6 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.util.KeyRoulette
-import me.rerere.ai.util.configureClientWithProxy
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
@@ -50,6 +49,7 @@ import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
+import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -79,19 +79,20 @@ class ChatCompletionsAPI(
                 providerSetting = providerSetting
             )
 
-        val proxyClient = client.configureClientWithProxy(providerSetting.proxy)
-
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey)}")
+            .addHeader(
+                "Authorization",
+                "Bearer ${keyRoulette.next(providerSetting.id.toString(), providerSetting.apiKey)}"
+            )
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
         Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
-        val response = proxyClient.newCall(request).await()
+        val response = client.newCall(request).await()
         if (!response.isSuccessful) {
             throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
         }
@@ -138,13 +139,14 @@ class ChatCompletionsAPI(
             stream = true,
         )
 
-        val proxyClient = client.configureClientWithProxy(providerSetting.proxy)
-
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey)}")
+            .addHeader(
+                "Authorization",
+                "Bearer ${keyRoulette.next(providerSetting.id.toString(), providerSetting.apiKey)}"
+            )
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
@@ -240,7 +242,7 @@ class ChatCompletionsAPI(
             }
         }
 
-        val eventSource = EventSources.createFactory(proxyClient).newEventSource(request, listener)
+        val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
 
         awaitClose {
             println("[awaitClose] 关闭eventSource ")
@@ -325,7 +327,29 @@ class ChatCompletionsAPI(
                     "api.siliconflow.cn" -> {
                         // https://docs.siliconflow.cn/cn/userguide/capabilities/reasoning#3-1-api-%E5%8F%82%E6%95%B0
                         val modelId = params.model.modelId
-                        if (modelId.contains("DeepSeek-") || modelId.contains("GLM-") || modelId.contains("Qwen3-")) {
+                        val siliconflowThinkingModels = setOf(
+                            "Pro/moonshotai/Kimi-K2.5",
+                            "Pro/zai-org/GLM-5",
+                            "Pro/zai-org/GLM-4.7",
+                            "deepseek-ai/DeepSeek-V3.2",
+                            "Pro/deepseek-ai/DeepSeek-V3.2",
+                            "Qwen/Qwen3.5-397B-A17B",
+                            "Qwen/Qwen3.5-122B-A10B",
+                            "Qwen/Qwen3.5-35B-A3B",
+                            "Qwen/Qwen3.5-27B",
+                            "Qwen/Qwen3.5-9B",
+                            "Qwen/Qwen3.5-4B",
+                            "zai-org/GLM-4.6",
+                            "Qwen/Qwen3-8B",
+                            "Qwen/Qwen3-14B",
+                            "Qwen/Qwen3-32B",
+                            "Qwen/Qwen3-30B-A3B",
+                            "tencent/Hunyuan-A13B-Instruct",
+                            "zai-org/GLM-4.5V",
+                            "deepseek-ai/DeepSeek-V3.1-Terminus",
+                            "Pro/deepseek-ai/DeepSeek-V3.1-Terminus",
+                        )
+                        if (modelId in siliconflowThinkingModels) {
                             put("enable_thinking", level.isEnabled)
                         }
                     }
@@ -406,19 +430,19 @@ class ChatCompletionsAPI(
                         }
                     }
                     group.parts
-                        .filter { it is UIMessagePart.Text || it is UIMessagePart.Image || it is UIMessagePart.Video }
+                        .filter { it is UIMessagePart.Text || it is UIMessagePart.Image }
                         .forEach { contentBuffer.add(it) }
                 }
 
                 is PartGroup.Tools -> {
                     // 输出 assistant 消息（包含累积的内容 + tool_calls）
-                    add(
-                        buildAssistantMessageJson(
-                            contentParts = contentBuffer,
-                            tools = group.tools,
-                            reasoningPart = reasoningPart
-                        )
-                    )
+                    buildAssistantMessageJson(
+                        contentParts = contentBuffer,
+                        tools = group.tools,
+                        reasoningPart = reasoningPart
+                    )?.let { assistantMessage ->
+                        add(assistantMessage)
+                    }
                     contentBuffer.clear()
                     reasoningPart = null // 清空，下一个 group 可能有新的 reasoning
 
@@ -439,13 +463,13 @@ class ChatCompletionsAPI(
 
         // 输出剩余内容
         if (contentBuffer.isNotEmpty() || reasoningPart != null) {
-            add(
-                buildAssistantMessageJson(
-                    contentParts = contentBuffer,
-                    tools = emptyList(),
-                    reasoningPart = reasoningPart
-                )
-            )
+            buildAssistantMessageJson(
+                contentParts = contentBuffer,
+                tools = emptyList(),
+                reasoningPart = reasoningPart
+            )?.let { assistantMessage ->
+                add(assistantMessage)
+            }
         }
     }
 
@@ -453,80 +477,79 @@ class ChatCompletionsAPI(
         contentParts: List<UIMessagePart>,
         tools: List<UIMessagePart.Tool>,
         reasoningPart: UIMessagePart.Reasoning?
-    ) = buildJsonObject {
-        put("role", "assistant")
-
-        // reasoning_content
-        reasoningPart?.let {
-            put("reasoning_content", it.reasoning)
+    ): JsonObject? {
+        val hasUsableContent = contentParts.any { part ->
+            when (part) {
+                is UIMessagePart.Text -> part.text.isNotBlank()
+                is UIMessagePart.Image -> part.url.isNotBlank()
+                else -> false
+            }
+        }
+        val hasReasoning = !reasoningPart?.reasoning.isNullOrBlank()
+        if (!hasUsableContent && !hasReasoning && tools.isEmpty()) {
+            return null
         }
 
-        // content
-        if (contentParts.isEmpty()) {
-            put("content", "")
-        } else if (contentParts.size == 1 && contentParts[0] is UIMessagePart.Text) {
-            put("content", (contentParts[0] as UIMessagePart.Text).text)
-        } else {
-            putJsonArray("content") {
-                contentParts.forEach { part ->
-                    when (part) {
-                        is UIMessagePart.Text -> {
-                            add(buildJsonObject {
-                                put("type", "text")
-                                put("text", part.text)
-                            })
-                        }
+        return buildJsonObject {
+            put("role", "assistant")
 
-                        is UIMessagePart.Image -> {
-                            add(buildJsonObject {
-                                part.encodeBase64().onSuccess { encodedImage ->
-                                    put("type", "image_url")
-                                    put("image_url", buildJsonObject {
-                                        put("url", encodedImage.base64)
-                                    })
-                                }.onFailure {
-                                    it.printStackTrace()
+            // reasoning_content
+            if (hasReasoning) {
+                put("reasoning_content", reasoningPart.reasoning)
+            }
+
+            // content
+            if (contentParts.isEmpty()) {
+                put("content", "")
+            } else if (contentParts.size == 1 && contentParts[0] is UIMessagePart.Text) {
+                put("content", (contentParts[0] as UIMessagePart.Text).text)
+            } else {
+                putJsonArray("content") {
+                    contentParts.forEach { part ->
+                        when (part) {
+                            is UIMessagePart.Text -> {
+                                add(buildJsonObject {
                                     put("type", "text")
-                                    put("text", "")
-                                }
-                            })
-                        }
+                                    put("text", part.text)
+                                })
+                            }
 
-                        is UIMessagePart.Video -> {
-                            add(buildJsonObject {
-                                part.encodeBase64().onSuccess { encodedVideo ->
-                                    put("type", "image_url")
-                                    put("image_url", buildJsonObject {
-                                        put("url", encodedVideo.base64)
-                                    })
-                                }.onFailure {
-                                    it.printStackTrace()
-                                    put("type", "text")
-                                    put("text", "")
-                                }
-                            })
-                        }
+                            is UIMessagePart.Image -> {
+                                add(buildJsonObject {
+                                    part.encodeBase64().onSuccess { encodedImage ->
+                                        put("type", "image_url")
+                                        put("image_url", buildJsonObject {
+                                            put("url", encodedImage.base64)
+                                        })
+                                    }.onFailure {
+                                        it.printStackTrace()
+                                        put("type", "text")
+                                        put("text", "")
+                                    }
+                                })
+                            }
 
-                        else -> {}
+                            else -> {}
+                        }
                     }
                 }
             }
-        }
 
-        // tool_calls
-        if (tools.isNotEmpty()) {
-            put("tool_calls", buildJsonArray {
-                tools.forEach { tool ->
-                    add(buildJsonObject {
-                        put("id", tool.toolCallId)
-                        put("type", "function")
-                        put("function", buildJsonObject {
-                            put("name", tool.toolName)
-                            put("arguments", tool.input)
+            // tool_calls
+            if (tools.isNotEmpty()) {
+                put("tool_calls", buildJsonArray {
+                    tools.forEach { tool ->
+                        add(buildJsonObject {
+                            put("id", tool.toolCallId)
+                            put("type", "function")
+                            put("function", buildJsonObject {
+                                put("name", tool.toolName)
+                                put("arguments", tool.input)
+                            })
                         })
-                    })
-                }
-            })
+                    }
+                })
+            }
         }
     }
 
@@ -562,24 +585,6 @@ class ChatCompletionsAPI(
                                 })
                             }
 
-                            is UIMessagePart.Video -> {
-                                android.util.Log.d("ChatCompletionsAPI", "[VideoUpload] Processing video: ${part.url}")
-                                add(buildJsonObject {
-                                    part.encodeBase64().onSuccess { encodedVideo ->
-                                        android.util.Log.d("ChatCompletionsAPI", "[VideoUpload] Video encoded success: mimeType=${encodedVideo.mimeType}, base64 length=${encodedVideo.base64.length}")
-                                        put("type", "image_url")
-                                        put("image_url", buildJsonObject {
-                                            put("url", encodedVideo.base64)
-                                        })
-                                    }.onFailure {
-                                        android.util.Log.e("ChatCompletionsAPI", "[VideoUpload] encode video failed: ${part.url}", it)
-                                        it.printStackTrace()
-                                        put("type", "text")
-                                        put("text", "")
-                                    }
-                                })
-                            }
-
                             else -> {}
                         }
                     }
@@ -593,10 +598,17 @@ class ChatCompletionsAPI(
             jsonObject["role"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "ASSISTANT"
         )
 
-        // 也许支持其他模态的输出content? 暂时只支持文本吧
-        val content = jsonObject["content"]?.jsonPrimitive?.contentOrNull ?: ""
-        val reasoning = jsonObject["reasoning_content"]?.jsonPrimitive?.contentOrNull
-            ?: jsonObject["reasoning"]?.jsonPrimitive?.contentOrNull
+        // 也许支持其他模态的输出content?
+        val content = jsonObject["content"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+        val reasoning = jsonObject["reasoning_content"]?.jsonPrimitiveOrNull?.contentOrNull
+            ?: jsonObject["reasoning"]?.jsonPrimitiveOrNull?.contentOrNull
+            ?: jsonObject["content"]?.takeIf { it is JsonArray }?.let { arr ->
+                // Mistral接口
+                // {"id":"","object":"chat.completion.chunk","created":1772351733,"model":"magistral-medium-2509","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"好的"}]}]},"finish_reason":null}]}
+                arr.jsonArrayOrNull?.getOrNull(0)?.jsonObject?.get("thinking")?.jsonArrayOrNull?.getOrNull(0)?.jsonObjectOrNull?.get(
+                    "text"
+                )?.jsonPrimitiveOrNull?.contentOrNull
+            }
         val toolCalls = jsonObject["tool_calls"] as? JsonArray ?: JsonArray(emptyList())
         val images = jsonObject["images"] as? JsonArray ?: JsonArray(emptyList())
 

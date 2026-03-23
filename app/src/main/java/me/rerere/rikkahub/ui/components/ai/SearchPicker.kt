@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -36,26 +35,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
-import com.composables.icons.lucide.Earth
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Search
-import com.composables.icons.lucide.Settings2
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.registry.ModelRegistry
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.GlobalSearch
+import me.rerere.hugeicons.stroke.AiSearch02
+import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
-import me.rerere.rikkahub.ui.components.ui.Tag
-import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.pages.setting.SearchAbilityTagLine
-import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
 import org.koin.compose.koinInject
 
@@ -88,14 +85,19 @@ fun SearchPickerButton(
                 modifier = Modifier.size(24.dp),
                 contentAlignment = Alignment.Center
             ) {
-                if (enableSearch && currentService != null) {
+                if (model?.tools?.contains(BuiltInTools.Search) == true) {
+                    Icon(
+                        imageVector = HugeIcons.AiSearch02,
+                        contentDescription = stringResource(R.string.use_web_search),
+                    )
+                } else if (enableSearch && currentService != null) {
                     AutoAIIcon(
                         name = SearchServiceOptions.TYPES[currentService::class] ?: "Search",
                         color = Color.Transparent
                     )
                 } else {
                     Icon(
-                        imageVector = Lucide.Earth,
+                        imageVector = HugeIcons.Search01,
                         contentDescription = stringResource(R.string.use_web_search),
                     )
                 }
@@ -156,7 +158,7 @@ private fun SearchPicker(
     val navBackStack = LocalNavController.current
 
     // 模型内置搜索
-    if (model != null && ModelRegistry.GEMINI_SERIES.match(model.modelId)) {
+    if (model != null && (ModelRegistry.GEMINI_SERIES.match(model.modelId) || model.modelId.contains("gpt-"))) {
         BuiltInSearchSetting(model = model)
     }
 
@@ -178,7 +180,7 @@ private fun SearchPicker(
 private fun AppSearchSettings(
     enableSearch: Boolean,
     onDismiss: () -> Unit,
-    navBackStack: NavHostController,
+    navBackStack: Navigator,
     onToggleSearch: (Boolean) -> Unit,
     modifier: Modifier,
     settings: Settings,
@@ -192,7 +194,7 @@ private fun AppSearchSettings(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Lucide.Earth, null)
+            Icon(HugeIcons.GlobalSearch, null)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -217,7 +219,7 @@ private fun AppSearchSettings(
                     navBackStack.navigate(Screen.SettingSearch)
                 }
             ) {
-                Icon(Lucide.Settings2, null)
+                Icon(HugeIcons.Settings03, null)
             }
             Switch(
                 checked = enableSearch,
@@ -255,7 +257,7 @@ private fun AppSearchSettings(
                 onClick = {
                     onUpdateSearchService(index)
                 },
-                shape = RoundedCornerShape(50),
+                shape = MaterialTheme.shapes.large
             ) {
                 Row(
                     modifier = Modifier
@@ -266,7 +268,7 @@ private fun AppSearchSettings(
                 ) {
                     AutoAIIcon(
                         name = SearchServiceOptions.TYPES[service::class] ?: "Search",
-                        modifier = Modifier.size(30.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                     Column(
                         modifier = Modifier.weight(1f),
@@ -298,7 +300,7 @@ private fun BuiltInSearchSetting(model: Model) {
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Lucide.Search, null)
+            Icon(HugeIcons.GlobalSearch, null)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)

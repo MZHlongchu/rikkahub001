@@ -1,10 +1,11 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
-import android.app.Application
 import android.util.Log
+import android.net.Uri
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -13,12 +14,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.data.model.KnowledgeBaseDocument
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.repository.MemoryRepository
-import me.rerere.rikkahub.utils.deleteChatFiles
+import me.rerere.rikkahub.data.skills.SkillsRepository
+import me.rerere.rikkahub.service.KnowledgeBaseService
 import kotlin.uuid.Uuid
 
 private const val TAG = "AssistantDetailVM"
@@ -27,9 +31,13 @@ class AssistantDetailVM(
     private val id: String,
     private val settingsStore: SettingsStore,
     private val memoryRepository: MemoryRepository,
-    private val context: Application,
+    private val filesManager: FilesManager,
+    private val skillsRepository: SkillsRepository,
+    private val knowledgeBaseService: KnowledgeBaseService,
 ) : ViewModel() {
     private val assistantId = Uuid.parse(id)
+
+    val skillsState = skillsRepository.state
 
     val settings: StateFlow<Settings> =
         settingsStore.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
@@ -68,6 +76,17 @@ class AssistantDetailVM(
         }.stateIn(
             scope = viewModelScope, started = SharingStarted.Eagerly, initialValue = emptyList()
         )
+
+    val knowledgeBaseDocuments: StateFlow<List<KnowledgeBaseDocument>> = knowledgeBaseService
+        .observeDocuments(assistantId)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList()
+        )
+
+    val knowledgeBaseIndexState: StateFlow<me.rerere.rikkahub.data.model.KnowledgeBaseIndexState> =
+        knowledgeBaseService.indexState
 
     val tags = settingsStore
         .settingsFlow
@@ -153,6 +172,10 @@ class AssistantDetailVM(
         }
     }
 
+    fun refreshSkills() {
+        skillsRepository.requestRefresh()
+    }
+
     fun addMemory(memory: AssistantMemory) {
         viewModelScope.launch {
             val memoryAssistantId = if (assistant.value.useGlobalMemory) {
@@ -179,9 +202,56 @@ class AssistantDetailVM(
         }
     }
 
+    fun uploadKnowledgeBaseDocuments(
+        uris: List<Uri>,
+        onResult: (Result<Int>) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val result = runCatching {
+                knowledgeBaseService.importDocuments(assistantId, uris)
+            }
+            onResult(result)
+        }
+    }
+
+    fun reindexKnowledgeBaseDocument(
+        documentId: Long,
+        onResult: (Result<Unit>) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val result = runCatching {
+                knowledgeBaseService.reindexDocument(documentId)
+            }
+            onResult(result)
+        }
+    }
+
+    fun reindexAllKnowledgeBase(
+        onResult: (Result<Int>) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val result = runCatching {
+                knowledgeBaseService.reindexAllDocuments(assistantId)
+            }
+            onResult(result)
+        }
+    }
+
+    fun deleteKnowledgeBaseDocument(
+        documentId: Long,
+        onResult: (Result<Boolean>) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val result = runCatching {
+                knowledgeBaseService.deleteDocument(documentId)
+            }
+            onResult(result)
+        }
+    }
+
     fun checkAvatarDelete(old: Assistant, new: Assistant) {
         if (old.avatar is Avatar.Image && old.avatar != new.avatar) {
-            context.deleteChatFiles(listOf(old.avatar.url.toUri()))
+            filesManager.deleteChatFiles(listOf(old.avatar.url.toUri()))
         }
     }
 
@@ -193,7 +263,7 @@ class AssistantDetailVM(
             try {
                 val oldUri = oldBackground.toUri()
                 if (oldUri.scheme == "content" || oldUri.scheme == "file") {
-                    context.deleteChatFiles(listOf(oldUri))
+                    filesManager.deleteChatFiles(listOf(oldUri))
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to delete background file: $oldBackground", e)

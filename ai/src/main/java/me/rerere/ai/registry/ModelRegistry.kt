@@ -51,6 +51,30 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val GPT_5_3 = defineModel {
+        tokens("gpt", "5", "3")
+        visionInput()
+        toolAbility()
+    }
+
+    private val GPT_5_4 = defineModel {
+        tokens("gpt", "5", "4")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val GPT_5_4_MINI = defineModel {
+        tokens("gpt", "5", "4", "mini")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val GPT_5_4_NANO = defineModel {
+        tokens("gpt", "5", "4", "nano")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val GEMINI_20_FLASH = defineModel {
         tokens("gemini", "2", "0", "flash")
         visionInput()
@@ -100,6 +124,25 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    val GEMINI_3_1_PRO_PREVIEW = defineModel {
+        tokens("gemini", "3", "1", "pro", "preview")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    val GEMINI_3_1_PRO_PREVIEW_CUSTOMTOOLS = defineModel {
+        tokens("gemini", "3", "1", "pro", "preview", "customtools")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    val GEMINI_3_1_FLASH_IMAGE = defineModel {
+        tokens("gemini", "3", "1", "flash", "image")
+        visionInput()
+        imageOutput()
+        reasoningAbility()
+    }
+
     val GEMINI_FLASH_LATEST = defineModel {
         exact("gemini-flash-latest")
         visionInput()
@@ -117,7 +160,7 @@ object ModelRegistry {
     }
 
     val GEMINI_3_SERIES = defineGroup {
-        add(GEMINI_3_PRO, GEMINI_3_FLASH)
+        add(GEMINI_3_PRO, GEMINI_3_FLASH, GEMINI_3_1_PRO_PREVIEW, GEMINI_3_1_PRO_PREVIEW_CUSTOMTOOLS)
     }
 
     val GEMINI_SERIES = defineGroup {
@@ -148,8 +191,14 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val CLAUDE_SONNET_4_6 = defineModel {
+        tokens("claude", "sonnet", "4", "6")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     val CLAUDE_SERIES = defineGroup {
-        add(CLAUDE_SONNET_3_5, CLAUDE_SONNET_3_7, CLAUDE_4, CLAUDE_4_5)
+        add(CLAUDE_SONNET_3_5, CLAUDE_SONNET_3_7, CLAUDE_4, CLAUDE_4_5, CLAUDE_SONNET_4_6)
     }
 
     private val DEEPSEEK_V3_MODEL = defineModel {
@@ -192,6 +241,12 @@ object ModelRegistry {
 
     private val QWEN_3 = defineModel {
         tokens("qwen", "3")
+        toolReasoningAbility()
+    }
+
+    private val QWEN_3_5 = defineModel {
+        tokens("qwen", "3", "5")
+        visionInput()
         toolReasoningAbility()
     }
 
@@ -251,13 +306,33 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val GLM_5 = defineModel {
+        tokens("glm", "5")
+        toolReasoningAbility()
+    }
+
     private val MINIMAX_M2 = defineModel {
         tokens("minimax", "m", "2")
         toolReasoningAbility()
     }
 
+    private val MINIMAX_M2_5 = defineModel {
+        tokens("minimax", "m", "2", "5")
+        toolReasoningAbility()
+    }
+
+    private val MINIMAX_M2_7 = defineModel {
+        tokens("minimax", "m", "2", "7")
+        toolReasoningAbility()
+    }
+
     private val XIAOMI_MIMO_V2 = defineModel {
         tokens("mimo", "v", "2")
+        toolReasoningAbility()
+    }
+
+    private val XIAOMI_MIMO_V2_PRO = defineModel {
+        tokens("mimo", "v", "2", "pro")
         toolReasoningAbility()
     }
 
@@ -273,6 +348,10 @@ object ModelRegistry {
         GPT_5,
         GPT_5_1,
         GPT_5_2,
+        GPT_5_3,
+        GPT_5_4,
+        GPT_5_4_MINI,
+        GPT_5_4_NANO,
         GEMINI_20_FLASH,
         GEMINI_2_5_FLASH,
         GEMINI_2_5_PRO,
@@ -281,12 +360,16 @@ object ModelRegistry {
         GEMINI_NANO_BANANA,
         GEMINI_3_PRO,
         GEMINI_3_FLASH,
+        GEMINI_3_1_PRO_PREVIEW,
+        GEMINI_3_1_PRO_PREVIEW_CUSTOMTOOLS,
+        GEMINI_3_1_FLASH_IMAGE,
         GEMINI_FLASH_LATEST,
         GEMINI_PRO_LATEST,
         CLAUDE_SONNET_3_5,
         CLAUDE_SONNET_3_7,
         CLAUDE_4,
         CLAUDE_4_5,
+        CLAUDE_SONNET_4_6,
         DEEPSEEK_V3_MODEL,
         DEEPSEEK_CHAT,
         DEEPSEEK_R1_MODEL,
@@ -294,6 +377,7 @@ object ModelRegistry {
         DEEPSEEK_V3_1,
         DEEPSEEK_V3_2,
         QWEN_3,
+        QWEN_3_5,
         DOUBAO_1_6,
         DOUBAO_1_8,
         GROK_4,
@@ -304,8 +388,12 @@ object ModelRegistry {
         GLM_4_5,
         GLM_4_6,
         GLM_4_7,
+        GLM_5,
         MINIMAX_M2,
+        MINIMAX_M2_5,
+        MINIMAX_M2_7,
         XIAOMI_MIMO_V2,
+        XIAOMI_MIMO_V2_PRO,
         QWEN_MT
     )
 
@@ -369,6 +457,10 @@ object ModelRegistry {
 
     private fun ModelDefinitionBuilder.toolAbility() {
         ability(ModelAbility.TOOL)
+    }
+
+    private fun ModelDefinitionBuilder.reasoningAbility() {
+        ability(ModelAbility.REASONING)
     }
 
     private fun ModelDefinitionBuilder.toolReasoningAbility() {

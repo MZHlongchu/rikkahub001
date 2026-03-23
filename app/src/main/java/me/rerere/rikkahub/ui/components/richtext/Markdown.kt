@@ -66,14 +66,15 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.net.toUri
-import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.Lucide
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.ui.components.table.DataTable
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.IElementType
@@ -131,11 +132,6 @@ private fun preProcess(content: String): String {
         } else {
             "$$" + matchResult.groupValues[1] + "$$"
         }
-    }
-
-    // 替换思考
-    result = result.replace(THINKING_REGEX) { matchResult ->
-        matchResult.groupValues[1].lines().filter { it.isNotBlank() }.joinToString("\n") { ">$it" }
     }
 
     return result
@@ -246,23 +242,23 @@ object HeaderStyle {
     )
 
     val H2 = TextStyle(
-        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 20.sp
+        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 22.sp
     )
 
     val H3 = TextStyle(
-        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 18.sp
+        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 20.sp
     )
 
     val H4 = TextStyle(
-        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 16.sp
+        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 18.sp
     )
 
     val H5 = TextStyle(
-        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 14.sp
+        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 16.sp
     )
 
     val H6 = TextStyle(
-        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 12.sp
+        fontStyle = FontStyle.Normal, fontWeight = FontWeight.Bold, fontSize = 14.sp
     )
 }
 
@@ -302,6 +298,15 @@ private fun MarkdownNode(
                 MarkdownElementTypes.ATX_6 -> HeaderStyle.H6
                 else -> throw IllegalArgumentException("Unknown header type")
             }
+            val headingPadding = when (node.type) {
+                MarkdownElementTypes.ATX_1 -> 16.dp
+                MarkdownElementTypes.ATX_2 -> 14.dp
+                MarkdownElementTypes.ATX_3 -> 12.dp
+                MarkdownElementTypes.ATX_4 -> 10.dp
+                MarkdownElementTypes.ATX_5 -> 8.dp
+                MarkdownElementTypes.ATX_6 -> 6.dp
+                else -> 8.dp
+            }
             ProvideTextStyle(value = style) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     node.children.fastForEach { node ->
@@ -310,7 +315,7 @@ private fun MarkdownNode(
                                 node = node,
                                 content = content,
                                 onClickCitation = onClickCitation,
-                                modifier = modifier.padding(vertical = 16.dp),
+                                modifier = modifier.padding(vertical = headingPadding),
                                 trim = true,
                             )
                         }
@@ -356,7 +361,7 @@ private fun MarkdownNode(
                 ) {
                     if (isChecked) {
                         Icon(
-                            imageVector = Lucide.Check,
+                            imageVector = HugeIcons.Tick01,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary
                         )
@@ -471,18 +476,38 @@ private fun MarkdownNode(
 
         GFMElementTypes.INLINE_MATH -> {
             val formula = node.getTextInNode(content)
-            MathInline(
-                formula, modifier = modifier.padding(horizontal = 1.dp)
-            )
+            val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+            if (enableLatexRendering) {
+                MathInline(
+                    formula, modifier = modifier.padding(horizontal = 1.dp)
+                )
+            } else {
+                Text(
+                    text = formula,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = modifier.padding(horizontal = 1.dp)
+                )
+            }
         }
 
         GFMElementTypes.BLOCK_MATH -> {
             val formula = node.getTextInNode(content)
-            MathBlock(
-                formula, modifier = modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
-            )
+            val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+            if (enableLatexRendering) {
+                MathBlock(
+                    formula, modifier = modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                )
+            } else {
+                Text(
+                    text = formula,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                )
+            }
         }
 
         MarkdownElementTypes.CODE_SPAN -> {
@@ -494,13 +519,9 @@ private fun MarkdownNode(
 
         MarkdownElementTypes.CODE_BLOCK -> {
             val code = node.getTextInNode(content)
-            HighlightCodeBlock(
-                code = code,
-                language = "plaintext",
-                modifier = Modifier
-                    .padding(bottom = 4.dp)
-                    .fillMaxWidth(),
-                completeCodeBlock = true
+            Text(
+                text = code,
+                modifier = modifier,
             )
         }
 
@@ -702,16 +723,17 @@ private fun Paragraph(
     val hasInlineMath = remember(node) {
         node.findChildOfTypeRecursive(GFMElementTypes.INLINE_MATH) != null
     }
+    val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
 
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
     FlowRow(
         modifier = modifier.then(
-            if (node.nextSibling() != null) Modifier.padding(bottom = 8.dp)
+            if (node.nextSibling() != null) Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
             else Modifier
         )
     ) {
-        val annotatedString = remember(content) {
+        val annotatedString = remember(content, enableLatexRendering) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -723,6 +745,7 @@ private fun Paragraph(
                         style = textStyle,
                         density = density,
                         trim = trim,
+                        enableLatexRendering = enableLatexRendering,
                     )
                 }
             }
@@ -734,7 +757,7 @@ private fun Paragraph(
             softWrap = true,
             overflow = TextOverflow.Visible,
             style = LocalTextStyle.current.copy(
-                lineHeight = if (hasInlineMath) TextUnit.Unspecified else LocalTextStyle.current.lineHeight
+                lineHeight = if (hasInlineMath && enableLatexRendering) TextUnit.Unspecified else LocalTextStyle.current.lineHeight
             )
         )
     }
@@ -800,6 +823,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     colorScheme: ColorScheme,
     density: Density,
     style: TextStyle,
+    enableLatexRendering: Boolean = true,
     onClickCitation: (String) -> Unit = {},
 ) {
     when {
@@ -837,6 +861,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         colorScheme = colorScheme,
                         density = density,
                         style = style,
+                        enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation
                     )
                 }
@@ -853,6 +878,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         colorScheme = colorScheme,
                         density = density,
                         style = style,
+                        enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation
                     )
                 }
@@ -869,6 +895,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         colorScheme = colorScheme,
                         density = density,
                         style = style,
+                        enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation
                     )
                 }
@@ -955,25 +982,38 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         }
 
         node.type == GFMElementTypes.INLINE_MATH -> {
-            // formula as id
-            val formula = node.getTextInNode(content)
-            appendInlineContent(formula, "[Latex]")
-            val (width, height) = with(density) {
-                assumeLatexSize(
-                    latex = formula, fontSize = style.fontSize.toPx()
-                ).let {
-                    it.width().toSp() to it.height().toSp()
+            if (enableLatexRendering) {
+                // formula as id
+                val formula = node.getTextInNode(content)
+                appendInlineContent(formula, "[Latex]")
+                val (width, height) = with(density) {
+                    assumeLatexSize(
+                        latex = formula, fontSize = style.fontSize.toPx()
+                    ).let {
+                        it.width().toSp() to it.height().toSp()
+                    }
+                }
+                inlineContents.putIfAbsent(/* key = */ formula,/* value = */ InlineTextContent(
+                    placeholder = Placeholder(
+                        width = width, height = height, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                    ), children = {
+                        MathInline(
+                            latex = formula, modifier = Modifier
+                        )
+                    })
+                )
+            } else {
+                // 禁用 LaTeX 渲染时，以等宽字体显示原始公式
+                val formula = node.getTextInNode(content)
+                withStyle(
+                    SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 0.95.em,
+                    )
+                ) {
+                    append(formula)
                 }
             }
-            inlineContents.putIfAbsent(/* key = */ formula,/* value = */ InlineTextContent(
-                placeholder = Placeholder(
-                    width = width, height = height, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
-                ), children = {
-                    MathInline(
-                        latex = formula, modifier = Modifier
-                    )
-                })
-            )
         }
 
         // 其他类型继续递归处理
@@ -986,6 +1026,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     colorScheme = colorScheme,
                     density = density,
                     style = style,
+                    enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation
                 )
             }

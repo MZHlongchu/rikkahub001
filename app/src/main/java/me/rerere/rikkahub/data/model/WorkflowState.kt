@@ -18,24 +18,6 @@ enum class WorkflowPhase {
 /**
  * TODO 项状态
  */
-@Serializable
-enum class TodoStatus {
-    TODO,   // 待办
-    DOING,  // 进行中
-    DONE    // 已完成
-}
-
-/**
- * TODO 项
- */
-@Serializable
-data class TodoItem(
-    val id: String = Uuid.random().toString(),
-    val title: String,
-    val status: TodoStatus = TodoStatus.TODO,
-    val note: String? = null
-)
-
 /**
  * 记忆块（Compact 后的上下文摘要）
  * @deprecated 已不再使用，保留字段用于向后兼容

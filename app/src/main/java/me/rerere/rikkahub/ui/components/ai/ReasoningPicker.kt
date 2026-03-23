@@ -28,17 +28,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.composables.icons.lucide.Lightbulb
-import com.composables.icons.lucide.LightbulbOff
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Sparkle
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Idea
+import me.rerere.hugeicons.stroke.Idea01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
+import me.rerere.rikkahub.ui.components.ui.icons.ReasoningHigh
+import me.rerere.rikkahub.ui.components.ui.icons.ReasoningLow
+import me.rerere.rikkahub.ui.components.ui.icons.ReasoningMedium
 
 @Composable
 fun ReasoningButton(
@@ -57,8 +58,9 @@ fun ReasoningButton(
         )
     }
 
+    val level = ReasoningLevel.fromBudgetTokens(reasoningTokens)
     ToggleSurface(
-        checked = ReasoningLevel.fromBudgetTokens(reasoningTokens).isEnabled,
+        checked = level.isEnabled,
         onClick = {
             showPicker = true
         },
@@ -74,10 +76,13 @@ fun ReasoningButton(
                 modifier = Modifier.size(24.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.deepthink),
-                    contentDescription = null,
-                )
+                when (level) {
+                    ReasoningLevel.OFF -> Icon(HugeIcons.Idea, null)
+                    ReasoningLevel.AUTO -> Icon(HugeIcons.Idea01, null)
+                    ReasoningLevel.LOW -> Icon(ReasoningLow, null)
+                    ReasoningLevel.MEDIUM -> Icon(ReasoningMedium, null)
+                    ReasoningLevel.HIGH -> Icon(ReasoningHigh, null)
+                }
             }
             if (!onlyIcon) Text(stringResource(R.string.setting_provider_page_reasoning))
         }
@@ -107,7 +112,7 @@ fun ReasoningPicker(
             ReasoningLevelCard(
                 selected = currentLevel == ReasoningLevel.OFF,
                 icon = {
-                    Icon(Lucide.LightbulbOff, null)
+                    Icon(HugeIcons.Idea, null)
                 },
                 title = {
                     Text(stringResource(id = R.string.reasoning_off))
@@ -122,7 +127,7 @@ fun ReasoningPicker(
             ReasoningLevelCard(
                 selected = currentLevel == ReasoningLevel.AUTO,
                 icon = {
-                    Icon(Lucide.Sparkle, null)
+                    Icon(HugeIcons.Idea01, null)
                 },
                 title = {
                     Text(stringResource(id = R.string.reasoning_auto))
@@ -137,7 +142,7 @@ fun ReasoningPicker(
             ReasoningLevelCard(
                 selected = currentLevel == ReasoningLevel.LOW,
                 icon = {
-                    Icon(Lucide.Lightbulb, null)
+                    Icon(ReasoningLow, null)
                 },
                 title = {
                     Text(stringResource(id = R.string.reasoning_light))
@@ -152,7 +157,7 @@ fun ReasoningPicker(
             ReasoningLevelCard(
                 selected = currentLevel == ReasoningLevel.MEDIUM,
                 icon = {
-                    Icon(Lucide.Lightbulb, null)
+                    Icon(ReasoningMedium, null)
                 },
                 title = {
                     Text(stringResource(id = R.string.reasoning_medium))
@@ -167,7 +172,7 @@ fun ReasoningPicker(
             ReasoningLevelCard(
                 selected = currentLevel == ReasoningLevel.HIGH,
                 icon = {
-                    Icon(Lucide.Lightbulb, null)
+                    Icon(ReasoningHigh, null)
                 },
                 title = {
                     Text(stringResource(id = R.string.reasoning_heavy))

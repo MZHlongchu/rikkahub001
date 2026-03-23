@@ -18,12 +18,13 @@ data class Conversation(
     val assistantId: Uuid,
     val title: String = "",
     val messageNodes: List<MessageNode>,
-    val compressedHistory: List<MessageNode> = emptyList(),  // 压缩的历史消息
-    val truncateIndex: Int = -1,
     val chatSuggestions: List<String> = emptyList(),
     val isPinned: Boolean = false,
-    val workflowState: WorkflowState? = null,  // Workflow 状态，null 表示未启用
-    val todoState: TodoState? = null,  // Todo 状态，独立于 Workflow
+    val workflowState: WorkflowState? = null,
+    val todoState: TodoState? = null,
+    val compressionState: ConversationCompressionState = ConversationCompressionState(),
+    val memoryIndexState: ConversationMemoryIndexState = ConversationMemoryIndexState(),
+    val compressionEvents: List<CompressionEvent> = emptyList(),
     @Serializable(with = InstantSerializer::class)
     val createAt: Instant = Instant.now(),
     @Serializable(with = InstantSerializer::class)
@@ -32,33 +33,10 @@ data class Conversation(
     val newConversation: Boolean = false
 ) {
     val files: List<Uri>
-        get() {
-            val images = messageNodes
-                .flatMap { node -> node.messages.flatMap { it.parts } }
-                .filterIsInstance<UIMessagePart.Image>()
-                .mapNotNull {
-                    it.url.takeIf { it.startsWith("file://") }?.toUri()
-                }
-            val documents = messageNodes
-                .flatMap { node -> node.messages.flatMap { it.parts } }
-                .filterIsInstance<UIMessagePart.Document>()
-                .mapNotNull {
-                    it.url.takeIf { it.startsWith("file://") }?.toUri()
-                }
-            val videos = messageNodes
-                .flatMap { node -> node.messages.flatMap { it.parts } }
-                .filterIsInstance<UIMessagePart.Video>()
-                .mapNotNull {
-                    it.url.takeIf { it.startsWith("file://") }?.toUri()
-                }
-            val audios = messageNodes
-                .flatMap { node -> node.messages.flatMap { it.parts } }
-                .filterIsInstance<UIMessagePart.Audio>()
-                .mapNotNull {
-                    it.url.takeIf { it.startsWith("file://") }?.toUri()
-                }
-            return images + documents + videos + audios
-        }
+        get() = messageNodes
+            .flatMap { node -> node.messages.flatMap { it.parts } }
+            .collectAllParts()
+            .mapNotNull { it.fileUri() }
 
     /**
      *  当前选中的 message
@@ -77,11 +55,17 @@ data class Conversation(
     }
 
     fun updateCurrentMessages(messages: List<UIMessage>): Conversation {
+        return updateCurrentMessages(messages = messages, startIndex = 0)
+    }
+
+    fun updateCurrentMessages(messages: List<UIMessage>, startIndex: Int): Conversation {
+        require(startIndex >= 0) { "startIndex must be >= 0" }
         val newNodes = this.messageNodes.toMutableList()
 
         messages.forEachIndexed { index, message ->
+            val targetIndex = startIndex + index
             val node = newNodes
-                .getOrElse(index) { message.toMessageNode() }
+                .getOrElse(targetIndex) { message.toMessageNode() }
 
             val newMessages = node.messages.toMutableList()
             var newMessageIndex = node.selectIndex
@@ -98,10 +82,10 @@ data class Conversation(
             )
 
             // 更新newNodes
-            if (index > newNodes.lastIndex) {
+            if (targetIndex > newNodes.lastIndex) {
                 newNodes.add(newNode)
             } else {
-                newNodes[index] = newNode
+                newNodes[targetIndex] = newNode
             }
         }
 
@@ -126,10 +110,70 @@ data class Conversation(
 }
 
 @Serializable
+data class ConversationCompressionState(
+    val dialogueSummaryText: String = "",
+    val dialogueSummaryTokenEstimate: Int = 0,
+    @Serializable(with = InstantSerializer::class)
+    val dialogueSummaryUpdatedAt: Instant = Instant.EPOCH,
+    val rollingSummaryJson: String = "",
+    val rollingSummaryTokenEstimate: Int = 0,
+    val memoryLedgerStatus: String = "idle",
+    val memoryLedgerError: String = "",
+    val lastCompressedMessageIndex: Int = -1,
+    @Serializable(with = InstantSerializer::class)
+    val updatedAt: Instant = Instant.EPOCH
+) {
+    val hasSummary: Boolean
+        get() = hasDialogueSummary || hasLedger
+
+    val hasDialogueSummary: Boolean
+        get() = dialogueSummaryText.isNotBlank()
+
+    val hasLedger: Boolean
+        get() = rollingSummaryJson.isNotBlank()
+}
+
+@Serializable
+data class ConversationMemoryIndexState(
+    val lastIndexStatus: String = "idle",
+    @Serializable(with = InstantSerializer::class)
+    val lastIndexedAt: Instant = Instant.EPOCH,
+    val lastIndexError: String = "",
+)
+
+@Serializable
+data class CompressionEvent(
+    val id: Long = 0L,
+    val boundaryIndex: Int,
+    val dialogueSummaryText: String = "",
+    val dialogueSummaryPreview: String = "",
+    val ledgerSnapshot: String = "",
+    val summarySnapshot: String = "",
+    val compressStartIndex: Int = 0,
+    val compressEndIndex: Int = -1,
+    val keepRecentMessages: Int = 0,
+    val trigger: String = "",
+    val additionalPrompt: String = "",
+    val baseDialogueSummaryText: String = "",
+    val baseLedgerJson: String = "",
+    val baseSummaryJson: String = "",
+    @Serializable(with = InstantSerializer::class)
+    val createdAt: Instant = Instant.now()
+)
+
+val compressionEventOrder: Comparator<CompressionEvent> =
+    compareBy<CompressionEvent>({ it.createdAt }, { it.id })
+
+fun List<CompressionEvent>.latestCompressionEvent(): CompressionEvent? =
+    maxWithOrNull(compressionEventOrder)
+
+@Serializable
 data class MessageNode(
     val id: Uuid = Uuid.random(),
     val messages: List<UIMessage>,
     val selectIndex: Int = 0,
+    @Transient
+    val isFavorite: Boolean = false,
 ) {
     val currentMessage get() = if (messages.isEmpty() || selectIndex !in messages.indices) {
         throw IllegalStateException("MessageNode has no valid current message: messages.size=${messages.size}, selectIndex=$selectIndex")
@@ -152,4 +196,21 @@ fun UIMessage.toMessageNode(): MessageNode {
         messages = listOf(this),
         selectIndex = 0
     )
+}
+
+/**
+ * 递归展开所有 parts，包括工具调用结果中的嵌套 parts。
+ */
+private fun List<UIMessagePart>.collectAllParts(): List<UIMessagePart> =
+    this + filterIsInstance<UIMessagePart.Tool>().flatMap { it.output.collectAllParts() }
+
+/**
+ * 提取 part 中引用的本地文件 URI，新增文件类型时只需在此处添加。
+ */
+private fun UIMessagePart.fileUri(): Uri? = when (this) {
+    is UIMessagePart.Image -> url.takeIf { it.startsWith("file://") }?.toUri()
+    is UIMessagePart.Document -> url.takeIf { it.startsWith("file://") }?.toUri()
+    is UIMessagePart.Video -> url.takeIf { it.startsWith("file://") }?.toUri()
+    is UIMessagePart.Audio -> url.takeIf { it.startsWith("file://") }?.toUri()
+    else -> null
 }

@@ -4,6 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Book02
+import me.rerere.hugeicons.stroke.Book04
+import me.rerere.hugeicons.stroke.Earth
+import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.Wrench01
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -50,19 +58,14 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import androidx.navigation.compose.rememberNavController
+import androidx.compose.runtime.mutableStateListOf
+import androidx.navigation3.runtime.NavKey
+import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.ui.context.Navigator
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.request.crossfade
-import com.composables.icons.lucide.BookDashed
-import com.composables.icons.lucide.BookHeart
-import com.composables.icons.lucide.Earth
-import com.composables.icons.lucide.FileText
-import com.composables.icons.lucide.Image
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Search
-import com.composables.icons.lucide.Wrench
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +100,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.getActivity
+import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.utils.toLocalString
 import org.koin.compose.koinInject
@@ -154,7 +158,7 @@ fun ChatExportSheet(
                             Text(stringResource(id = R.string.chat_page_export_markdown_desc))
                         },
                         leadingContent = {
-                            Icon(Lucide.FileText, contentDescription = null)
+                            Icon(HugeIcons.File02, contentDescription = null)
                         }
                     )
                 }
@@ -173,7 +177,7 @@ fun ChatExportSheet(
                                 Text(stringResource(id = R.string.chat_page_export_image_desc))
                             },
                             leadingContent = {
-                                Icon(Lucide.Image, contentDescription = null)
+                                Icon(HugeIcons.Image02, contentDescription = null)
                             }
                         )
 
@@ -240,7 +244,7 @@ private fun exportToMarkdown(
     conversation: Conversation,
     messages: List<UIMessage>
 ) {
-    val filename = "chat-export-${LocalDateTime.now().toLocalString()}.md"
+    val filename = "chat-export-${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))}.md"
 
     val sb = buildAnnotatedString {
         append("# ${conversation.title}\n\n")
@@ -269,6 +273,73 @@ private fun exportToMarkdown(
                                 append(it)
                             }
                         appendLine()
+                        appendLine()
+                    }
+
+                    is UIMessagePart.Tool -> {
+                        append("**Tool**: `${part.toolName}`")
+                        appendLine()
+                        if (part.toolCallId.isNotBlank()) {
+                            append("- Call ID: `${part.toolCallId}`")
+                            appendLine()
+                        }
+
+                        append("Input:")
+                        appendLine()
+                        append("```json")
+                        appendLine()
+                        append(JsonInstantPretty.encodeToString(part.inputAsJson()))
+                        appendLine()
+                        append("```")
+                        appendLine()
+
+                        if (part.output.isNotEmpty()) {
+                            append("Output:")
+                            appendLine()
+                            part.output.forEach { outputPart ->
+                                when (outputPart) {
+                                    is UIMessagePart.Text -> {
+                                        append("```text")
+                                        appendLine()
+                                        append(outputPart.text)
+                                        appendLine()
+                                        append("```")
+                                        appendLine()
+                                    }
+
+                                    is UIMessagePart.Reasoning -> {
+                                        outputPart.reasoning.lines()
+                                            .filter { it.isNotBlank() }
+                                            .forEach {
+                                                append("> $it")
+                                                appendLine()
+                                            }
+                                    }
+
+                                    is UIMessagePart.Image -> {
+                                        append("![Tool Image](${outputPart.encodeBase64().getOrNull()?.base64})")
+                                        appendLine()
+                                    }
+
+                                    is UIMessagePart.Document -> {
+                                        append("[Document: ${outputPart.fileName}](${outputPart.url})")
+                                        appendLine()
+                                    }
+
+                                    is UIMessagePart.Video -> {
+                                        append("[Video](${outputPart.url})")
+                                        appendLine()
+                                    }
+
+                                    is UIMessagePart.Audio -> {
+                                        append("[Audio](${outputPart.url})")
+                                        appendLine()
+                                    }
+
+                                    else -> {}
+                                }
+                            }
+                        }
                         appendLine()
                     }
 
@@ -316,7 +387,7 @@ private suspend fun exportToImage(
     settings: Settings,
     options: ImageExportOptions = ImageExportOptions()
 ) {
-    val filename = "chat-export-${LocalDateTime.now().toLocalString()}.png"
+    val filename = "chat-export-${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))}.png"
     val composer = BitmapComposer(scope)
     val activity = context.getActivity()
     if (activity == null) {
@@ -383,12 +454,13 @@ private fun ExportedChatImage(
     messages: List<UIMessage>,
     options: ImageExportOptions = ImageExportOptions()
 ) {
-    val navBackStack = rememberNavController()
+    val navBackStack = remember { mutableStateListOf<NavKey>() }
+    val navigator = Navigator(navBackStack)
     val highlighter = koinInject<Highlighter>()
     val toasterState = rememberToasterState()
     RikkahubTheme {
         CompositionLocalProvider(
-            LocalNavController provides navBackStack,
+            LocalNavController provides navigator,
             LocalHighlighter provides highlighter,
             LocalToaster provides toasterState
         ) {
@@ -669,14 +741,14 @@ private fun ChainOfThoughtScope.ExportedToolStep(
             Icon(
                 imageVector = when (tool.toolName) {
                     "memory_tool" -> when (memoryAction) {
-                        "create", "edit" -> Lucide.BookHeart
-                        "delete" -> Lucide.BookDashed
-                        else -> Lucide.Wrench
+                        "create", "edit" -> HugeIcons.Book04
+                        "delete" -> HugeIcons.Book02
+                        else -> HugeIcons.Wrench01
                     }
 
-                    "search_web" -> Lucide.Search
-                    "scrape_web" -> Lucide.Earth
-                    else -> Lucide.Wrench
+                    "search_web" -> HugeIcons.Search01
+                    "scrape_web" -> HugeIcons.Earth
+                    else -> HugeIcons.Wrench01
                 },
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),

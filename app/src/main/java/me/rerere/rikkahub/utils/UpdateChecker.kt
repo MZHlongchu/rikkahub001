@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import me.rerere.common.http.await
@@ -17,7 +18,10 @@ import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://updates.rikka-ai.com/"
+private const val GITHUB_OWNER = "yuxinjiang218-creator"
+private const val GITHUB_REPO = "rikkahub"
+private const val API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
+private val VERSION_REGEX = Regex("""\d+\.\d+\.\d+""")
 
 class UpdateChecker(private val client: OkHttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -31,6 +35,7 @@ class UpdateChecker(private val client: OkHttpClient) {
                         Request.Builder()
                             .url(API_URL)
                             .get()
+                            .addHeader("Accept", "application/vnd.github+json")
                             .addHeader(
                                 "User-Agent",
                                 "RikkaHub ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
@@ -38,7 +43,8 @@ class UpdateChecker(private val client: OkHttpClient) {
                             .build()
                     ).await()
                     if (response.isSuccessful) {
-                        json.decodeFromString<UpdateInfo>(response.body.string())
+                        val release = json.decodeFromString<GithubRelease>(response.body.string())
+                        release.toUpdateInfo()
                     } else {
                         throw Exception("Failed to fetch update info")
                     }
@@ -75,6 +81,65 @@ class UpdateChecker(private val client: OkHttpClient) {
             context.openUrl(download.url) // 跳转到下载页面
         }
     }
+}
+
+@Serializable
+private data class GithubRelease(
+    @SerialName("tag_name")
+    val tagName: String,
+    val name: String = "",
+    val body: String = "",
+    @SerialName("published_at")
+    val publishedAt: String? = null,
+    @SerialName("created_at")
+    val createdAt: String? = null,
+    val assets: List<GithubAsset> = emptyList()
+)
+
+@Serializable
+private data class GithubAsset(
+    val name: String,
+    @SerialName("browser_download_url")
+    val browserDownloadUrl: String,
+    val size: Long
+)
+
+private fun GithubRelease.toUpdateInfo(): UpdateInfo {
+    val version = normalizeVersion(tagName, name, BuildConfig.VERSION_NAME)
+    val downloads = assets
+        .filter { it.name.endsWith(".apk", ignoreCase = true) }
+        .map {
+            UpdateDownload(
+                name = it.name,
+                url = it.browserDownloadUrl,
+                size = formatSize(it.size)
+            )
+        }
+
+    return UpdateInfo(
+        version = version,
+        publishedAt = publishedAt ?: createdAt ?: "1970-01-01T00:00:00Z",
+        changelog = body.ifBlank { "No changelog." },
+        downloads = downloads
+    )
+}
+
+internal fun extractSemverCore(raw: String): String? {
+    return VERSION_REGEX.find(raw)?.value
+}
+
+internal fun normalizeVersion(tagName: String, releaseName: String, fallbackVersion: String): String {
+    return extractSemverCore(tagName)
+        ?: extractSemverCore(releaseName)
+        ?: fallbackVersion
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes < 1024) return "${bytes} B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format("%.1f KB", kb)
+    val mb = kb / 1024.0
+    return String.format("%.1f MB", mb)
 }
 
 @Serializable

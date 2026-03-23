@@ -28,14 +28,16 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.composables.icons.lucide.Copy
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Trash2
-import com.composables.icons.lucide.X
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.ChatNoticeKind
 import kotlin.uuid.Uuid
 
 @Composable
@@ -68,7 +70,7 @@ fun ErrorCardsDisplay(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            imageVector = Lucide.Trash2,
+                            imageVector = HugeIcons.Delete01,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.onErrorContainer,
@@ -104,14 +106,25 @@ fun ErrorCard(
 
     // 5 秒后自动消失
     LaunchedEffect(error.id) {
-        delay(5000)
+        delay(if (error.kind == ChatNoticeKind.SUCCESS) 4000 else 5000)
         onDismiss()
+    }
+
+    val containerColor = if (error.kind == ChatNoticeKind.SUCCESS) {
+        MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.errorContainer
+    }
+    val contentColor = if (error.kind == ChatNoticeKind.SUCCESS) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.onErrorContainer
     }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.errorContainer,
+        color = containerColor,
         shadowElevation = 4.dp,
     ) {
         Row(
@@ -121,14 +134,29 @@ fun ErrorCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                imageVector = if (error.kind == ChatNoticeKind.SUCCESS) HugeIcons.Tick01 else HugeIcons.Cancel01,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(18.dp),
+            )
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                if (error.title != null) {
+                    Text(
+                        text = error.title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = contentColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     text = error.error.message ?: "Unknown error",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    color = contentColor.copy(alpha = 0.82f),
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -145,9 +173,9 @@ fun ErrorCard(
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
-                    imageVector = Lucide.Copy,
+                    imageVector = HugeIcons.Copy01,
                     contentDescription = "Copy error message",
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    tint = contentColor,
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -156,9 +184,9 @@ fun ErrorCard(
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
-                    imageVector = Lucide.X,
+                    imageVector = HugeIcons.Cancel01,
                     contentDescription = stringResource(R.string.chat_page_dismiss_error),
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    tint = contentColor,
                     modifier = Modifier.size(18.dp),
                 )
             }

@@ -31,7 +31,8 @@ data class UIMessage(
 ) {
     private fun appendChunk(chunk: MessageChunk): UIMessage {
         val choice = chunk.choices.getOrNull(0)
-        return choice?.delta?.let { delta ->
+        val message = choice?.delta ?: choice?.message
+        return message?.let { delta ->
             // Handle Parts
             var newParts = delta.parts.fold(parts) { acc, deltaPart ->
                 when (deltaPart) {
@@ -150,11 +151,6 @@ data class UIMessage(
         return "[${role.name}]: " + parts.joinToString(separator = "\n") { part ->
             when (part) {
                 is UIMessagePart.Text -> part.text
-                is UIMessagePart.Tool -> {
-                    val outputText = part.output.filterIsInstance<UIMessagePart.Text>()
-                        .joinToString("\n") { it.text }
-                    "[Tool: ${part.toolName}] Input: ${part.input}\nOutput: $outputText"
-                }
                 else -> ""
             }
         }
@@ -169,8 +165,16 @@ data class UIMessage(
 
     fun getTools() = parts.filterIsInstance<UIMessagePart.Tool>()
 
-    fun isValidToUpload() = parts.any {
-        it !is UIMessagePart.Reasoning
+    fun isValidToUpload() = parts.any { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text.isNotBlank()
+            is UIMessagePart.Image -> part.url.isNotBlank()
+            is UIMessagePart.Video -> part.url.isNotBlank()
+            is UIMessagePart.Audio -> part.url.isNotBlank()
+            is UIMessagePart.Document -> part.url.isNotBlank()
+            is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
+            else -> true
+        }
     }
 
     inline fun <reified P : UIMessagePart> hasPart(): Boolean {
@@ -220,7 +224,7 @@ fun List<UIMessage>.handleMessageChunk(chunk: MessageChunk, model: Model? = null
     val choice = chunk.choices.getOrNull(0) ?: return this
     val message = choice.delta ?: choice.message ?: throw Exception("delta/message is null")
     if (this.last().role != message.role) {
-        return this + message.copy(modelId = model?.id)
+        return this + (UIMessage(modelId = model?.id, role = message.role, parts = emptyList()) + chunk)
     } else {
         val last = this.last() + chunk
         return this.dropLast(1) + last
@@ -262,11 +266,6 @@ fun List<UIMessagePart>.isEmptyUIMessage(): Boolean {
             else -> true
         }
     }
-}
-
-fun List<UIMessage>.truncate(index: Int): List<UIMessage> {
-    if (index < 0 || index > this.lastIndex) return this
-    return this.subList(index, this.size)
 }
 
 fun List<UIMessage>.limitContext(size: Int): List<UIMessage> {
@@ -314,6 +313,67 @@ fun List<UIMessage>.limitContext(size: Int): List<UIMessage> {
     return this.subList(adjustedStartIndex, this.size)
 }
 
+fun UIMessage.countsTowardKeepRecent(): Boolean {
+    if (role != MessageRole.USER && role != MessageRole.ASSISTANT) return false
+    return !parts.isEmptyUIMessage()
+}
+
+@Suppress("DEPRECATION")
+fun UIMessage.isToolDependencyMessage(): Boolean {
+    if (role == MessageRole.TOOL) return true
+    return parts.any { part ->
+        when (part) {
+            is UIMessagePart.Tool -> true
+            is UIMessagePart.ToolCall -> true
+            is UIMessagePart.ToolResult -> true
+            else -> false
+        }
+    }
+}
+
+fun List<UIMessage>.findKeepStartIndexForVisibleMessages(visibleMessageCount: Int): Int? {
+    if (visibleMessageCount <= 0) return size
+    if (isEmpty()) return null
+
+    var remainingVisibleMessages = visibleMessageCount
+    var keepStartIndex: Int? = null
+    for (index in lastIndex downTo 0) {
+        if (!this[index].countsTowardKeepRecent()) continue
+        remainingVisibleMessages--
+        if (remainingVisibleMessages == 0) {
+            keepStartIndex = index
+            break
+        }
+    }
+
+    val initialStartIndex = keepStartIndex ?: return null
+    var adjustedStartIndex = initialStartIndex
+    val visitedIndices = mutableSetOf<Int>()
+
+    while (adjustedStartIndex > 0 && visitedIndices.add(adjustedStartIndex)) {
+        var changed = false
+
+        while (adjustedStartIndex > 0 && this[adjustedStartIndex - 1].isToolDependencyMessage()) {
+            adjustedStartIndex--
+            changed = true
+        }
+
+        if (this[adjustedStartIndex].isToolDependencyMessage()) {
+            val userIndex = (adjustedStartIndex - 1 downTo 0).firstOrNull { index ->
+                this[index].role == MessageRole.USER && this[index].countsTowardKeepRecent()
+            }
+            if (userIndex != null) {
+                adjustedStartIndex = userIndex
+                changed = true
+            }
+        }
+
+        if (!changed) break
+    }
+
+    return adjustedStartIndex
+}
+
 @Serializable
 sealed class ToolApprovalState {
     @Serializable
@@ -331,6 +391,10 @@ sealed class ToolApprovalState {
     @Serializable
     @SerialName("denied")
     data class Denied(val reason: String = "") : ToolApprovalState()
+
+    @Serializable
+    @SerialName("answered")
+    data class Answered(val answer: String) : ToolApprovalState()
 }
 
 @Serializable
@@ -338,30 +402,35 @@ sealed class UIMessagePart {
     abstract val metadata: JsonObject?
 
     @Serializable
+    @SerialName("text")
     data class Text(
         val text: String,
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("image")
     data class Image(
         val url: String,
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("video")
     data class Video(
         val url: String,
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("audio")
     data class Audio(
         val url: String,
         override var metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("document")
     data class Document(
         val url: String,
         val fileName: String,
@@ -370,6 +439,7 @@ sealed class UIMessagePart {
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("reasoning")
     data class Reasoning(
         val reasoning: String,
         val createdAt: Instant = Clock.System.now(),
@@ -379,12 +449,14 @@ sealed class UIMessagePart {
 
     @Deprecated("Deprecated")
     @Serializable
+    @SerialName("search")
     data object Search : UIMessagePart() {
         override var metadata: JsonObject? = null
     }
 
     @Deprecated("Use UIMessagePart.Tool instead")
     @Serializable
+    @SerialName("tool_call")
     data class ToolCall(
         val toolCallId: String,
         val toolName: String,
@@ -405,6 +477,7 @@ sealed class UIMessagePart {
 
     @Deprecated("Use UIMessagePart.Tool instead")
     @Serializable
+    @SerialName("tool_result")
     data class ToolResult(
         val toolCallId: String,
         val toolName: String,
@@ -414,6 +487,7 @@ sealed class UIMessagePart {
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("tool")
     data class Tool(
         val toolCallId: String,
         val toolName: String,

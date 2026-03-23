@@ -20,31 +20,33 @@ data class Assistant(
     val systemPrompt: String = "",
     val temperature: Float? = null,
     val topP: Float? = null,
-    val contextMessageSize: Int = 64,
+    val contextMessageSize: Int = 0,
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
     val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆
     val enableRecentChatsReference: Boolean = false,
+    val enableKnowledgeBaseTool: Boolean = false,
     val messageTemplate: String = "{{ message }}",
     val presetMessages: List<UIMessage> = emptyList(),
-    val quickMessages: List<QuickMessage> = emptyList(),
+    val quickMessageIds: Set<Uuid> = emptySet(),
     val regexes: List<AssistantRegex> = emptyList(),
     val thinkingBudget: Int? = 1024,
     val maxTokens: Int? = null,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBodies: List<CustomBody> = emptyList(),
     val mcpServers: Set<Uuid> = emptySet(),
-    val localTools: List<LocalToolOption> = listOf(
-        LocalToolOption.TimeInfo,
-        LocalToolOption.ChaquoPy  // 默认启用ChaquoPy，保持向后兼容
-    ),
+    val localTools: List<LocalToolOption> = listOf(LocalToolOption.TimeInfo),
     val background: String? = null,
+    val backgroundOpacity: Float = 1.0f,
     val modeInjectionIds: Set<Uuid> = emptySet(),      // 关联的模式注入 ID
     val lorebookIds: Set<Uuid> = emptySet(),            // 关联的 Lorebook ID
+    val enabledSkills: Set<String> = emptySet(),        // 启用的 skill 名称列表
+    val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
 )
 
 @Serializable
 data class QuickMessage(
+    val id: Uuid = Uuid.random(),
     val title: String = "",
     val content: String = "",
 )

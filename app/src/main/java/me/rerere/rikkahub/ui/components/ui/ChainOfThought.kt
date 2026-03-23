@@ -9,26 +9,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocal
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,16 +39,32 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.fastForEach
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
-import com.composables.icons.lucide.ChevronDown
-import com.composables.icons.lucide.ChevronRight
-import com.composables.icons.lucide.ChevronUp
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Search
-import com.composables.icons.lucide.Sparkles
 
 private val LocalCardColor = staticCompositionLocalOf { Color.White }
 
+/**
+ * 以时间线/步骤卡片的形式展示一组思考过程。
+ *
+ * 适用于承载推理步骤、工具调用步骤，或两者混合的链式内容。组件支持：
+ * - 在步骤较多时自动折叠，仅展示最后若干步
+ * - 点击顶部控制条展开/收起全部步骤
+ * - 通过 [collapsedAdaptiveWidth] 控制折叠态是否保持自适应宽度
+ *
+ * @param modifier 外层卡片的修饰符
+ * @param cardColors 卡片配色
+ * @param steps 需要渲染的步骤数据列表
+ * @param collapsedVisibleCount 折叠时保留可见的尾部步骤数
+ * @param collapsedAdaptiveWidth 是否在折叠态下使用内容自适应宽度
+ * @param content 每个步骤的具体 UI，由 [ChainOfThoughtScope] 提供步骤构建能力
+ */
 @Composable
 fun <T> ChainOfThought(
     modifier: Modifier = Modifier,
@@ -63,10 +73,12 @@ fun <T> ChainOfThought(
     ),
     steps: List<T>,
     collapsedVisibleCount: Int = 2,
+    collapsedAdaptiveWidth: Boolean = false,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val canCollapse = steps.size > collapsedVisibleCount
+    val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
     CompositionLocalProvider(
         LocalCardColor provides cardColors.containerColor
@@ -77,8 +89,10 @@ fun <T> ChainOfThought(
         ) {
             Column(
                 modifier = Modifier
-                    .padding(8.dp)
-                    .animateContentSize(),
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .animateContentSize(
+                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                    ),
             ) {
                 val visibleSteps = if (expanded || !canCollapse) {
                     steps
@@ -90,7 +104,13 @@ fun <T> ChainOfThought(
                 if (canCollapse) {
                     Row(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .then(
+                                if (shouldFillCollapseControlWidth) {
+                                    Modifier.fillMaxWidth()
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .clip(MaterialTheme.shapes.small)
                             .clickable { expanded = !expanded }
                             .padding(vertical = 4.dp),
@@ -102,7 +122,7 @@ fun <T> ChainOfThought(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                imageVector = if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                                imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.primary,
@@ -141,7 +161,7 @@ fun <T> ChainOfThought(
                     }
                 ) {
                     Column {
-                        visibleSteps.forEach { step ->
+                        visibleSteps.fastForEach { step ->
                             scope.content(step)
                         }
                     }
@@ -151,9 +171,22 @@ fun <T> ChainOfThought(
     }
 }
 
+/**
+ * [ChainOfThought] 内部使用的步骤渲染作用域。
+ *
+ * 通过该作用域可以声明单个步骤的图标、标题、附加信息以及可展开内容，
+ * 并复用统一的时间线布局与交互行为。
+ */
 interface ChainOfThoughtScope {
     /**
-     * 非受控 step：内部管理展开状态
+     * 声明一个非受控步骤，由组件内部管理展开/折叠状态。
+     *
+     * @param icon 步骤图标
+     * @param label 步骤标题区域
+     * @param extra 标题右侧的附加信息
+     * @param onClick 自定义点击行为；设置后优先于展开/折叠逻辑
+     * @param collapsedAdaptiveWidth 是否在折叠且内容隐藏时使用自适应宽度
+     * @param content 步骤展开后显示的内容；为 `null` 时步骤不可展开
      */
     @Composable
     fun ChainOfThoughtStep(
@@ -161,11 +194,24 @@ interface ChainOfThoughtScope {
         label: (@Composable () -> Unit),
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
+        collapsedAdaptiveWidth: Boolean = false,
         content: (@Composable () -> Unit)? = null,
     )
 
     /**
-     * 受控 step：外部控制展开状态
+     * 声明一个受控步骤，由外部传入展开状态。
+     *
+     * 适合需要与外部状态联动的场景，例如“推理中预览 / 完成后收起”。
+     *
+     * @param expanded 当前是否处于展开状态
+     * @param onExpandedChange 展开状态变化回调
+     * @param icon 步骤图标
+     * @param label 步骤标题区域
+     * @param extra 标题右侧的附加信息
+     * @param onClick 自定义点击行为；设置后优先于展开/折叠逻辑
+     * @param collapsedAdaptiveWidth 是否在折叠且内容隐藏时使用自适应宽度
+     * @param contentVisible 是否展示内容区域，可与 [expanded] 解耦
+     * @param content 步骤内容；为 `null` 时步骤不可展开
      */
     @Composable
     fun ControlledChainOfThoughtStep(
@@ -175,6 +221,7 @@ interface ChainOfThoughtScope {
         label: (@Composable () -> Unit),
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
+        collapsedAdaptiveWidth: Boolean = false,
         contentVisible: Boolean = expanded,
         content: (@Composable () -> Unit)? = null,
     )
@@ -187,6 +234,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        collapsedAdaptiveWidth: Boolean,
         content: @Composable (() -> Unit)?
     ) {
         var expanded by remember { mutableStateOf(false) }
@@ -195,6 +243,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             label = label,
             extra = extra,
             onClick = onClick,
+            collapsedAdaptiveWidth = collapsedAdaptiveWidth,
             expanded = expanded,
             onExpandedChange = { expanded = it },
             contentVisible = expanded,
@@ -210,6 +259,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        collapsedAdaptiveWidth: Boolean,
         contentVisible: Boolean,
         content: @Composable (() -> Unit)?
     ) {
@@ -218,6 +268,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             label = label,
             extra = extra,
             onClick = onClick,
+            collapsedAdaptiveWidth = collapsedAdaptiveWidth,
             expanded = expanded,
             onExpandedChange = onExpandedChange,
             contentVisible = contentVisible,
@@ -231,20 +282,34 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        collapsedAdaptiveWidth: Boolean,
         expanded: Boolean,
         onExpandedChange: (Boolean) -> Unit,
         contentVisible: Boolean,
         content: @Composable (() -> Unit)?
     ) {
         val hasContent = content != null
+        val shouldFillMaxWidth = !collapsedAdaptiveWidth || contentVisible
 
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.then(
+                if (shouldFillMaxWidth) {
+                    Modifier.fillMaxWidth()
+                } else {
+                    Modifier
+                }
+            ),
         ) {
             // Label 行：Icon + Label + Extra + 指示器
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .then(
+                        if (shouldFillMaxWidth) {
+                            Modifier.fillMaxWidth()
+                        } else {
+                            Modifier
+                        }
+                    )
                     .then(
                         if (onClick != null) {
                             Modifier
@@ -292,7 +357,15 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 }
 
                 // Label
-                Box(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier.then(
+                        if (shouldFillMaxWidth) {
+                            Modifier.weight(1f)
+                        } else {
+                            Modifier
+                        }
+                    )
+                ) {
                     label()
                 }
 
@@ -304,14 +377,14 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 // 指示器：onClick 显示向右箭头，content 显示展开/折叠箭头
                 if (onClick != null) {
                     Icon(
-                        imageVector = Lucide.ChevronRight,
+                        imageVector = HugeIcons.ArrowRight01,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (hasContent) {
                     Icon(
-                        imageVector = if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -323,10 +396,16 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             if (contentVisible && hasContent) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .then(
+                            if (shouldFillMaxWidth) {
+                                Modifier.fillMaxWidth()
+                            } else {
+                                Modifier
+                            }
+                        )
                         .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
                 ) {
-                    content?.invoke()
+                    content()
                 }
             }
         }
@@ -367,11 +446,17 @@ private fun ChainOfThoughtPreview() {
                         .fillMaxWidth()
                         .padding(16.dp),
                     steps = listOf(
-                        StepData("Searching the web", Lucide.Search, "3 results", hasContent = true),
-                        StepData("Reading documents", Lucide.Sparkles, "Completed", hasOnClick = true),
-                        StepData("Analyzing results (controlled)", Lucide.Sparkles, "In progress", hasContent = true, controlled = true),
+                        StepData("Searching the web", HugeIcons.Search01, "3 results", hasContent = true),
+                        StepData("Reading documents", HugeIcons.Sparkles, "Completed", hasOnClick = true),
+                        StepData(
+                            "Analyzing results (controlled)",
+                            HugeIcons.Sparkles,
+                            "In progress",
+                            hasContent = true,
+                            controlled = true
+                        ),
                         StepData("Step without icon", null, null),
-                        StepData("Final step", Lucide.Sparkles, "Done"),
+                        StepData("Final step", HugeIcons.Sparkles, "Done"),
                     ),
                     collapsedVisibleCount = 2,
                 ) { step ->

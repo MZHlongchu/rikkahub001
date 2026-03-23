@@ -19,9 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardColors
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -51,18 +48,16 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
-import com.composables.icons.lucide.File
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Music
-import com.composables.icons.lucide.Video
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.serialization.json.jsonArray
@@ -74,11 +69,14 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyUIMessage
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -89,6 +87,7 @@ import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.extendColors
+import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.base64Encode
 import me.rerere.rikkahub.utils.openUrl
@@ -99,29 +98,34 @@ import kotlin.time.Duration.Companion.milliseconds
 @Composable
 fun ChatMessage(
     node: MessageNode,
-    conversation: Conversation,
     modifier: Modifier = Modifier,
     loading: Boolean = false,
     model: Model? = null,
     assistant: Assistant? = null,
+    lastMessage: Boolean = false,
     onFork: () -> Unit,
     onRegenerate: () -> Unit,
     onEdit: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
     onUpdate: (MessageNode) -> Unit,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
-    val chatMessages = conversation.currentMessages
-    val messageIndex = chatMessages.indexOf(message)
-    val lastMessage = messageIndex == chatMessages.lastIndex
     val settings = LocalSettings.current.displaySetting
     val textStyle = LocalTextStyle.current.copy(
         fontSize = LocalTextStyle.current.fontSize * settings.fontSizeRatio,
-        lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio
+        lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio,
+        fontFamily = when (settings.chatFontFamily) {
+            ChatFontFamily.DEFAULT -> FontFamily.Default
+            ChatFontFamily.SERIF -> FontFamily.Serif
+            ChatFontFamily.MONOSPACE -> FontFamily.Monospace
+        }
     )
     var showActionsSheet by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
@@ -142,8 +146,6 @@ fun ChatMessage(
             ) {
                 ChatMessageAssistantAvatar(
                     message = message,
-                    messages = chatMessages,
-                    messageIndex = messageIndex,
                     model = model,
                     assistant = assistant,
                     loading = loading,
@@ -151,8 +153,6 @@ fun ChatMessage(
                 )
                 ChatMessageUserAvatar(
                     message = message,
-                    messages = chatMessages,
-                    messageIndex = messageIndex,
                     avatar = settings.userAvatar,
                     nickname = settings.userNickname,
                     modifier = Modifier.weight(1f)
@@ -165,11 +165,11 @@ fun ChatMessage(
                 role = message.role,
                 parts = message.parts,
                 annotations = message.annotations,
-                messages = chatMessages,
-                messageIndex = messageIndex,
                 loading = loading,
                 model = model,
                 onToolApproval = onToolApproval,
+                onToolAnswer = onToolAnswer,
+                onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
             )
 
             message.translation?.let { translation ->
@@ -223,6 +223,8 @@ fun ChatMessage(
             onSelectAndCopy = {
                 showSelectCopySheet = true
             },
+            isFavorite = isFavorite,
+            onToggleFavorite = onToggleFavorite,
             onWebViewPreview = {
                 val textContent = message.parts
                     .filterIsInstance<UIMessagePart.Text>()
@@ -261,17 +263,22 @@ private fun MessagePartsBlock(
     model: Model?,
     parts: List<UIMessagePart>,
     annotations: List<UIMessageAnnotation>,
-    messages: List<UIMessage>,
-    messageIndex: Int,
     loading: Boolean,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onUserMessageClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
 
-    fun handleClickCitation(citationId: String) {
-        messages.forEach { message ->
-            message.parts.forEach { part ->
+    // 消息输出HapticFeedback
+    val hapticFeedback = LocalHapticFeedback.current
+    val settings = LocalSettings.current
+    val partsState by rememberUpdatedState(parts)
+
+    val handleClickCitation: (String) -> Unit = remember {
+        handler@{ citationId ->
+            partsState.forEach { part ->
                 if (part is UIMessagePart.Tool && part.toolName == "search_web" && part.isExecuted) {
                     val outputText = part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
                     val items =
@@ -282,18 +289,13 @@ private fun MessagePartsBlock(
                         val url = item.jsonObject["url"]?.jsonPrimitive?.content ?: return@forEach
                         if (citationId == id) {
                             context.openUrl(url)
-                            return
+                            return@handler
                         }
                     }
                 }
             }
         }
     }
-
-    // 消息输出HapticFeedback
-    val hapticFeedback = LocalHapticFeedback.current
-    val settings = LocalSettings.current
-    val partsState by rememberUpdatedState(parts)
     LaunchedEffect(settings.displaySetting) {
         snapshotFlow { partsState }
             .debounce(50.milliseconds)
@@ -310,9 +312,11 @@ private fun MessagePartsBlock(
         when (block) {
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
+                    val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
                     ChainOfThought(
                         modifier = Modifier.animateContentSize(),
                         steps = block.steps,
+                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
                     ) { step ->
                         when (step) {
                             is ThinkingStep.ReasoningStep -> {
@@ -321,6 +325,7 @@ private fun MessagePartsBlock(
                                         reasoning = step.reasoning,
                                         model = model,
                                         assistant = assistant,
+                                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
                                     )
                                 }
                             }
@@ -331,6 +336,7 @@ private fun MessagePartsBlock(
                                         tool = step.tool,
                                         loading = loading && !step.tool.isExecuted,
                                         onToolApproval = onToolApproval,
+                                        onToolAnswer = onToolAnswer,
                                     )
                                 }
                             }
@@ -339,191 +345,193 @@ private fun MessagePartsBlock(
                 }
             }
 
-            is MessagePartBlock.ContentBlock -> when (val part = block.part) {
-                is UIMessagePart.Text -> {
-                    SelectionContainer {
-                        if (role == MessageRole.USER) {
-                            Card(
-                                modifier = Modifier.animateContentSize(),
-                                shape = MaterialTheme.shapes.medium,
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp)) {
-                                    MarkdownBlock(
-                                        content = part.text.replaceRegexes(
-                                            assistant = assistant,
-                                            scope = AssistantAffectScope.USER,
-                                            visual = true,
-                                        ),
-                                        onClickCitation = { id -> handleClickCitation(id) }
-                                    )
-                                }
-                            }
-                        } else {
-                            if (settings.displaySetting.showAssistantBubble) {
-                                Card(
+            is MessagePartBlock.ContentBlock -> key(block.index) {
+                when (val part = block.part) {
+                    is UIMessagePart.Text -> {
+                        SelectionContainer {
+                            if (role == MessageRole.USER) {
+                                Surface(
                                     modifier = Modifier.animateContentSize(),
                                     shape = MaterialTheme.shapes.medium,
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    )
+                                    tonalElevation = 2.dp,
+                                    onClick = { onUserMessageClick?.invoke() },
                                 ) {
                                     Column(modifier = Modifier.padding(8.dp)) {
                                         MarkdownBlock(
                                             content = part.text.replaceRegexes(
                                                 assistant = assistant,
-                                                scope = AssistantAffectScope.ASSISTANT,
+                                                scope = AssistantAffectScope.USER,
                                                 visual = true,
                                             ),
-                                            onClickCitation = { id -> handleClickCitation(id) },
+                                            onClickCitation = handleClickCitation
                                         )
                                     }
                                 }
                             } else {
-                                MarkdownBlock(
-                                    content = part.text.replaceRegexes(
-                                        assistant = assistant,
-                                        scope = AssistantAffectScope.ASSISTANT,
-                                        visual = true,
-                                    ),
-                                    onClickCitation = { id -> handleClickCitation(id) },
-                                    modifier = Modifier
-                                        .animateContentSize()
-                                )
-                            }
-                        }
-                    }
-                }
-
-                is UIMessagePart.Video -> {
-                    Surface(
-                        tonalElevation = 2.dp,
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW)
-                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            intent.data = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                part.url.toUri().toFile()
-                            )
-                            val chooserIndent = Intent.createChooser(intent, null)
-                            context.startActivity(chooserIndent)
-                        },
-                        modifier = Modifier,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                            Icon(Lucide.Video, null)
-                        }
-                    }
-                }
-
-                is UIMessagePart.Audio -> {
-                    Surface(
-                        tonalElevation = 2.dp,
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW)
-                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            intent.data = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                part.url.toUri().toFile()
-                            )
-                            val chooserIndent = Intent.createChooser(intent, null)
-                            context.startActivity(chooserIndent)
-                        },
-                        modifier = Modifier,
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.secondaryContainer
-                    ) {
-                        ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Lucide.Music,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                is UIMessagePart.Image -> {
-                    ZoomableAsyncImage(
-                        model = part.url,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .clip(MaterialTheme.shapes.medium)
-                            .height(72.dp)
-                    )
-                }
-
-                is UIMessagePart.Document -> {
-                    Surface(
-                        tonalElevation = 2.dp,
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW)
-                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            intent.data = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                part.url.toUri().toFile()
-                            )
-                            val chooserIndent = Intent.createChooser(intent, null)
-                            context.startActivity(chooserIndent)
-                        },
-                        modifier = Modifier,
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.tertiaryContainer
-                    ) {
-                        ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                when (part.mime) {
-                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> {
-                                        Icon(
-                                            painter = painterResource(R.drawable.docx),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                                if (settings.displaySetting.showAssistantBubble) {
+                                    Surface(
+                                        modifier = Modifier.animateContentSize(),
+                                        shape = MaterialTheme.shapes.medium,
+                                        tonalElevation = 2.dp,
+                                    ) {
+                                        Column(modifier = Modifier.padding(8.dp)) {
+                                            MarkdownBlock(
+                                                content = part.text.replaceRegexes(
+                                                    assistant = assistant,
+                                                    scope = AssistantAffectScope.ASSISTANT,
+                                                    visual = true,
+                                                ),
+                                                onClickCitation = handleClickCitation,
+                                            )
+                                        }
                                     }
-
-                                    "application/pdf" -> {
-                                        Icon(
-                                            painter = painterResource(R.drawable.pdf),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-
-                                    else -> {
-                                        Icon(
-                                            imageVector = Lucide.File,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
+                                } else {
+                                    MarkdownBlock(
+                                        content = part.text.replaceRegexes(
+                                            assistant = assistant,
+                                            scope = AssistantAffectScope.ASSISTANT,
+                                            visual = true,
+                                        ),
+                                        onClickCitation = handleClickCitation,
+                                        modifier = Modifier
+                                            .animateContentSize()
+                                    )
                                 }
-
-                                Text(
-                                    text = part.fileName,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.widthIn(max = 200.dp)
-                                )
                             }
                         }
                     }
-                }
 
-                else -> {
-                    // Skip unknown part types (e.g., deprecated ToolCall, ToolResult, Search)
+                    is UIMessagePart.Video -> {
+                        Surface(
+                            tonalElevation = 2.dp,
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW)
+                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                intent.data = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    part.url.toUri().toFile()
+                                )
+                                val chooserIndent = Intent.createChooser(intent, null)
+                                context.startActivity(chooserIndent)
+                            },
+                            modifier = Modifier,
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                                Icon(HugeIcons.Video01, null)
+                            }
+                        }
+                    }
+
+                    is UIMessagePart.Audio -> {
+                        Surface(
+                            tonalElevation = 2.dp,
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW)
+                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                intent.data = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    part.url.toUri().toFile()
+                                )
+                                val chooserIndent = Intent.createChooser(intent, null)
+                                context.startActivity(chooserIndent)
+                            },
+                            modifier = Modifier,
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.MusicNote03,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    is UIMessagePart.Image -> {
+                        ZoomableAsyncImage(
+                            model = part.url,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .clip(MaterialTheme.shapes.medium)
+                                .height(72.dp)
+                        )
+                    }
+
+                    is UIMessagePart.Document -> {
+                        Surface(
+                            tonalElevation = 2.dp,
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW)
+                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                intent.data = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    part.url.toUri().toFile()
+                                )
+                                val chooserIndent = Intent.createChooser(intent, null)
+                                context.startActivity(chooserIndent)
+                            },
+                            modifier = Modifier,
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.tertiaryContainer
+                        ) {
+                            ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    when (part.mime) {
+                                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> {
+                                            Icon(
+                                                painter = painterResource(R.drawable.docx),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+
+                                        "application/pdf" -> {
+                                            Icon(
+                                                painter = painterResource(R.drawable.pdf),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+
+                                        else -> {
+                                            Icon(
+                                                imageVector = HugeIcons.File02,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = part.fileName,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 200.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        // Skip unknown part types (e.g., deprecated ToolCall, ToolResult, Search)
+                    }
                 }
             }
         }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -33,20 +34,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Pencil
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Edit03
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
-import me.rerere.rikkahub.utils.createChatFilesByContents
+import org.koin.compose.koinInject
 
 @Composable
 fun TextAvatar(
@@ -64,7 +66,7 @@ fun TextAvatar(
     ) {
         Text(
             text = text.take(1).uppercase(),
-            color = MaterialTheme.colorScheme.onSecondary,
+            color = LocalContentColor.current,
             maxLines = 1,
             overflow = TextOverflow.Clip,
             autoSize = TextAutoSize.StepBased(
@@ -86,7 +88,7 @@ fun UIAvatar(
     onUpdate: ((Avatar) -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {
-    val context = LocalContext.current
+    val filesManager: FilesManager = koinInject()
     var showPickOption by remember { mutableStateOf(false) }
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
@@ -96,7 +98,7 @@ fun UIAvatar(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            val localUris = context.createChatFilesByContents(listOf(it))
+            val localUris = filesManager.createChatFilesByContents(listOf(it))
             localUris.firstOrNull()?.let { localUri ->
                 onUpdate?.invoke(Avatar.Image(localUri.toString()))
             }
@@ -135,8 +137,9 @@ fun UIAvatar(
                                 minFontSize = 15.sp,
                                 maxFontSize = 30.sp,
                             ),
-                            lineHeight = 1.em,
-                            modifier = Modifier.padding(2.dp)
+                            lineHeight = 0.8.em,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(5.dp)
                         )
                     }
 
@@ -165,7 +168,7 @@ fun UIAvatar(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Lucide.Pencil,
+                    imageVector = HugeIcons.Edit03,
                     contentDescription = "Edit",
                     modifier = Modifier
                         .size(10.dp)

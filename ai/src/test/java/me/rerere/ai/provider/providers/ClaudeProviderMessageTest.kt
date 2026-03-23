@@ -1,10 +1,15 @@
 package me.rerere.ai.provider.providers
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import okhttp3.OkHttpClient
@@ -40,6 +45,22 @@ class ClaudeProviderMessageTest {
         )
         method.isAccessible = true
         return method.invoke(provider, messages) as JsonArray
+    }
+
+    private fun invokeBuildMessageRequest(
+        providerSetting: ProviderSetting.Claude,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): JsonObject {
+        val method = ClaudeProvider::class.java.getDeclaredMethod(
+            "buildMessageRequest",
+            ProviderSetting.Claude::class.java,
+            List::class.java,
+            TextGenerationParams::class.java,
+            Boolean::class.javaPrimitiveType,
+        )
+        method.isAccessible = true
+        return method.invoke(provider, providerSetting, messages, params, false) as JsonObject
     }
 
     @Test
@@ -347,7 +368,123 @@ class ClaudeProviderMessageTest {
         assertEquals("Hello, how are you?", textBlock?.get("text")?.jsonPrimitive?.content)
     }
 
+    @Test
+    fun `kimi claude replay should reuse prior reasoning for later tool segments`() {
+        val request = invokeBuildMessageRequest(
+            providerSetting = ProviderSetting.Claude(baseUrl = "https://api.kimi.com/coding/v1"),
+            messages = listOf(
+                UIMessage.user("Teach me calculus"),
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(
+                        UIMessagePart.Reasoning("I should inspect the document list first."),
+                        UIMessagePart.Text("I will inspect the knowledge base first."),
+                        createExecutedTool("kb_call_1", "list_knowledge_base_documents", "{}", """{"returned_count":1}"""),
+                        UIMessagePart.Text("Now I will search the selected document."),
+                        createExecutedTool("kb_call_2", "search_knowledge_base", """{"query":"limits"}""", """{"result_quality":"good"}"""),
+                    )
+                )
+            ),
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "kimi-k2",
+                    abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+                ),
+                thinkingBudget = 1024,
+            )
+        )
+
+        val assistantToolMessages = assistantMessagesWithToolUse(request["messages"]!!.jsonArray)
+        assertEquals(2, assistantToolMessages.size)
+        assistantToolMessages.forEach { message ->
+            assertTrue(
+                message["content"]!!.jsonArray.any {
+                    it.jsonObject["type"]?.jsonPrimitive?.content == "thinking"
+                }
+            )
+        }
+    }
+
+    @Test
+    fun `kimi claude replay should use latest reasoning segment when available`() {
+        val request = invokeBuildMessageRequest(
+            providerSetting = ProviderSetting.Claude(baseUrl = "https://api.kimi.com/coding/v1"),
+            messages = listOf(
+                UIMessage.user("Teach me calculus"),
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(
+                        UIMessagePart.Reasoning("First reasoning"),
+                        UIMessagePart.Text("First action"),
+                        createExecutedTool("kb_call_1", "list_knowledge_base_documents", "{}", """{"returned_count":1}"""),
+                        UIMessagePart.Reasoning("Second reasoning"),
+                        UIMessagePart.Text("Second action"),
+                        createExecutedTool("kb_call_2", "search_knowledge_base", """{"query":"derivative"}""", """{"result_quality":"good"}"""),
+                    )
+                )
+            ),
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "kimi-k2",
+                    abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+                ),
+                thinkingBudget = 1024,
+            )
+        )
+
+        val assistantToolMessages = assistantMessagesWithToolUse(request["messages"]!!.jsonArray)
+        assertEquals(2, assistantToolMessages.size)
+        val secondThinking = assistantToolMessages[1]["content"]!!.jsonArray.first {
+            it.jsonObject["type"]?.jsonPrimitive?.content == "thinking"
+        }.jsonObject["thinking"]!!.jsonPrimitive.content
+        assertEquals("Second reasoning", secondThinking)
+    }
+
+    @Test
+    fun `anthropic replay should keep existing tool segment structure`() {
+        val request = invokeBuildMessageRequest(
+            providerSetting = ProviderSetting.Claude(baseUrl = "https://api.anthropic.com/v1"),
+            messages = listOf(
+                UIMessage.user("Teach me calculus"),
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(
+                        UIMessagePart.Reasoning("I should inspect the document list first."),
+                        UIMessagePart.Text("I will inspect the knowledge base first."),
+                        createExecutedTool("kb_call_1", "list_knowledge_base_documents", "{}", """{"returned_count":1}"""),
+                        UIMessagePart.Text("Now I will search the selected document."),
+                        createExecutedTool("kb_call_2", "search_knowledge_base", """{"query":"limits"}""", """{"result_quality":"good"}"""),
+                    )
+                )
+            ),
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "claude-sonnet",
+                    abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+                ),
+                thinkingBudget = 1024,
+            )
+        )
+
+        val assistantToolMessages = assistantMessagesWithToolUse(request["messages"]!!.jsonArray)
+        assertEquals(2, assistantToolMessages.size)
+        assertTrue(
+            assistantToolMessages[1]["content"]!!.jsonArray.none {
+                it.jsonObject["type"]?.jsonPrimitive?.content == "thinking"
+            }
+        )
+    }
+
     // ==================== Helper Functions ====================
+
+    private fun assistantMessagesWithToolUse(messages: JsonArray): List<JsonObject> {
+        return messages.mapNotNull { message ->
+            val obj = message.jsonObject
+            if (obj["role"]?.jsonPrimitive?.content != "assistant") return@mapNotNull null
+            val content = obj["content"]?.jsonArray ?: return@mapNotNull null
+            if (content.any { it.jsonObject["type"]?.jsonPrimitive?.content == "tool_use" }) obj else null
+        }
+    }
 
     private fun createExecutedTool(
         callId: String,

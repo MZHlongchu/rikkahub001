@@ -28,7 +28,6 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.handleMessageChunk
 import me.rerere.ai.ui.limitContext
-import me.rerere.ai.ui.truncate
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -41,9 +40,6 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
-import me.rerere.rikkahub.data.model.WorkflowPhase
-import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.data.ai.tools.ToolGuard
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.util.Locale
@@ -63,7 +59,6 @@ class GenerationHandler(
     private val providerManager: ProviderManager,
     private val json: Json,
     private val memoryRepo: MemoryRepository,
-    private val conversationRepo: ConversationRepository,
     private val aiLoggingManager: AILoggingManager,
 ) {
     fun generateText(
@@ -74,11 +69,10 @@ class GenerationHandler(
         outputTransformers: List<OutputMessageTransformer> = emptyList(),
         assistant: Assistant,
         memories: List<AssistantMemory>? = null,
+        dialogueSummaryText: String? = null,
+        legacyRollingSummaryJson: String? = null,
         tools: List<Tool> = emptyList(),
-        truncateIndex: Int = -1,
         maxSteps: Int = 256,
-        workflowPhase: WorkflowPhase? = null,  // Workflow 阶段，null 表示未启用
-        conversationId: String = "",  // 对话ID，用于沙箱文件操作等
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -114,7 +108,7 @@ class GenerationHandler(
 
             // Check if we have approved tool calls to execute (resuming after approval)
             val pendingTools = messages.lastOrNull()?.getTools()?.filter {
-                !it.isExecuted && (it.approvalState is ToolApprovalState.Approved || it.approvalState is ToolApprovalState.Denied)
+                !it.isExecuted && (it.approvalState is ToolApprovalState.Approved || it.approvalState is ToolApprovalState.Denied || it.approvalState is ToolApprovalState.Answered)
             } ?: emptyList()
 
             val toolsToProcess: List<UIMessagePart.Tool>
@@ -151,10 +145,9 @@ class GenerationHandler(
                     provider = provider,
                     tools = toolsInternal,
                     memories = memories ?: emptyList(),
-                    truncateIndex = truncateIndex,
-                    stream = assistant.streamOutput,
-                    workflowPhase = workflowPhase,  // 传递Workflow阶段
-                    conversationId = conversationId  // 传递对话ID
+                    dialogueSummaryText = dialogueSummaryText.orEmpty(),
+                    legacyRollingSummaryJson = legacyRollingSummaryJson.orEmpty(),
+                    stream = assistant.streamOutput
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -226,7 +219,9 @@ class GenerationHandler(
             } else {
                 // Resuming after approval - use the pending tools directly
                 Log.i(TAG, "generateText: resuming with ${pendingTools.size} approved/denied tools")
-                toolsToProcess = messages.last().getTools().filter { !it.isExecuted }
+                toolsToProcess = messages.last().getTools().filter {
+                    !it.isExecuted && (it.approvalState is ToolApprovalState.Approved || it.approvalState is ToolApprovalState.Denied || it.approvalState is ToolApprovalState.Answered)
+                }
             }
 
             // Handle tools (execute approved tools, handle denied tools)
@@ -252,6 +247,16 @@ class GenerationHandler(
                         )
                     }
 
+                    is ToolApprovalState.Answered -> {
+                        // Tool was answered by user (e.g., ask_user tool)
+                        val answer = (tool.approvalState as ToolApprovalState.Answered).answer
+                        executedTools += tool.copy(
+                            output = listOf(
+                                UIMessagePart.Text(answer)
+                            )
+                        )
+                    }
+
                     is ToolApprovalState.Pending -> {
                         // Should not reach here, but just in case
                     }
@@ -262,32 +267,20 @@ class GenerationHandler(
                             val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
                                 ?: error("Tool ${tool.toolName} not found")
                             val args = json.parseToJsonElement(tool.input.ifBlank { "{}" })
-
-                            // Workflow权限检查
-                            if (workflowPhase != null) {
-                                val operation = ToolGuard.extractOperation(tool.toolName, tool.input)
-                                if (!ToolGuard.isAllowed(workflowPhase, tool.toolName, operation)) {
-                                    throw SecurityException(ToolGuard.getBlockedReason(workflowPhase, tool.toolName, operation))
-                                }
-                            }
-
                             Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
                             val result = toolDef.execute(args)
                             executedTools += tool.copy(output = result)
-                        }.onFailure {
-                            it.printStackTrace()
+                        }.onFailure { error ->
+                            Log.e(TAG, "generateText: tool ${tool.toolName} failed", error)
+                            val shortMessage = error.message?.take(240)?.ifBlank { null }
+                                ?: "tool execution failed"
                             executedTools += tool.copy(
                                 output = listOf(
                                     UIMessagePart.Text(
                                         json.encodeToString(
                                             buildJsonObject {
-                                                put(
-                                                    "error",
-                                                    JsonPrimitive(buildString {
-                                                        append("[${it.javaClass.name}] ${it.message}")
-                                                        append("\n${it.stackTraceToString()}")
-                                                    })
-                                                )
+                                                put("error", JsonPrimitive(shortMessage))
+                                                put("error_code", JsonPrimitive("TOOL_EXECUTION_FAILED"))
                                             }
                                         )
                                     )
@@ -326,61 +319,6 @@ class GenerationHandler(
 
     }.flowOn(Dispatchers.IO)
 
-    /**
-     * 构建Workflow阶段提示
-     * 根据当前阶段(PLAN/EXECUTE/REVIEW)向AI说明可用的操作范围
-     */
-    private fun buildWorkflowPhasePrompt(phase: WorkflowPhase): String {
-        return when (phase) {
-            WorkflowPhase.PLAN -> """
-
-                [当前工作流阶段: PLAN - 规划阶段]
-                在此阶段你只能执行只读操作来分析和规划：
-                - ✅ 可以：查看文件内容、列出目录结构、检查文件状态
-                - ✅ 可以：使用 git status/log 查看版本历史
-                - ✅ 可以：读取数据分析需求
-                - ❌ 不能：写入/修改/删除文件或目录
-                - ❌ 不能：执行 Python/Shell 代码
-                - ❌ 不能：安装 pip 包或使用 apk/apt
-                - ❌ 不能：执行 git add/commit/push 等写操作
-
-                如果你需要执行上述被禁止的操作，请明确告诉用户："需要切换到 EXECUTE 阶段才能执行此操作"。
-                建议：在此阶段先制定完整的执行计划，列出需要修改的文件和步骤。
-            """.trimIndent()
-
-            WorkflowPhase.EXECUTE -> """
-
-                [当前工作流阶段: EXECUTE - 执行阶段]
-                在此阶段你可以执行所有操作来完成任务：
-                - ✅ 可以：写入/修改/删除文件
-                - ✅ 可以：执行 Python 代码 (container_python)
-                - ✅ 可以：执行 Shell 命令 (container_shell)
-                - ✅ 可以：安装 pip 包 (通过 packages 参数)
-                - ✅ 可以：使用 apk/apt 安装系统包
-                - ✅ 可以：执行 git add/commit/push
-                - ✅ 可以：创建目录、复制/移动文件
-
-                注意：所有文件操作都限制在沙箱目录内，不影响系统其他部分。
-                执行完成后，记得使用 workflow_todo_update 工具更新任务状态。
-            """.trimIndent()
-
-            WorkflowPhase.REVIEW -> """
-
-                [当前工作流阶段: REVIEW - 审查阶段]
-                在此阶段你只能执行只读操作来审查代码：
-                - ✅ 可以：查看文件内容、对比代码差异
-                - ✅ 可以：检查代码风格、安全性、性能问题
-                - ✅ 可以：列出目录结构查看项目组织
-                - ✅ 可以：使用 git log/diff 查看变更历史
-                - ❌ 不能：修改任何文件或代码
-                - ❌ 不能：执行任何代码或脚本
-
-                如果你发现需要修改的问题，请明确告诉用户："发现XX问题，需要切换到 EXECUTE 阶段进行修复"。
-                建议：列出所有发现的问题，按严重程度分类，提供具体的修复建议。
-            """.trimIndent()
-        }
-    }
-
     private suspend fun generateInternal(
         assistant: Assistant,
         settings: Settings,
@@ -392,10 +330,9 @@ class GenerationHandler(
         provider: ProviderSetting,
         tools: List<Tool>,
         memories: List<AssistantMemory>,
-        truncateIndex: Int,
-        stream: Boolean,
-        workflowPhase: WorkflowPhase? = null,  // Workflow阶段，用于注入阶段提示
-        conversationId: String,  // 对话ID
+        dialogueSummaryText: String,
+        legacyRollingSummaryJson: String,
+        stream: Boolean
     ) {
         val internalMessages = buildList {
             val system = buildString {
@@ -409,15 +346,16 @@ class GenerationHandler(
                     appendLine()
                     append(buildMemoryPrompt(memories = memories))
                 }
+                if (dialogueSummaryText.isNotBlank()) {
+                    appendLine()
+                    append(buildDialogueSummaryPrompt(dialogueSummaryText))
+                } else if (legacyRollingSummaryJson.isNotBlank()) {
+                    appendLine()
+                    append(buildLegacyRollingSummaryPrompt(legacyRollingSummaryJson))
+                }
                 if (assistant.enableRecentChatsReference) {
                     appendLine()
-                    append(buildRecentChatsPrompt(assistant, conversationRepo))
-                }
-
-                // Workflow阶段提示
-                if (workflowPhase != null) {
-                    appendLine()
-                    append(buildWorkflowPhasePrompt(workflowPhase))
+                    append(buildRecallMemoryGuidancePrompt())
                 }
 
                 // 工具prompt
@@ -427,7 +365,7 @@ class GenerationHandler(
                 }
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
-            addAll(messages.truncate(truncateIndex).limitContext(assistant.contextMessageSize))
+            addAll(messages.limitContext(assistant.contextMessageSize))
         }.transforms(
             transformers = transformers,
             context = context,
@@ -537,7 +475,7 @@ class GenerationHandler(
                 messages = messages,
                 params = TextGenerationParams(
                     model = model,
-                    temperature = 0.3f,
+                    thinkingBudget = settings.translateThinkingBudget,
                 ),
             ).collect { chunk ->
                 messages = messages.handleMessageChunk(chunk)

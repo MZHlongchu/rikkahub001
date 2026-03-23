@@ -42,8 +42,14 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     fun getConversationFlowById(id: String): Flow<ConversationEntity?>
 
+    @Query("SELECT id FROM conversationentity")
+    suspend fun getAllIds(): List<String>
+
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     suspend fun getConversationById(id: String): ConversationEntity?
+
+    @Query("SELECT EXISTS(SELECT 1 FROM conversationentity WHERE id = :id)")
+    suspend fun existsById(id: String): Boolean
 
     @Insert
     suspend fun insert(conversation: ConversationEntity)
@@ -68,4 +74,18 @@ interface ConversationDAO {
 
     @Query("UPDATE conversationentity SET is_pinned = :isPinned WHERE id = :id")
     suspend fun updatePinStatus(id: String, isPinned: Boolean)
+
+    @Query("SELECT COUNT(*) FROM conversationentity")
+    suspend fun countAll(): Int
+
+    @Query(
+        "SELECT strftime('%Y-%m-%d', create_at/1000, 'unixepoch', 'localtime') AS day, " +
+            "COUNT(*) AS count " +
+            "FROM conversationentity " +
+            "WHERE create_at >= :startMillis " +
+            "GROUP BY day"
+    )
+    suspend fun getConversationCountPerDay(startMillis: Long): List<ConversationDayCount>
 }
+
+data class ConversationDayCount(val day: String, val count: Int)

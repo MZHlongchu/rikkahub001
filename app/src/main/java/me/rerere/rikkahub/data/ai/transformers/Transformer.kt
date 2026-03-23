@@ -11,7 +11,6 @@ class TransformerContext(
     val model: Model,
     val assistant: Assistant,
     val settings: Settings,
-    val conversationId: String = "",  // 对话ID，用于沙箱文件操作等
 )
 
 interface MessageTransformer {
@@ -62,9 +61,8 @@ suspend fun List<UIMessage>.transforms(
     model: Model,
     assistant: Assistant,
     settings: Settings,
-    conversationId: String = "",
 ): List<UIMessage> {
-    val ctx = TransformerContext(context, model, assistant, settings, conversationId)
+    val ctx = TransformerContext(context, model, assistant, settings)
     return transformers.fold(this) { acc, transformer ->
         transformer.transform(ctx, acc)
     }
@@ -93,9 +91,8 @@ suspend fun List<UIMessage>.onGenerationFinish(
     model: Model,
     assistant: Assistant,
     settings: Settings,
-    conversationId: String = "",
 ): List<UIMessage> {
-    val ctx = TransformerContext(context, model, assistant, settings, conversationId)
+    val ctx = TransformerContext(context, model, assistant, settings)
     return transformers.fold(this) { acc, transformer ->
         if (transformer is OutputMessageTransformer) {
             transformer.onGenerationFinish(ctx, acc)

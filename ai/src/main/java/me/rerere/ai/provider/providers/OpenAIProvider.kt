@@ -8,7 +8,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import me.rerere.ai.provider.EmbeddingGenerationParams
+import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Provider
@@ -22,39 +26,34 @@ import me.rerere.ai.ui.ImageGenerationResult
 import me.rerere.ai.ui.MessageChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.util.KeyRoulette
-import me.rerere.ai.util.configureClientWithProxy
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.getByKey
-import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.math.BigDecimal
 
 class OpenAIProvider(
-    private val client: OkHttpClient
+    private val client: OkHttpClient,
+    private val keyRoulette: KeyRoulette = KeyRoulette.default()
 ) : Provider<ProviderSetting.OpenAI> {
-    private val keyRoulette = KeyRoulette.default()
-
     private val chatCompletionsAPI = ChatCompletionsAPI(client = client, keyRoulette = keyRoulette)
-    private val responseAPI = ResponseAPI(client = client)
+    private val responseAPI = ResponseAPI(client = client, keyRoulette = keyRoulette)
 
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
-            val key = keyRoulette.next(providerSetting.apiKey)
+            val key = keyRoulette.next(providerSetting.id.toString(), providerSetting.apiKey)
             val request = Request.Builder()
                 .url("${providerSetting.baseUrl}/models")
                 .addHeader("Authorization", "Bearer $key")
                 .get()
                 .build()
 
-            val response =
-                client.configureClientWithProxy(providerSetting.proxy).newCall(request).await()
+            val response = client.newCall(request).await()
             if (!response.isSuccessful) {
                 error("Failed to get models: ${response.code} ${response.body?.string()}")
             }
@@ -75,7 +74,7 @@ class OpenAIProvider(
         }
 
     override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
-        val key = keyRoulette.next(providerSetting.apiKey)
+        val key = keyRoulette.next(providerSetting.id.toString(), providerSetting.apiKey)
         val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
             providerSetting.balanceOption.apiPath
         } else {
@@ -86,7 +85,7 @@ class OpenAIProvider(
             .addHeader("Authorization", "Bearer $key")
             .get()
             .build()
-        val response = client.configureClientWithProxy(providerSetting.proxy).newCall(request).await()
+        val response = client.newCall(request).await()
         if (!response.isSuccessful) {
             error("Failed to get balance: ${response.code} ${response.body?.string()}")
         }
@@ -138,6 +137,57 @@ class OpenAIProvider(
         )
     }
 
+    override suspend fun generateEmbedding(
+        providerSetting: ProviderSetting.OpenAI,
+        params: EmbeddingGenerationParams
+    ): EmbeddingGenerationResult = withContext(Dispatchers.IO) {
+        require(params.input.isNotEmpty()) { "Embedding input cannot be empty" }
+
+        val key = keyRoulette.next(providerSetting.apiKey)
+        val requestBody = json.encodeToString(
+            buildJsonObject {
+                put("model", params.model.modelId)
+                if (params.input.size == 1) {
+                    put("input", params.input.first())
+                } else {
+                    putJsonArray("input") {
+                        params.input.forEach { add(JsonPrimitive(it)) }
+                    }
+                }
+                params.dimensions?.let { put("dimensions", it) }
+            }.mergeCustomBody(params.customBody)
+        )
+
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}/embeddings")
+            .headers(params.customHeaders.toHeaders())
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).await()
+        if (!response.isSuccessful) {
+            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
+        }
+
+        val bodyStr = response.body?.string() ?: ""
+        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+        val data = bodyJson["data"]?.jsonArray ?: error("No data in response")
+        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
+
+        val embeddings = data.map { embeddingJson ->
+            val embeddingArray = embeddingJson.jsonObject["embedding"]?.jsonArray
+                ?: error("No embedding in response")
+            embeddingArray.map { it.jsonPrimitive.content.toFloat() }
+        }
+
+        EmbeddingGenerationResult(
+            model = model,
+            embeddings = embeddings
+        )
+    }
+
     override suspend fun generateImage(
         providerSetting: ProviderSetting,
         params: ImageGenerationParams
@@ -146,7 +196,7 @@ class OpenAIProvider(
             "Expected OpenAI provider setting"
         }
 
-        val key = keyRoulette.next(providerSetting.apiKey)
+        val key = keyRoulette.next(providerSetting.id.toString(), providerSetting.apiKey)
 
         val requestBody = json.encodeToString(
             buildJsonObject {
@@ -171,7 +221,7 @@ class OpenAIProvider(
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = client.configureClientWithProxy(providerSetting.proxy).newCall(request).await()
+        val response = client.newCall(request).await()
         if (!response.isSuccessful) {
             error("Failed to generate image: ${response.code} ${response.body?.string()}")
         }

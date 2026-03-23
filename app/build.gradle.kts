@@ -1,3 +1,5 @@
+import com.android.build.api.dsl.Packaging
+import org.gradle.api.GradleException
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
@@ -8,9 +10,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-//    alias(libs.plugins.google.services)
-//    alias(libs.plugins.firebase.crashlytics)
-    id("com.chaquo.python") version "17.0.0"
 }
 
 android {
@@ -21,25 +20,13 @@ android {
         applicationId = "me.rerere.rikkahub.dev"
         minSdk = 26
         targetSdk = 28
-        versionCode = 135
-        versionName = "1.9.0-beta.1"
+        versionCode = 151
+        versionName = "2.1.62"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
-    }
-
-    splits {
-        abi {
-            // AppBundle tasks usually contain "bundle" in their name
-            //noinspection WrongGradleMethod
-            val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
-            isEnable = !isBuildingBundle
-            reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = true
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
@@ -71,7 +58,8 @@ android {
     buildTypes {
         release {
             applicationIdSuffix = ".mod"
-            signingConfig = signingConfigs.getByName("debug")
+            // Release builds must use the locally managed private keystore from ignored local.properties.
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -80,10 +68,6 @@ android {
             )
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
-            lint {
-                abortOnError = false
-                checkReleaseBuilds = false
-            }
         }
         debug {
             applicationIdSuffix = ".debug"
@@ -110,10 +94,15 @@ android {
         buildConfig = true
     }
     sourceSets {
-        getByName("androidTest").assets.srcDirs("$projectDir/schemas")
+        getByName("androidTest").assets.directories.add("$projectDir/schemas")
     }
     androidResources {
         generateLocaleConfig = true
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
     tasks.withType<KotlinCompile>().configureEach {
         compilerOptions.optIn.add("androidx.compose.material3.ExperimentalMaterial3Api")
@@ -126,7 +115,14 @@ android {
         compilerOptions.optIn.add("kotlin.uuid.ExperimentalUuidApi")
         compilerOptions.optIn.add("kotlin.time.ExperimentalTime")
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
+        compilerOptions.optIn.add("androidx.navigation3.runtime.ExperimentalNavigation3Api")
     }
+}
+
+composeCompiler {
+    stabilityConfigurationFiles.add(
+        project.layout.projectDirectory.file("compose_compiler_config.conf")
+    )
 }
 
 tasks.register("buildAll") {
@@ -134,17 +130,54 @@ tasks.register("buildAll") {
     description = "Build both APK and AAB"
 }
 
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
+val webUiDir = rootProject.file("web-ui")
+val webStaticDir = rootProject.file("web/src/main/resources/static")
+val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+val npmCommand = if (isWindows) "npm.cmd" else "npm"
+val npxCommand = if (isWindows) "npx.cmd" else "npx"
+
+val prepareWebUiDependencies by tasks.registering(Exec::class) {
+    group = "web"
+    description = "Install web-ui dependencies when node_modules is missing."
+    if (!webUiDir.exists()) {
+        throw GradleException("web-ui directory not found: $webUiDir")
+    }
+    workingDir = webUiDir
+    commandLine(npmCommand, "install")
+    onlyIf { !webUiDir.resolve("node_modules").exists() }
 }
 
-chaquopy {
-    defaultConfig {
-        version = "3.11"
-        pip {
-            install("-r", "src/main/python/requirements.txt")
+val buildWebUiClient by tasks.registering(Exec::class) {
+    group = "web"
+    description = "Build web-ui client assets."
+    dependsOn(prepareWebUiDependencies)
+    workingDir = webUiDir
+    commandLine(npxCommand, "react-router", "build")
+}
+
+val syncWebUiStatic by tasks.registering {
+    group = "web"
+    description = "Copy web-ui build/client into web static resources for Android packaging."
+    dependsOn(buildWebUiClient)
+    doLast {
+        val sourceDir = webUiDir.resolve("build/client")
+        if (!sourceDir.exists()) {
+            throw GradleException("web-ui build output not found: $sourceDir")
         }
+        if (webStaticDir.exists()) {
+            webStaticDir.deleteRecursively()
+        }
+        sourceDir.copyRecursively(webStaticDir, overwrite = true)
+        println("Synced web static assets: $sourceDir -> $webStaticDir")
     }
+}
+
+tasks.named("preBuild") {
+    dependsOn(syncWebUiStatic)
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 kotlin {
@@ -171,20 +204,11 @@ dependencies {
     implementation(libs.androidx.material3.adaptive)
     implementation(libs.androidx.material3.adaptive.layout)
 
-    // Navigation 2
-    implementation(libs.androidx.navigation2)
-
     // Navigation 3
-//    implementation(libs.androidx.navigation3.runtime)
-//    implementation(libs.androidx.navigation3.ui)
-//    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
-//    implementation(libs.androidx.material3.adaptive.navigation3)
-
-//    // Firebase
-//    implementation(platform(libs.firebase.bom))
-//    implementation(libs.firebase.analytics)
-//    implementation(libs.firebase.crashlytics)
-//    implementation(libs.firebase.config)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
+    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+    implementation(libs.androidx.material3.adaptive.navigation3)
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)
@@ -192,6 +216,10 @@ dependencies {
     // Image metadata extractor
     // https://github.com/drewnoakes/metadata-extractor
     implementation(libs.metadata.extractor)
+
+    // Haze (background blur)
+    implementation(libs.haze)
+    implementation(libs.haze.materials)
 
     // koin
     implementation(platform(libs.koin.bom))
@@ -249,9 +277,6 @@ dependencies {
     // Apache Commons Text
     implementation(libs.commons.text)
 
-    // XZ utils (for .tar.xz extraction)
-    implementation(libs.xz)
-
     // Toast (Sonner)
     implementation(libs.sonner)
 
@@ -260,6 +285,7 @@ dependencies {
 
     // lucide icons
     implementation(libs.lucide.icons)
+    implementation(libs.huge.icons)
 
     // image viewer
     implementation(libs.image.viewer)
@@ -273,8 +299,15 @@ dependencies {
     // mcp
     implementation(libs.modelcontextprotocol.kotlin.sdk)
 
+    // jmDNS (mDNS/Bonjour for .local hostname)
+    implementation(libs.jmdns)
+
+    // sqlite-android (requery SQLite for Android)
+    implementation(libs.sqlite.android)
+
     // modules
     implementation(project(":ai"))
+    implementation(project(":web"))
     implementation(project(":document"))
     implementation(project(":highlight"))
     implementation(project(":search"))

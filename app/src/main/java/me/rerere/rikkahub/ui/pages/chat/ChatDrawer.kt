@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -39,26 +41,35 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavHostController
 import androidx.paging.compose.collectAsLazyPagingItems
-import com.composables.icons.lucide.Drama
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Pencil
-import com.composables.icons.lucide.Settings
-import com.composables.icons.lucide.Sparkles
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import me.rerere.ai.provider.ModelType
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ChartColumn
+import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.InLove
+import me.rerere.hugeicons.stroke.LanguageCircle
+import me.rerere.hugeicons.stroke.LookTop
+import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.hugeicons.stroke.Sparkles
+import me.rerere.hugeicons.stroke.TransactionHistory
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.getEmbeddingModel
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.components.ai.AssistantPicker
+import me.rerere.rikkahub.ui.components.ui.BackupReminderCard
 import me.rerere.rikkahub.ui.components.ui.Greeting
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.components.ui.UpdateCard
+import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.rememberIsPlayStoreVersion
@@ -69,10 +80,9 @@ import me.rerere.rikkahub.utils.toDp
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDrawerContent(
-    navController: NavHostController,
+    navController: Navigator,
     vm: ChatVM,
     settings: Settings,
     current: Conversation,
@@ -83,7 +93,7 @@ fun ChatDrawerContent(
     val repo = koinInject<ConversationRepository>()
 
     val conversations = vm.conversations.collectAsLazyPagingItems()
-    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+    val conversationListState = rememberLazyListState()
 
     val conversationJobs by vm.conversationJobs.collectAsStateWithLifecycle(
         initialValue = emptyMap(),
@@ -105,6 +115,11 @@ fun ChatDrawerContent(
     var conversationToMove by remember { mutableStateOf<Conversation?>(null) }
     val bottomSheetState = rememberModalBottomSheetState()
 
+    // Menu popup 状态
+    var showMenuPopup by remember { mutableStateOf(false) }
+    var showEmbeddingModelRequiredDialog by remember { mutableStateOf(false) }
+    val embeddingModelConfigured = settings.getEmbeddingModel()?.type == ModelType.EMBEDDING
+
     ModalDrawerSheet(
         modifier = Modifier.width(300.dp)
     ) {
@@ -115,6 +130,11 @@ fun ChatDrawerContent(
             if (settings.displaySetting.showUpdates && !isPlayStore) {
                 UpdateCard(vm)
             }
+
+            BackupReminderCard(
+                settings = settings,
+                onClick = { navController.navigate(Screen.Backup) },
+            )
 
             // 用户头像和昵称自定义区域
             Row(
@@ -158,7 +178,7 @@ fun ChatDrawerContent(
                         )
 
                         Icon(
-                            imageVector = Lucide.Pencil,
+                            imageVector = HugeIcons.PencilEdit01,
                             contentDescription = "Edit",
                             modifier = Modifier
                                 .onClick {
@@ -173,12 +193,13 @@ fun ChatDrawerContent(
                 }
             }
 
+            DrawerActions(navController = navController)
+
             ConversationList(
                 current = current,
                 conversations = conversations,
                 conversationJobs = conversationJobs.keys,
-                searchQuery = searchQuery,
-                onSearchQueryChange = { vm.updateSearchQuery(it) },
+                listState = conversationListState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -190,6 +211,10 @@ fun ChatDrawerContent(
                 },
                 onDelete = {
                     vm.deleteConversation(it)
+                    // Refresh the conversation list to immediately remove the deleted item
+                    // This fixes the issue where deleted conversations sometimes remain visible
+                    // until manually clicked (issue #747)
+                    conversations.refresh()
                     if (it.id == current.id) {
                         navigateToChatPage(navController)
                     }
@@ -200,6 +225,13 @@ fun ChatDrawerContent(
                 onMoveToAssistant = {
                     conversationToMove = it
                     showMoveToAssistantSheet = true
+                },
+                onGenerateMemoryIndex = {
+                    if (embeddingModelConfigured) {
+                        vm.generateMemoryIndex(it)
+                    } else {
+                        showEmbeddingModelRequiredDialog = true
+                    }
                 }
             )
 
@@ -217,7 +249,7 @@ fun ChatDrawerContent(
                                 .firstOrNull()
                                 ?.id ?: Uuid.random()
                         }
-                        navigateToChatPage(navController = navController, chatId = id)
+                        navigateToChatPage(navigator = navController, chatId = id)
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -228,7 +260,7 @@ fun ChatDrawerContent(
             )
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -237,7 +269,7 @@ fun ChatDrawerContent(
                 DrawerAction(
                     icon = {
                         Icon(
-                            imageVector = Lucide.Drama,
+                            imageVector = HugeIcons.LookTop,
                             contentDescription = stringResource(R.string.assistant_page_title)
                         )
                     },
@@ -249,15 +281,62 @@ fun ChatDrawerContent(
                     },
                 )
 
+                Box {
+                    DrawerAction(
+                        icon = {
+                            Icon(HugeIcons.Sparkles, "Menu")
+                        },
+                        label = {
+                            Text(stringResource(R.string.menu))
+                        },
+                        onClick = {
+                            showMenuPopup = true
+                        },
+                    )
+                    DropdownMenu(
+                        expanded = showMenuPopup,
+                        onDismissRequest = { showMenuPopup = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_page_menu_ai_translator)) },
+                            leadingIcon = { Icon(HugeIcons.LanguageCircle, null) },
+                            onClick = {
+                                showMenuPopup = false
+                                navController.navigate(Screen.Translator)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
+                            leadingIcon = { Icon(HugeIcons.Image02, null) },
+                            onClick = {
+                                showMenuPopup = false
+                                navController.navigate(Screen.ImageGen)
+                            }
+                        )
+                    }
+                }
+
                 DrawerAction(
                     icon = {
-                        Icon(Lucide.Sparkles, "Menu")
+                        Icon(HugeIcons.InLove, stringResource(R.string.favorite_page_title))
                     },
                     label = {
-                        Text(stringResource(R.string.menu))
+                        Text(stringResource(R.string.favorite_page_title))
                     },
                     onClick = {
-                        navController.navigate(Screen.Menu)
+                        navController.navigate(Screen.Favorite)
+                    },
+                )
+
+                DrawerAction(
+                    icon = {
+                        Icon(HugeIcons.ChartColumn, "统计数据")
+                    },
+                    label = {
+                        Text("统计数据")
+                    },
+                    onClick = {
+                        navController.navigate(Screen.Stats)
                     },
                 )
 
@@ -265,7 +344,7 @@ fun ChatDrawerContent(
 
                 DrawerAction(
                     icon = {
-                        Icon(Lucide.Settings, null)
+                        Icon(HugeIcons.Settings03, null)
                     },
                     label = { Text(stringResource(R.string.settings)) },
                     onClick = {
@@ -277,6 +356,39 @@ fun ChatDrawerContent(
     }
 
     // 昵称编辑对话框
+    if (showEmbeddingModelRequiredDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showEmbeddingModelRequiredDialog = false
+            },
+            title = {
+                Text(stringResource(R.string.error_title_generate_memory_index))
+            },
+            text = {
+                Text(stringResource(R.string.memory_index_embedding_required))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEmbeddingModelRequiredDialog = false
+                        navController.navigate(Screen.SettingModels)
+                    }
+                ) {
+                    Text(stringResource(R.string.permission_go_to_settings))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showEmbeddingModelRequiredDialog = false
+                    }
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     nicknameEditState.EditStateContent { nickname, onUpdate ->
         AlertDialog(
             onDismissRequest = {
@@ -357,6 +469,71 @@ fun ChatDrawerContent(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrawerActions(navController: Navigator) {
+    Column {
+        // 搜索入口
+        Surface(
+            onClick = { navController.navigate(Screen.MessageSearch) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Search01,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.chat_page_search_chats),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+
+        // 历史记录入口
+        Surface(
+            onClick = { navController.navigate(Screen.History) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.TransactionHistory,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.chat_page_history),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
             }
         }
     }

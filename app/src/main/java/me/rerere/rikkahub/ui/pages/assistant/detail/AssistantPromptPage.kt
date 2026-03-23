@@ -1,5 +1,11 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +29,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -30,7 +37,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
@@ -54,12 +62,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.ChevronDown
-import com.composables.icons.lucide.ChevronUp
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Plus
-import com.composables.icons.lucide.Trash2
-import com.composables.icons.lucide.X
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
@@ -73,7 +75,6 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.AssistantRegex
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -81,6 +82,7 @@ import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TextArea
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.insertAtCursor
@@ -100,18 +102,23 @@ fun AssistantPromptPage(id: String) {
     )
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            LargeFlexibleTopAppBar(
                 title = {
                     Text(stringResource(R.string.assistant_page_tab_prompt))
                 },
                 navigationIcon = {
                     BackButton()
-                }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = CustomColors.topBarColors,
             )
-        }
+        },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
         AssistantPromptContent(
             modifier = Modifier.padding(innerPadding),
@@ -141,12 +148,10 @@ private fun AssistantPromptContent(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            )
+            colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
             Column(
-                modifier = Modifier.padding(8.dp),
+                modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val systemPromptValue = rememberTextFieldState(
@@ -194,9 +199,7 @@ private fun AssistantPromptContent(
         }
 
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            )
+            colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -306,7 +309,7 @@ private fun AssistantPromptContent(
                             onShare = {},
                             onDelete = {},
                             onUpdate = {},
-                            conversation = Conversation.ofId(Uuid.random())
+                            lastMessage = false,
                         )
                     }
                 }
@@ -314,9 +317,7 @@ private fun AssistantPromptContent(
         }
 
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            )
+            colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -370,7 +371,7 @@ private fun AssistantPromptContent(
                                     )
                                 }
                             ) {
-                                Icon(Lucide.X, null)
+                                Icon(HugeIcons.Cancel01, null)
                             }
                         }
                         OutlinedTextField(
@@ -412,110 +413,13 @@ private fun AssistantPromptContent(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Lucide.Plus, null)
+                    Icon(HugeIcons.Add01, null)
                 }
             }
         }
 
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            )
-        ) {
-            FormItem(
-                modifier = Modifier.padding(8.dp),
-                label = {
-                    Text(stringResource(R.string.assistant_page_quick_messages))
-                },
-                description = {
-                    Text(stringResource(R.string.assistant_page_quick_messages_desc))
-                }
-            )
-            Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(16.dp)
-            ) {
-                assistant.quickMessages.fastForEachIndexed { index, quickMessage ->
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            OutlinedTextField(
-                                value = quickMessage.title,
-                                onValueChange = { title ->
-                                    onUpdate(
-                                        assistant.copy(
-                                            quickMessages = assistant.quickMessages.mapIndexed { i, msg ->
-                                                if (i == index) {
-                                                    msg.copy(title = title)
-                                                } else {
-                                                    msg
-                                                }
-                                            }
-                                        )
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                                label = { Text(stringResource(R.string.assistant_page_quick_message_title)) }
-                            )
-                            IconButton(
-                                onClick = {
-                                    onUpdate(
-                                        assistant.copy(
-                                            quickMessages = assistant.quickMessages.filterIndexed { i, _ ->
-                                                i != index
-                                            }
-                                        )
-                                    )
-                                }
-                            ) {
-                                Icon(Lucide.X, null)
-                            }
-                        }
-                        OutlinedTextField(
-                            value = quickMessage.content,
-                            onValueChange = { text ->
-                                onUpdate(
-                                    assistant.copy(
-                                        quickMessages = assistant.quickMessages.mapIndexed { i, msg ->
-                                            if (i == index) {
-                                                msg.copy(content = text)
-                                            } else {
-                                                msg
-                                            }
-                                        }
-                                    )
-                                )
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            maxLines = 6,
-                            label = { Text(stringResource(R.string.assistant_page_quick_message_content)) }
-                        )
-                    }
-                }
-                Button(
-                    onClick = {
-                        onUpdate(
-                            assistant.copy(
-                                quickMessages = assistant.quickMessages + QuickMessage()
-                            )
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Lucide.Plus, null)
-                }
-            }
-        }
-
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            )
+            colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -550,7 +454,7 @@ private fun AssistantPromptContent(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Lucide.Plus, null)
+                    Icon(HugeIcons.Add01, null)
                 }
             }
         }
@@ -610,7 +514,7 @@ private fun AssistantRegexCard(
                     }
                 ) {
                     Icon(
-                        imageVector = if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                         contentDescription = null
                     )
                 }
@@ -761,7 +665,7 @@ private fun AssistantRegexCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Icon(Lucide.Trash2, null)
+                        Icon(HugeIcons.Delete01, null)
                         Text(stringResource(R.string.delete))
                     }
                 }

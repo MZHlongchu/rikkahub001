@@ -1,5 +1,15 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Package01
+import me.rerere.hugeicons.stroke.Connect
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.Share01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,16 +87,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastFilter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.Boxes
-import com.composables.icons.lucide.Cable
-import com.composables.icons.lucide.ChevronDown
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Network
-import com.composables.icons.lucide.Plus
-import com.composables.icons.lucide.Settings2
-import com.composables.icons.lucide.Share
-import com.composables.icons.lucide.Trash2
-import com.composables.icons.lucide.X
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -96,7 +96,6 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.ProviderProxy
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
@@ -120,7 +119,10 @@ import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomBodies
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomHeaders
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.ProviderConnectionTester
 import me.rerere.rikkahub.ui.pages.setting.components.SettingProviderBalanceOption
+import me.rerere.rikkahub.ui.pages.setting.components.isUsingDefaultBaseUrl
+import me.rerere.rikkahub.ui.pages.setting.components.resetBaseUrlToDefault
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.plus
@@ -135,7 +137,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
     val provider = settings.providers.find { it.id == id } ?: return
-    val pager = rememberPagerState { 3 }
+    val pager = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -183,7 +185,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                             shareSheetState.show(provider)
                         }
                     ) {
-                        Icon(Lucide.Share, null)
+                        Icon(HugeIcons.Share01, null)
                     }
                 }
             )
@@ -193,7 +195,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                 NavigationBarItem(
                     selected = pager.currentPage == 0,
                     label = { Text(stringResource(id = R.string.setting_provider_page_configuration)) },
-                    icon = { Icon(Lucide.Settings2, null) },
+                    icon = { Icon(HugeIcons.Tools, null) },
                     onClick = {
                         scope.launch {
                             pager.animateScrollToPage(0)
@@ -203,20 +205,10 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                 NavigationBarItem(
                     selected = pager.currentPage == 1,
                     label = { Text(stringResource(id = R.string.setting_provider_page_models)) },
-                    icon = { Icon(Lucide.Boxes, null) },
+                    icon = { Icon(HugeIcons.Package01, null) },
                     onClick = {
                         scope.launch {
                             pager.animateScrollToPage(1)
-                        }
-                    }
-                )
-                NavigationBarItem(
-                    selected = pager.currentPage == 2,
-                    label = { Text(stringResource(id = R.string.setting_provider_page_network_proxy)) },
-                    icon = { Icon(Lucide.Network, null) },
-                    onClick = {
-                        scope.launch {
-                            pager.animateScrollToPage(2)
                         }
                     }
                 )
@@ -252,13 +244,6 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                         onEdit = onEdit
                     )
                 }
-
-                2 -> {
-                    SettingProviderProxyPage(
-                        provider = provider,
-                        onEdit = onEdit
-                    )
-                }
             }
         }
     }
@@ -271,7 +256,6 @@ private fun SettingProviderConfigPage(
     onDelete: () -> Unit
 ) {
     var internalProvider by remember(provider) { mutableStateOf(provider) }
-    val scope = rememberCoroutineScope()
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -303,9 +287,8 @@ private fun SettingProviderConfigPage(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ConnectionTester(
+            ProviderConnectionTester(
                 internalProvider = internalProvider,
-                scope = scope
             )
 
             Spacer(Modifier.weight(1f))
@@ -316,8 +299,20 @@ private fun SettingProviderConfigPage(
                         showDeleteDialog = true
                     },
                 ) {
-                    Icon(Lucide.Trash2, "Delete")
+                    Icon(HugeIcons.Delete01, "Delete")
                 }
+            }
+
+            IconButton(
+                onClick = {
+                    internalProvider = internalProvider.resetBaseUrlToDefault()
+                },
+                enabled = !internalProvider.isUsingDefaultBaseUrl(),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Refresh03,
+                    contentDescription = stringResource(R.string.setting_model_page_reset_to_default)
+                )
             }
 
             Button(
@@ -377,212 +372,6 @@ private fun SettingProviderModelPage(
         providerSetting = provider,
         onUpdateProvider = onEdit
     )
-}
-
-@Composable
-private fun SettingProviderProxyPage(
-    provider: ProviderSetting,
-    onEdit: (ProviderSetting) -> Unit
-) {
-    val toaster = LocalToaster.current
-    val context = LocalContext.current
-    var editingProxy by remember(provider.proxy) {
-        mutableStateOf(provider.proxy)
-    }
-    val proxyType = when (editingProxy) {
-        is ProviderProxy.Http -> "HTTP"
-        is ProviderProxy.None -> "None"
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            val types = listOf("None", "HTTP")
-            types.forEachIndexed { index, type ->
-                SegmentedButton(
-                    shape = SegmentedButtonDefaults.itemShape(index, types.size),
-                    label = { Text(type) },
-                    selected = proxyType == type,
-                    onClick = {
-                        editingProxy = when (type) {
-                            "HTTP" -> ProviderProxy.Http(
-                                address = "",
-                                port = 8080
-                            )
-
-                            else -> ProviderProxy.None
-                        }
-                    }
-                )
-            }
-        }
-
-        when (editingProxy) {
-            is ProviderProxy.None -> {}
-            is ProviderProxy.Http -> {
-                OutlinedTextField(
-                    value = (editingProxy as ProviderProxy.Http).address,
-                    onValueChange = {
-                        editingProxy = (editingProxy as ProviderProxy.Http).copy(address = it)
-                    },
-                    label = { Text(stringResource(id = R.string.setting_provider_page_proxy_host)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                var portStr by remember { mutableStateOf((editingProxy as ProviderProxy.Http).port.toString()) }
-                OutlinedTextField(
-                    value = portStr,
-                    onValueChange = {
-                        portStr = it
-                        it.toIntOrNull()?.let { port ->
-                            editingProxy = (editingProxy as ProviderProxy.Http).copy(port = port)
-                        }
-                    },
-                    label = { Text(stringResource(id = R.string.setting_provider_page_proxy_port)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-                OutlinedTextField(
-                    value = (editingProxy as ProviderProxy.Http).username ?: "",
-                    onValueChange = {
-                        editingProxy = (editingProxy as ProviderProxy.Http).copy(username = it)
-                    },
-                    label = { Text(stringResource(id = R.string.setting_provider_page_proxy_username)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = (editingProxy as ProviderProxy.Http).password ?: "",
-                    onValueChange = {
-                        editingProxy = (editingProxy as ProviderProxy.Http).copy(password = it)
-                    },
-                    label = { Text(stringResource(id = R.string.setting_provider_page_proxy_password)) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Button(
-                onClick = {
-                    onEdit(provider.copyProvider(proxy = editingProxy))
-                    toaster.show(
-                        context.getString(R.string.setting_provider_page_save_success),
-                        type = ToastType.Success
-                    )
-                }
-            ) {
-                Text(stringResource(id = R.string.setting_provider_page_save))
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnectionTester(
-    internalProvider: ProviderSetting,
-    scope: CoroutineScope
-) {
-    var showTestDialog by remember { mutableStateOf(false) }
-    val providerManager = koinInject<ProviderManager>()
-    IconButton(
-        onClick = {
-            showTestDialog = true
-        }
-    ) {
-        Icon(Lucide.Cable, null)
-    }
-    if (showTestDialog) {
-        var model by remember(internalProvider) {
-            mutableStateOf(internalProvider.models.firstOrNull { it.type == ModelType.CHAT })
-        }
-        var testState: UiState<String> by remember { mutableStateOf(UiState.Idle) }
-        AlertDialog(
-            onDismissRequest = { showTestDialog = false },
-            title = {
-                Text(stringResource(R.string.setting_provider_page_test_connection))
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    ModelSelector(
-                        modelId = model?.id,
-                        providers = listOf(internalProvider),
-                        type = ModelType.CHAT,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        model = it
-                    }
-                    when (testState) {
-                        is UiState.Loading -> {
-                            LinearWavyProgressIndicator()
-                        }
-
-                        is UiState.Success -> {
-                            Text(
-                                text = stringResource(R.string.setting_provider_page_test_success),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.extendColors.green6
-                            )
-                        }
-
-                        is UiState.Error -> {
-                            Text(
-                                text = (testState as UiState.Error).error.message ?: "Error",
-                                color = MaterialTheme.extendColors.red6,
-                                maxLines = 10
-                            )
-                        }
-
-                        else -> {}
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTestDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-
-                TextButton(
-                    onClick = {
-                        if (model == null) return@TextButton
-                        val provider = providerManager.getProviderByType(internalProvider)
-                        scope.launch {
-                            runCatching {
-                                testState = UiState.Loading
-                                provider.generateText(
-                                    providerSetting = internalProvider,
-                                    messages = listOf(
-                                        UIMessage.user("hello")
-                                    ),
-                                    params = TextGenerationParams(
-                                        model = model!!,
-                                    )
-                                )
-                                testState = UiState.Success("Success")
-                            }.onFailure {
-                                testState = UiState.Error(it)
-                            }
-                        }
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_test))
-                }
-            }
-        )
-    }
 }
 
 @Composable
@@ -951,7 +740,7 @@ private fun AddModelButton(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    Lucide.Plus,
+                    HugeIcons.Add01,
                     contentDescription = stringResource(R.string.setting_provider_page_add_model)
                 )
                 AnimatedVisibility(expanded) {
@@ -983,7 +772,7 @@ private fun AddModelButton(
                             }
                         }
                     ) {
-                        Icon(Lucide.ChevronDown, null)
+                        Icon(HugeIcons.ArrowDown01, null)
                     }
                 }
             ) {
@@ -1053,9 +842,7 @@ private fun ModelPicker(
     if (showModal) {
         ModalBottomSheet(
             onDismissRequest = { showModal = false },
-            sheetState = rememberModalBottomSheetState(
-                skipPartiallyExpanded = true
-            )
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
             var filterText by remember { mutableStateOf("") }
             val filterKeywords = filterText.split(" ").filter { it.isNotBlank() }
@@ -1072,7 +859,7 @@ private fun ModelPicker(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(500.dp)
+                    .fillMaxHeight(0.9f)
                     .padding(8.dp)
                     .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -1176,9 +963,9 @@ private fun ModelPicker(
                                     }
                                 ) {
                                     if (selectedModels.any { model -> model.modelId == it.modelId }) {
-                                        Icon(Lucide.X, null)
+                                        Icon(HugeIcons.Cancel01, null)
                                     } else {
-                                        Icon(Lucide.Plus, null)
+                                        Icon(HugeIcons.Add01, null)
                                     }
                                 }
                             }
@@ -1213,7 +1000,7 @@ private fun ModelPicker(
                 showModal = true
             }
         ) {
-            Icon(Lucide.Boxes, null)
+            Icon(HugeIcons.Package01, null)
         }
     }
 }
@@ -1408,7 +1195,7 @@ private fun ModelCard(
                             },
                             modifier = Modifier.align(Alignment.CenterStart)
                         ) {
-                            Icon(Lucide.X, null)
+                            Icon(HugeIcons.Cancel01, null)
                         }
                         Text(
                             text = stringResource(R.string.setting_provider_page_edit_model),
@@ -1473,7 +1260,7 @@ private fun ModelCard(
                         }
                     }
                 ) {
-                    Icon(Lucide.X, null)
+                    Icon(HugeIcons.Cancel01, null)
                 }
                 FilledIconButton(
                     onClick = {
@@ -1484,7 +1271,7 @@ private fun ModelCard(
                     }
                 ) {
                     Icon(
-                        Lucide.Trash2,
+                        HugeIcons.Delete01,
                         contentDescription = stringResource(R.string.chat_page_delete)
                     )
                 }
@@ -1545,7 +1332,7 @@ private fun ModelCard(
                         dialogState.open(model.copy())
                     }
                 ) {
-                    Icon(Lucide.Settings2, "Edit")
+                    Icon(HugeIcons.Tools, "Edit")
                 }
             }
         }
@@ -1680,14 +1467,14 @@ private fun ProviderOverrideSettings(
                                 showProviderConfig = true
                             }
                         ) {
-                            Icon(Lucide.Settings2, contentDescription = "Edit override")
+                            Icon(HugeIcons.Tools, contentDescription = "Edit override")
                         }
                         IconButton(
                             onClick = {
                                 onUpdateProviderOverride(null)
                             }
                         ) {
-                            Icon(Lucide.X, contentDescription = "Remove override")
+                            Icon(HugeIcons.Cancel01, contentDescription = "Remove override")
                         }
                     }
                 }
@@ -1705,7 +1492,7 @@ private fun ProviderOverrideSettings(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Lucide.Plus, contentDescription = null)
+                Icon(HugeIcons.Add01, contentDescription = null)
                 Spacer(modifier = Modifier.size(8.dp))
                 Text(stringResource(R.string.setting_provider_page_add_provider_override))
             }

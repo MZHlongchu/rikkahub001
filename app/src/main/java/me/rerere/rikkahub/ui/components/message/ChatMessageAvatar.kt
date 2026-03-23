@@ -30,15 +30,12 @@ import me.rerere.rikkahub.utils.toLocalString
 @Composable
 fun ChatMessageUserAvatar(
     message: UIMessage,
-    messages: List<UIMessage>,
-    messageIndex: Int,
     avatar: Avatar,
     nickname: String,
     modifier: Modifier = Modifier,
 ) {
     val settings = LocalSettings.current
-    val prevRole = if (messageIndex > 0) messages[messageIndex - 1].role else null
-    if (message.role == MessageRole.USER && prevRole != MessageRole.USER && !message.parts.isEmptyUIMessage() && settings.displaySetting.showUserAvatar) {
+    if (message.role == MessageRole.USER && !message.parts.isEmptyUIMessage() && settings.displaySetting.showUserAvatar) {
         Row(
             modifier = modifier.padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
@@ -54,12 +51,14 @@ fun ChatMessageUserAvatar(
                     maxLines = 1,
                     color = LocalContentColor.current.copy(alpha = 0.85f),
                 )
-                Text(
-                    text = message.createdAt.toJavaLocalDateTime().toLocalString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = LocalContentColor.current.copy(alpha = 0.6f),
-                    maxLines = 1,
-                )
+                if (settings.displaySetting.showDateBelowName) {
+                    Text(
+                        text = message.createdAt.toJavaLocalDateTime().toLocalString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = LocalContentColor.current.copy(alpha = 0.6f),
+                        maxLines = 1,
+                    )
+                }
             }
             UIAvatar(
                 name = nickname,
@@ -74,8 +73,6 @@ fun ChatMessageUserAvatar(
 @Composable
 fun ChatMessageAssistantAvatar(
     message: UIMessage,
-    messages: List<UIMessage>,
-    messageIndex: Int,
     loading: Boolean,
     model: Model?,
     assistant: Assistant?,
@@ -83,18 +80,18 @@ fun ChatMessageAssistantAvatar(
 ) {
     val settings = LocalSettings.current
     val showIcon = settings.displaySetting.showModelIcon
-    val prevRole = if (messageIndex > 0) messages[messageIndex - 1].role else null
-    if (message.role == MessageRole.ASSISTANT && prevRole != message.role && model != null) {
+    val useAssistantAvatar = assistant?.useAssistantAvatar == true
+    if (message.role == MessageRole.ASSISTANT && (model != null || useAssistantAvatar)) {
         Row(
-            modifier = modifier.padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier
         ) {
-            if (assistant?.useAssistantAvatar == true) {
+            if (useAssistantAvatar) {
                 if (showIcon) {
                     UIAvatar(
                         name = assistant.name,
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(32.dp),
                         value = assistant.avatar,
                         loading = loading,
                     )
@@ -105,22 +102,24 @@ fun ChatMessageAssistantAvatar(
                     if(settings.displaySetting.showModelName) {
                         Text(
                             text = assistant.name.ifEmpty { stringResource(R.string.assistant_page_default_assistant) },
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmallEmphasized,
                             maxLines = 1,
                         )
-                        Text(
-                            text = message.createdAt.toJavaLocalDateTime().toLocalString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = LocalContentColor.current.copy(alpha = 0.8f),
-                            maxLines = 1,
-                        )
+                        if (settings.displaySetting.showDateBelowName) {
+                            Text(
+                                text = message.createdAt.toJavaLocalDateTime().toLocalString(),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = LocalContentColor.current.copy(alpha = 0.8f),
+                                maxLines = 1,
+                            )
+                        }
                     }
                 }
-            } else {
+            } else if (model != null) {
                 if (showIcon) {
                     AutoAIIcon(
                         name = model.modelId,
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(32.dp),
                         loading = loading
                     )
                 }
@@ -130,13 +129,15 @@ fun ChatMessageAssistantAvatar(
                     if(settings.displaySetting.showModelName) {
                         Text(
                             text = model.displayName,
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.titleSmallEmphasized,
                         )
-                        Text(
-                            text = message.createdAt.toJavaLocalDateTime().toLocalString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = LocalContentColor.current.copy(alpha = 0.8f)
-                        )
+                        if (settings.displaySetting.showDateBelowName) {
+                            Text(
+                                text = message.createdAt.toJavaLocalDateTime().toLocalString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = LocalContentColor.current.copy(alpha = 0.8f)
+                            )
+                        }
                     }
                 }
             }

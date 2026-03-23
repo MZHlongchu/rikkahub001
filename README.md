@@ -1,70 +1,55 @@
-<div align="center">
-  <img src="docs/icon.png" alt="App Icon" width="100" />
-  <h1>RikkaHub</h1>
+# RikkaHub Fork
 
-  [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rikkahub/rikkahub)
+这是一个基于上游 RikkaHub 持续维护的 Android LLM 客户端分支，默认展示的是 `master`。
 
-  原生 Android LLM 聊天客户端，支持切换不同的 AI 服务商 🤖💬
+## 当前分支的额外功能
 
-  Fork 自 [RikkaHub](https://github.com/rikkahub/rikkahub)
+### 1. 本地工具与容器能力更完整
 
-  [简体中文](README_ZH_CN.md) | [繁體中文](README_ZH_TW.md) | English
-</div>
+- 新增沙箱文件工具，AI 可以在隔离沙箱里读写、列出、复制和删除文件
+- 新增 PRoot 容器工具，容器运行后可直接执行 shell、后台进程和容器内 Python，并支持后台保活
+- 新增 Workflow TODO 工具，可在对话里创建、读取、更新待办项
+- 新增 Workflow Control，可在聊天页直接开关工作流能力
+- 新增 SubAgent 工具，可把任务拆给子代理并行处理
+- 新增本地 Skills 目录与内置技能运行时，可在本机直接加载和调用技能
+- 助手设置页额外提供“文件管理”界面，可以直接查看并管理该助手各个对话沙箱里的文件
 
-<div align="center">
-  <img src="docs/img/chat.png" alt="Chat Interface" width="150" />
-  <img src="docs/img/models.png" alt="Models Picker" width="150" />
-  <img src="docs/img/providers.png" alt="Providers" width="150" />
-  <img src="docs/img/assistants.png" alt="Assistants" width="150" />
-</div>
+### 2. 聊天与上下文管理
 
-## 🚀 下载
+- 上下文压缩改成“主对话摘要 + 独立记忆账本”双轨维护：前者服务连续对话，后者服务历史召回与原文定位，一次生成的摘要既要维护上下文连贯性职责还要保障可作为高质量记忆检索的原料这种试图一鱼两吃的思路现已放弃，设计上就是只有用户觉得值得铭记的对话才应该作为记忆原料
+- 支持自动压缩，可按 token 阈值自动触发
+- 支持分别重新生成最近一次主摘要或记忆账本
+- 支持为当前会话重建记忆索引
+- 新增 Indexed History Recall，可检索历史记忆账本，再定位并读取原始消息
+- 新增助手级知识库，可上传文档建立索引，并通过工具列出、搜索和读取知识库分块
+- 对话分叉时会复制对应沙箱文件，避免新分支丢失运行上下文
 
-🔗 [官网下载](https://rikka-ai.com/download)
+### 3. 工作流交互
 
-🔗 [Google Play 下载](https://play.google.com/store/apps/details?id=me.rerere.rikkahub)
+- 聊天页增加 Workflow 侧边句柄和浮动面板
+- 可以在对话中切换工作流阶段，而不只是单纯聊天
+- Workflow 状态、TODO 状态会跟着会话一起保存
 
----
+### 4. 提供商与搜索配置更适合长期使用
 
-## ✨ 功能特性
+- OpenAI、Claude、Google 的 API Key 输入改成多 Key 池编辑器
+- Tavily 也支持多 Key 池配置
+- Key 轮询带持久化游标，重启应用后仍能继续轮换，不是每次随机抽 key
+- 搜索工具执行失败时会返回结构化失败信息，工具输出也会做长度截断，减少异常把上下文撑爆的情况
 
-- 🎨 Material You 设计和暗黑模式
-- 🔄 支持多家 AI 提供商（OpenAI、Google、Anthropic 等）
-- 🖼️ 多模态输入（图片、**视频**、文档、PDF、Word）
-- 🛠️ MCP 协议支持
-- 📝 Markdown 渲染（代码高亮、公式、表格、Mermaid）
-- 🪾 消息分支
-- 🔍 搜索功能（Exa、Tavily、智谱等）
-- 🧩 提示词变量（模型名、时间等）
-- 🤳 二维码导入导出配置
-- 🤖 AI 助手定制
-- 🧠 记忆功能
-- 📝 AI 翻译
-- 🌐 自定义 HTTP 请求头
-- 💌 Silly Tavern 角色卡导入
+### 5. 更新与发布链路已改成 fork 自己的渠道
 
-### 🧪 沙箱与容器功能
+- 更新检查改为读取这个 fork 的 GitHub Releases
+- 版本号解析和 APK 下载链接都跟随当前仓库发布，而不是上游默认更新源
 
-- 🐳 **容器运行时** - 基于 PRoot 和 Alpine 的完整 Linux 环境
-- 🐍 **Python 沙箱** - ChaquoPy 运行环境，预装 numpy、pandas、matplotlib、requests
-- 📂 **沙箱文件操作** - 每个对话独立的文件系统
-- 🔧 **容器 Shell** - 完整的 GNU Bash，支持 apk、git、wget
-- 📥 **文档自动导入** - 用户上传的文件自动导入到沙箱
-- 🔔 **前台服务** - 确保后台 AI 任务持续运行
+## 构建
 
-### 📋 工作流增强
+```bash
+./gradlew assembleDebug
+./gradlew test
+./gradlew lint
+```
 
-- ✅ **Todo 状态管理** - 独立的待办事项系统
-- 💻 **代码专用压缩** - 针对技术对话优化的上下文压缩
+## 致谢
 
----
-
-## ⭐ Star History
-
-如果喜欢这个项目，请给个 Star ⭐
-
-[![Star History Chart](https://api.star-history.com/svg?repos=re-ovo/rikkahub&type=Date)](https://star-history.com/#re-ovo/rikkahub&Date)
-
-## 📄 开源协议
-
-[License](LICENSE)
+感谢 RikkaHub 上游项目持续迭代，这个仓库的维护建立在上游工作的基础之上。

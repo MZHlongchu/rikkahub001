@@ -1,4 +1,3 @@
-
 package me.rerere.rikkahub.ui.components.message
 
 import androidx.compose.foundation.LocalIndication
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -22,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,27 +34,29 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.composables.icons.lucide.BookOpenText
-import com.composables.icons.lucide.CircleStop
-import com.composables.icons.lucide.Copy
-import com.composables.icons.lucide.Ellipsis
-import com.composables.icons.lucide.GitFork
-import com.composables.icons.lucide.Languages
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Pencil
-import com.composables.icons.lucide.RefreshCw
-import com.composables.icons.lucide.Share
-import com.composables.icons.lucide.TextSelect
-import com.composables.icons.lucide.Trash2
-import com.composables.icons.lucide.Volume2
 import kotlinx.coroutines.delay
 import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.FavouriteCircle
+import me.rerere.hugeicons.stroke.GitFork
+import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.Share04
+import me.rerere.hugeicons.stroke.StopCircle
+import me.rerere.hugeicons.stroke.TextSelection
+import me.rerere.hugeicons.stroke.Translate
+import me.rerere.hugeicons.stroke.VolumeHigh
+import me.rerere.hugeicons.stroke.WebDesign01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.utils.copyMessageToClipboard
@@ -92,7 +91,9 @@ fun ColumnScope.ChatMessageActionButtons(
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Lucide.Copy, stringResource(R.string.copy), modifier = Modifier
+            imageVector = HugeIcons.Copy01,
+            contentDescription = stringResource(R.string.copy),
+            modifier = Modifier
                 .clip(CircleShape)
                 .clickable { context.copyMessageToClipboard(message) }
                 .padding(8.dp)
@@ -100,7 +101,9 @@ fun ColumnScope.ChatMessageActionButtons(
         )
 
         Icon(
-            Lucide.RefreshCw, stringResource(R.string.regenerate), modifier = Modifier
+            imageVector = HugeIcons.Refresh03,
+            contentDescription = stringResource(R.string.regenerate),
+            modifier = Modifier
                 .clip(CircleShape)
                 .clickable {
                     if (message.role == MessageRole.USER) {
@@ -119,7 +122,7 @@ fun ColumnScope.ChatMessageActionButtons(
             val isSpeaking by tts.isSpeaking.collectAsState()
             val isAvailable by tts.isAvailable.collectAsState()
             Icon(
-                imageVector = if (isSpeaking) Lucide.CircleStop else Lucide.Volume2,
+                imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
                 contentDescription = stringResource(R.string.tts),
                 modifier = Modifier
                     .clip(CircleShape)
@@ -149,7 +152,7 @@ fun ColumnScope.ChatMessageActionButtons(
             // Translation button
             if (onTranslate != null) {
                 Icon(
-                    imageVector = Lucide.Languages,
+                    imageVector = HugeIcons.Translate,
                     contentDescription = stringResource(R.string.translate),
                     modifier = Modifier
                         .clip(CircleShape)
@@ -167,8 +170,8 @@ fun ColumnScope.ChatMessageActionButtons(
         }
 
         Icon(
-            imageVector = Lucide.Ellipsis,
-            contentDescription = "More Options",
+            imageVector = HugeIcons.MoreVertical,
+            contentDescription = stringResource(R.string.more_options),
             modifier = Modifier
                 .clip(CircleShape)
                 .clickable(
@@ -206,28 +209,18 @@ fun ColumnScope.ChatMessageActionButtons(
     }
 
     // Regenerate confirmation dialog
-    if (showRegenerateConfirm) {
-        AlertDialog(
-            onDismissRequest = { showRegenerateConfirm = false },
-            title = { Text(stringResource(R.string.regenerate)) },
-            text = { Text(stringResource(R.string.regenerate_confirm_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showRegenerateConfirm = false
-                        onRegenerate()
-                    }
-                ) {
-                    Text(stringResource(R.string.confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRegenerateConfirm = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
-        )
-    }
+    RikkaConfirmDialog(
+        show = showRegenerateConfirm,
+        title = stringResource(R.string.regenerate),
+        confirmText = stringResource(R.string.confirm),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            showRegenerateConfirm = false
+            onRegenerate()
+        },
+        onDismiss = { showRegenerateConfirm = false },
+        text = { Text(stringResource(R.string.regenerate_confirm_message)) }
+    )
 }
 
 @Composable
@@ -239,6 +232,8 @@ fun ChatMessageActionsSheet(
     onShare: () -> Unit,
     onFork: () -> Unit,
     onSelectAndCopy: () -> Unit,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
     onWebViewPreview: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
@@ -269,7 +264,7 @@ fun ChatMessageActionsSheet(
                         .fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Lucide.TextSelect,
+                        imageVector = HugeIcons.TextSelection,
                         contentDescription = null,
                         modifier = Modifier.padding(4.dp)
                     )
@@ -300,7 +295,7 @@ fun ChatMessageActionsSheet(
                             .fillMaxWidth()
                     ) {
                         Icon(
-                            imageVector = Lucide.BookOpenText,
+                            imageVector = HugeIcons.WebDesign01,
                             contentDescription = null,
                             modifier = Modifier.padding(4.dp)
                         )
@@ -328,7 +323,7 @@ fun ChatMessageActionsSheet(
                         .fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Lucide.Pencil,
+                        imageVector = HugeIcons.Edit01,
                         contentDescription = null,
                         modifier = Modifier.padding(4.dp)
                     )
@@ -355,7 +350,7 @@ fun ChatMessageActionsSheet(
                         .fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Lucide.Share,
+                        imageVector = HugeIcons.Share04,
                         contentDescription = null,
                         modifier = Modifier.padding(4.dp)
                     )
@@ -382,7 +377,7 @@ fun ChatMessageActionsSheet(
                         .fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Lucide.GitFork,
+                        imageVector = HugeIcons.GitFork,
                         contentDescription = null,
                         modifier = Modifier.padding(4.dp)
                     )
@@ -390,6 +385,37 @@ fun ChatMessageActionsSheet(
                         text = stringResource(R.string.create_fork),
                         style = MaterialTheme.typography.titleMedium,
                     )
+                }
+            }
+
+            if (onToggleFavorite != null) {
+                Card(
+                    onClick = {
+                        onDismissRequest()
+                        onToggleFavorite()
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.FavouriteCircle,
+                            contentDescription = null,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                        Text(
+                            text = stringResource(
+                                if (isFavorite) R.string.chat_message_remove_favorite
+                                else R.string.chat_message_add_favorite
+                            ),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
                 }
             }
 
@@ -412,7 +438,7 @@ fun ChatMessageActionsSheet(
                         .fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Lucide.Trash2,
+                        imageVector = HugeIcons.Delete01,
                         contentDescription = null,
                         modifier = Modifier.padding(4.dp)
                     )

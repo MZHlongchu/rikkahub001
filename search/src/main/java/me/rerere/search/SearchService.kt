@@ -28,12 +28,14 @@ interface SearchService<T : SearchServiceOptions> {
     fun Description()
 
     suspend fun search(
+        context: android.content.Context,
         params: JsonObject,
         commonOptions: SearchCommonOptions,
         serviceOptions: T
     ): Result<SearchResult>
 
     suspend fun scrape(
+        context: android.content.Context,
         params: JsonObject,
         commonOptions: SearchCommonOptions,
         serviceOptions: T
@@ -57,16 +59,21 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.JinaOptions -> JinaSearchService
                 is SearchServiceOptions.BochaOptions -> BochaSearchService
                 is SearchServiceOptions.RikkaHubOptions -> RikkaHubSearchService
+                is SearchServiceOptions.RikkaLocalOptions -> BingSearchService
+                is SearchServiceOptions.GrokOptions -> GrokSearchService
             } as SearchService<T>
         }
 
-        internal val httpClient by lazy {
-            OkHttpClient.Builder()
-                .retryOnConnectionFailure(true)
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
+        @Volatile
+        internal var httpClient: OkHttpClient = OkHttpClient.Builder()
+            .retryOnConnectionFailure(true)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        fun init(client: OkHttpClient) {
+            httpClient = client
         }
 
         internal val json by lazy {
@@ -137,6 +144,7 @@ sealed class SearchServiceOptions {
             FirecrawlOptions::class to "Firecrawl",
             JinaOptions::class to "Jina",
             BochaOptions::class to "博查",
+            GrokOptions::class to "Grok",
         )
     }
 
@@ -213,7 +221,8 @@ sealed class SearchServiceOptions {
     data class PerplexityOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val maxTokensPerPage: Int? = 1024,
+        val maxTokens: Int? = null,
+        val maxTokensPerPage: Int? = null,
     ) : SearchServiceOptions()
 
     @Serializable
@@ -221,6 +230,7 @@ sealed class SearchServiceOptions {
     data class FirecrawlOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
+        val baseUrl: String = "https://api.firecrawl.dev",
     ) : SearchServiceOptions()
 
     @Serializable
@@ -244,6 +254,21 @@ sealed class SearchServiceOptions {
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
         val depth: String = "standard",
+    ) : SearchServiceOptions()
+
+    // Legacy option kept only for backward compatibility with old settings payload.
+    @Serializable
+    @SerialName("rikka_local")
+    data class RikkaLocalOptions(
+        override val id: Uuid = Uuid.random(),
+    ) : SearchServiceOptions()
+
+    @Serializable
+    @SerialName("grok")
+    data class GrokOptions(
+        override val id: Uuid = Uuid.random(),
+        val apiKey: String = "",
+        val model: String = "grok-4-1-fast-non-reasoning",
     ) : SearchServiceOptions()
 }
 

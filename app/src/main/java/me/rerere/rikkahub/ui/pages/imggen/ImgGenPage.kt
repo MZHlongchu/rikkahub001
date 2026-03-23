@@ -1,5 +1,13 @@
 package me.rerere.rikkahub.ui.pages.imggen
 
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Image03
+import me.rerere.hugeicons.stroke.Colors
+import me.rerere.hugeicons.stroke.FloppyDisk
+import me.rerere.hugeicons.stroke.SendToMobile
+import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.Delete01
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,14 +80,6 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import coil3.compose.AsyncImage
-import com.composables.icons.lucide.Copy
-import com.composables.icons.lucide.Images
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Palette
-import com.composables.icons.lucide.Save
-import com.composables.icons.lucide.Send
-import com.composables.icons.lucide.Settings2
-import com.composables.icons.lucide.Trash2
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -87,14 +87,15 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.ui.ImageAspectRatio
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.utils.saveMessageImage
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 import java.io.File
 
 @Composable
@@ -183,7 +184,7 @@ private fun BottomBar(
                 Text(stringResource(R.string.imggen_page_title))
             },
             icon = {
-                Icon(Lucide.Palette, null)
+                Icon(HugeIcons.Colors, null)
             },
             onClick = {
                 scope.launch {
@@ -198,7 +199,7 @@ private fun BottomBar(
                 Text(stringResource(R.string.imggen_page_gallery))
             },
             icon = {
-                Icon(Lucide.Images, null)
+                Icon(HugeIcons.Image03, null)
             },
             onClick = {
                 scope.launch {
@@ -306,7 +307,7 @@ private fun InputBar(
         IconButton(
             onClick = onShowSettings
         ) {
-            Icon(Lucide.Settings2, null)
+            Icon(HugeIcons.Tools, null)
         }
 
         OutlinedTextField(
@@ -336,7 +337,7 @@ private fun InputBar(
                 )
             } else {
                 Icon(
-                    imageVector = Lucide.Send,
+                    imageVector = HugeIcons.SendToMobile,
                     contentDescription = stringResource(R.string.imggen_page_generate_image)
                 )
             }
@@ -350,6 +351,7 @@ private fun ImageGalleryScreen(
 ) {
     val generatedImages = vm.generatedImages.collectAsLazyPagingItems()
     val context = LocalContext.current
+    val filesManager: FilesManager = koinInject()
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -369,7 +371,7 @@ private fun ImageGalleryScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(
-                        imageVector = Lucide.Images,
+                        imageVector = HugeIcons.Image03,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -446,7 +448,7 @@ private fun ImageGalleryScreen(
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Lucide.Copy,
+                                                imageVector = HugeIcons.Copy01,
                                                 contentDescription = "Copy prompt",
                                                 modifier = Modifier.size(16.dp)
                                             )
@@ -456,7 +458,7 @@ private fun ImageGalleryScreen(
                                             onClick = {
                                                 scope.launch {
                                                     try {
-                                                        context.saveMessageImage("file://${it.filePath}")
+                                                        filesManager.saveMessageImage(context, "file://${it.filePath}")
                                                         toaster.show(
                                                             message = context.getString(R.string.imggen_page_image_saved_success),
                                                             type = ToastType.Success
@@ -475,7 +477,7 @@ private fun ImageGalleryScreen(
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Lucide.Save,
+                                                imageVector = HugeIcons.FloppyDisk,
                                                 contentDescription = stringResource(R.string.imggen_page_save),
                                                 modifier = Modifier.size(16.dp)
                                             )
@@ -486,7 +488,7 @@ private fun ImageGalleryScreen(
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Lucide.Trash2,
+                                                imageVector = HugeIcons.Delete01,
                                                 contentDescription = stringResource(R.string.imggen_page_delete),
                                                 modifier = Modifier.size(16.dp),
                                                 tint = MaterialTheme.colorScheme.error

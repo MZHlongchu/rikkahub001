@@ -51,6 +51,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
     override val scrapingParameters: InputSchema? = null
 
     override suspend fun search(
+        context: android.content.Context,
         params: JsonObject,
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.ExaOptions
@@ -73,7 +74,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
 
             val response = httpClient.newCall(request).execute()
             if (response.isSuccessful) {
-                val bodyRaw = response.body?.string() ?: error("Failed to get response body")
+                val bodyRaw = response.body.string()
                 val response = runCatching {
                     json.decodeFromString<ExaData>(bodyRaw)
                 }.onFailure {
@@ -88,18 +89,19 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                             SearchResultItem(
                                 title = it.title,
                                 url = it.url,
-                                text = it.text
+                                text = it.text ?: ""
                             )
                         }
                     ))
             } else {
-                println(response.body?.string())
+                println(response.body.string())
                 error("response failed #${response.code}")
             }
         }
     }
 
     override suspend fun scrape(
+        context: android.content.Context,
         params: JsonObject,
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.ExaOptions
@@ -110,15 +112,13 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
     @Serializable
     data class ExaData(
         @SerialName("requestId")
-        val requestId: String,
+        val requestId: String? = null,
         @SerialName("autopromptString")
-        val autopromptString: String,
+        val autopromptString: String? = null,
         @SerialName("resolvedSearchType")
-        val resolvedSearchType: String,
+        val resolvedSearchType: String? = null,
         @SerialName("results")
         val results: List<ExaResult>,
-        @SerialName("costDollars")
-        val costDollars: ExaCostDollars
     )
 
     @Serializable
@@ -134,28 +134,6 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
         @SerialName("author")
         val author: String?,
         @SerialName("text")
-        val text: String,
-    )
-
-    @Serializable
-    data class ExaCostDollars(
-        @SerialName("total")
-        val total: Double,
-        @SerialName("search")
-        val search: ExaSearchCost,
-        @SerialName("contents")
-        val contents: ExaContentsCost
-    )
-
-    @Serializable
-    data class ExaSearchCost(
-        @SerialName("neural")
-        val neural: Double
-    )
-
-    @Serializable
-    data class ExaContentsCost(
-        @SerialName("text")
-        val text: Double
+        val text: String? = null,
     )
 }

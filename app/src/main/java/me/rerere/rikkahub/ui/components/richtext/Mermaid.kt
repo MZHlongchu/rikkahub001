@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.richtext
 
 import android.graphics.BitmapFactory
 import android.util.Base64
+import android.util.LruCache
 import android.webkit.JavascriptInterface
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.animateContentSize
@@ -32,11 +33,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.composables.icons.lucide.Download
-import com.composables.icons.lucide.Eye
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.X
 import com.dokar.sonner.ToastType
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Download01
+import me.rerere.hugeicons.stroke.View
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
@@ -46,7 +47,7 @@ import me.rerere.rikkahub.utils.escapeHtml
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.toCssHex
 
-private val mermaidHeightCache = android.util.LruCache<String, Int>(100)
+private val mermaidHeightCache = LruCache<String, Int>(100)
 
 /**
  * A component that renders Mermaid diagrams.
@@ -160,7 +161,7 @@ fun Mermaid(
                     },
                 ) {
                     Icon(
-                        Lucide.Eye,
+                        HugeIcons.View,
                         contentDescription = "Prewview"
                     )
                 }
@@ -173,7 +174,7 @@ fun Mermaid(
                     },
                 ) {
                     Icon(
-                        Lucide.Download,
+                        HugeIcons.Download01,
                         contentDescription = stringResource(R.string.mermaid_export)
                     )
                 }
@@ -206,7 +207,7 @@ fun Mermaid(
                         }
                     ) {
                         Icon(
-                            Lucide.X,
+                            HugeIcons.Cancel01,
                             contentDescription = "Close"
                         )
                     }

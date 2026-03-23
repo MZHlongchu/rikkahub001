@@ -3,6 +3,8 @@ package me.rerere.ai.ui
 import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.core.MessageRole
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -118,6 +120,178 @@ class MessageTest {
         val result = messages.limitContext(1)
         assertEquals(1, result.size)
         assertEquals(messages, result)
+    }
+
+    @Test
+    fun `countsTowardKeepRecent should ignore tool-only assistant messages`() {
+        val messages = listOf(
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("User query"))),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Tool(
+                        toolCallId = "call1",
+                        toolName = "test_tool",
+                        input = "{}",
+                        output = emptyList()
+                    )
+                )
+            ),
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("Final response")))
+        )
+
+        assertTrue(messages[0].countsTowardKeepRecent())
+        assertFalse(messages[1].countsTowardKeepRecent())
+        assertTrue(messages[2].countsTowardKeepRecent())
+    }
+
+    @Test
+    fun `findKeepStartIndexForVisibleMessages should keep tool chain with previous user`() {
+        val messages = listOf(
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("User query"))),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Tool(
+                        toolCallId = "call1",
+                        toolName = "test_tool",
+                        input = "{}",
+                        output = emptyList()
+                    )
+                )
+            ),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Tool(
+                        toolCallId = "call1",
+                        toolName = "test_tool",
+                        input = "{}",
+                        output = listOf(UIMessagePart.Text("result"))
+                    )
+                )
+            ),
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("Final response")))
+        )
+
+        val result = messages.findKeepStartIndexForVisibleMessages(1)
+        assertEquals(0, result)
+    }
+
+    @Test
+    fun `findKeepStartIndexForVisibleMessages should count only visible user assistant messages`() {
+        val messages = listOf(
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Older user"))),
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("Older reply"))),
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("Current user"))),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Tool(
+                        toolCallId = "call2",
+                        toolName = "search",
+                        input = """{"q":"weather"}""",
+                        output = emptyList()
+                    )
+                )
+            ),
+            UIMessage(
+                role = MessageRole.TOOL,
+                parts = listOf(
+                    UIMessagePart.ToolResult(
+                        toolCallId = "call2",
+                        toolName = "search",
+                        content = JsonPrimitive("sunny"),
+                        arguments = JsonPrimitive("""{"q":"weather"}""")
+                    )
+                )
+            ),
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("Current reply")))
+        )
+
+        val result = messages.findKeepStartIndexForVisibleMessages(2)
+        assertEquals(2, result)
+    }
+
+    @Test
+    fun `findKeepStartIndexForVisibleMessages should return size when keeping zero visible messages`() {
+        val messages = createTestMessages(4)
+        val result = messages.findKeepStartIndexForVisibleMessages(0)
+        assertEquals(messages.size, result)
+    }
+
+    @Test
+    fun `findKeepStartIndexForVisibleMessages should return null when not enough visible messages`() {
+        val messages = listOf(
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Tool(
+                        toolCallId = "call1",
+                        toolName = "test_tool",
+                        input = "{}",
+                        output = emptyList()
+                    )
+                )
+            )
+        )
+
+        val result = messages.findKeepStartIndexForVisibleMessages(1)
+        assertNull(result)
+    }
+
+    // ==================== isValidToUpload Tests ====================
+
+    @Test
+    fun `isValidToUpload should be true for non-empty reasoning with empty text`() {
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Reasoning(reasoning = "thinking"),
+                UIMessagePart.Text("")
+            )
+        )
+
+        assertTrue(message.isValidToUpload())
+    }
+
+    @Test
+    fun `isValidToUpload should be false for blank reasoning with empty text`() {
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Reasoning(reasoning = "   "),
+                UIMessagePart.Text("")
+            )
+        )
+
+        assertFalse(message.isValidToUpload())
+    }
+
+    @Test
+    fun `isValidToUpload should be true for non-empty text`() {
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("ok"))
+        )
+
+        assertTrue(message.isValidToUpload())
+    }
+
+    @Test
+    fun `isValidToUpload should keep tool-only message valid`() {
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "call-1",
+                    toolName = "search",
+                    input = """{"q":"hello"}"""
+                )
+            )
+        )
+
+        assertTrue(message.isValidToUpload())
     }
 
     // ==================== migrateToolMessages Tests ====================

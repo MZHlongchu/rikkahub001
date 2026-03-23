@@ -15,26 +15,35 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_CODE_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_DIALOGUE_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
+import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.files.SkillFrontmatterParser
+import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
-import me.rerere.rikkahub.data.model.PromptInjection
-import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.model.Lorebook
+import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.data.model.ScheduledPromptTask
+import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.ui.theme.PresetThemes
 import me.rerere.rikkahub.utils.JsonInstant
@@ -44,6 +53,7 @@ import me.rerere.search.SearchServiceOptions
 import me.rerere.tts.provider.TTSProviderSetting
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
+import java.io.File
 import kotlin.uuid.Uuid
 
 private const val TAG = "PreferencesStore"
@@ -52,7 +62,9 @@ private val Context.settingsStore by preferencesDataStore(
     name = "settings",
     produceMigrations = { context ->
         listOf(
-            PreferenceStoreV1Migration()
+            PreferenceStoreV1Migration(),
+            PreferenceStoreV2Migration(),
+            PreferenceStoreV3Migration()
         )
     }
 )
@@ -81,13 +93,20 @@ class SettingsStore(
         val IMAGE_GENERATION_MODEL = stringPreferencesKey("image_generation_model")
         val TITLE_PROMPT = stringPreferencesKey("title_prompt")
         val TRANSLATION_PROMPT = stringPreferencesKey("translation_prompt")
+        val TRANSLATE_THINKING_BUDGET = intPreferencesKey("translate_thinking_budget")
         val SUGGESTION_PROMPT = stringPreferencesKey("suggestion_prompt")
         val OCR_MODEL = stringPreferencesKey("ocr_model")
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
-        val CODE_COMPRESS_MODEL = stringPreferencesKey("code_compress_model")
-        val CODE_COMPRESS_PROMPT = stringPreferencesKey("code_compress_prompt")
+        val DIALOGUE_COMPRESS_PROMPT = stringPreferencesKey("dialogue_compress_prompt")
+        val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
+        val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
+        val AUTO_COMPRESS_TRIGGER_TOKENS = intPreferencesKey("auto_compress_trigger_tokens")
+        val MANUAL_COMPRESS_KEEP_RECENT_MESSAGES = intPreferencesKey("manual_compress_keep_recent_messages")
+        val MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER =
+            booleanPreferencesKey("manual_compress_generate_memory_ledger")
+        val TOKEN_ESTIMATOR_CHARS_PER_TOKEN = stringPreferencesKey("token_estimator_chars_per_token")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -96,6 +115,9 @@ class SettingsStore(
         val SELECT_ASSISTANT = stringPreferencesKey("select_assistant")
         val ASSISTANTS = stringPreferencesKey("assistants")
         val ASSISTANT_TAGS = stringPreferencesKey("assistant_tags")
+        val ENABLE_WORKFLOW_CONTROL = booleanPreferencesKey("enable_workflow_control")
+        val SCHEDULED_TASKS = stringPreferencesKey("scheduled_tasks")
+        val SCHEDULED_TASK_KEEP_ALIVE_ENABLED = booleanPreferencesKey("scheduled_task_keep_alive_enabled")
 
         // 搜索
         val SEARCH_SERVICES = stringPreferencesKey("search_services")
@@ -115,12 +137,27 @@ class SettingsStore(
         val TTS_PROVIDERS = stringPreferencesKey("tts_providers")
         val SELECTED_TTS_PROVIDER = stringPreferencesKey("selected_tts_provider")
 
+        // Web Server
+        val WEB_SERVER_ENABLED = booleanPreferencesKey("web_server_enabled")
+        val WEB_SERVER_PORT = intPreferencesKey("web_server_port")
+        val WEB_SERVER_JWT_ENABLED = booleanPreferencesKey("web_server_jwt_enabled")
+        val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
+        val ENABLE_CONTAINER_RUNTIME = booleanPreferencesKey("enable_container_runtime")
+        val WEB_SERVER_LOCALHOST_ONLY = booleanPreferencesKey("web_server_localhost_only")
+
         // 提示词注入
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
+        val QUICK_MESSAGES = stringPreferencesKey("quick_messages")
 
-        // 容器运行时
-        val ENABLE_CONTAINER_RUNTIME = booleanPreferencesKey("enable_container_runtime")
+        // 备份提醒
+        val BACKUP_REMINDER_CONFIG = stringPreferencesKey("backup_reminder_config")
+
+        // 统计
+        val LAUNCH_COUNT = intPreferencesKey("launch_count")
+
+        // 赞助提醒
+        val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
     }
 
     private val dataStore = context.settingsStore
@@ -149,18 +186,29 @@ class SettingsStore(
                 imageGenerationModelId = preferences[IMAGE_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
                 titlePrompt = preferences[TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
                 translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
+                translateThinkingBudget = preferences[TRANSLATE_THINKING_BUDGET] ?: 0,
                 suggestionPrompt = preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
                 ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
-                codeCompressModelId = preferences[CODE_COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
-                codeCompressPrompt = preferences[CODE_COMPRESS_PROMPT] ?: DEFAULT_CODE_COMPRESS_PROMPT,
+                dialogueCompressPrompt = preferences[DIALOGUE_COMPRESS_PROMPT] ?: DEFAULT_DIALOGUE_COMPRESS_PROMPT,
+                embeddingModelId = preferences[EMBEDDING_MODEL]?.takeIf { it.isNotBlank() }?.let { Uuid.parse(it) },
+                autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] == true,
+                autoCompressTriggerTokens = preferences[AUTO_COMPRESS_TRIGGER_TOKENS] ?: 12000,
+                manualCompressKeepRecentMessages = preferences[MANUAL_COMPRESS_KEEP_RECENT_MESSAGES] ?: 6,
+                manualCompressGenerateMemoryLedger = preferences[MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER] != false,
+                tokenEstimatorCharsPerToken = preferences[TOKEN_ESTIMATOR_CHARS_PER_TOKEN]?.toFloatOrNull() ?: 4.0f,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
+                enableWorkflowControl = preferences[ENABLE_WORKFLOW_CONTROL] == true,
+                scheduledTasks = preferences[SCHEDULED_TASKS]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptyList(),
+                scheduledTaskKeepAliveEnabled = preferences[SCHEDULED_TASK_KEEP_ALIVE_ENABLED] == true,
                 providers = JsonInstant.decodeFromString(preferences[PROVIDERS] ?: "[]"),
                 assistants = JsonInstant.decodeFromString(preferences[ASSISTANTS] ?: "[]"),
                 dynamicColor = preferences[DYNAMIC_COLOR] != false,
@@ -194,7 +242,20 @@ class SettingsStore(
                 lorebooks = preferences[LOREBOOKS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
-                enableContainerRuntime = preferences[ENABLE_CONTAINER_RUNTIME] == true,
+                quickMessages = preferences[QUICK_MESSAGES]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptyList(),
+                webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
+                webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
+                webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
+                webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
+                enableContainerRuntime = preferences[ENABLE_CONTAINER_RUNTIME] != false,
+                webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
+                backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: BackupReminderConfig(),
+                launchCount = preferences[LAUNCH_COUNT] ?: 0,
+                sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
             )
         }
         .map {
@@ -220,6 +281,21 @@ class SettingsStore(
                     assistants.add(defaultAssistant.copy())
                 }
             }
+            val migratedWorkflowEnabled = it.enableWorkflowControl ||
+                assistants.any { assistant -> assistant.localTools.contains(LocalToolOption.WorkflowControl) }
+            val migratedAssistants = assistants.map { assistant ->
+                if (assistant.localTools.any { tool ->
+                        tool == LocalToolOption.WorkflowControl || tool == LocalToolOption.SandboxFile
+                    }) {
+                    assistant.copy(
+                        localTools = assistant.localTools.filterNot { tool ->
+                            tool == LocalToolOption.WorkflowControl || tool == LocalToolOption.SandboxFile
+                        }
+                    )
+                } else {
+                    assistant
+                }
+            }.toMutableList()
             val ttsProviders = it.ttsProviders.ifEmpty { DEFAULT_TTS_PROVIDERS }.toMutableList()
             DEFAULT_TTS_PROVIDERS.forEach { defaultTTSProvider ->
                 if (ttsProviders.none { provider -> provider.id == defaultTTSProvider.id }) {
@@ -228,8 +304,9 @@ class SettingsStore(
             }
             it.copy(
                 providers = providers,
-                assistants = assistants,
-                ttsProviders = ttsProviders
+                assistants = migratedAssistants,
+                ttsProviders = ttsProviders,
+                enableWorkflowControl = migratedWorkflowEnabled,
             )
         }
         .map { settings ->
@@ -237,6 +314,12 @@ class SettingsStore(
             val validMcpServerIds = settings.mcpServers.map { it.id }.toSet()
             val validModeInjectionIds = settings.modeInjections.map { it.id }.toSet()
             val validLorebookIds = settings.lorebooks.map { it.id }.toSet()
+            val validAssistantIds = settings.assistants.map { it.id }.toSet()
+            val fallbackAssistantId = settings.assistants.firstOrNull()?.id ?: DEFAULT_ASSISTANT_ID
+            val maxSearchIndex = (settings.searchServices.size - 1).coerceAtLeast(0)
+            val validQuickMessageIds = settings.quickMessages.map { it.id }.toSet()
+            val skillDirectoryAliases = loadSkillDirectoryAliases(context)
+            val validSkillDirectoryNames = skillDirectoryAliases.values.toSet()
             settings.copy(
                 providers = settings.providers.distinctBy { it.id }.map { provider ->
                     when (provider) {
@@ -254,6 +337,15 @@ class SettingsStore(
                     }
                 },
                 assistants = settings.assistants.distinctBy { it.id }.map { assistant ->
+                    val sanitizedLocalTools = assistant.localTools.filterNot { tool ->
+                        tool == LocalToolOption.WorkflowControl || tool == LocalToolOption.SandboxFile
+                    }.let { tools ->
+                        if (settings.enableWorkflowControl) {
+                            (tools + LocalToolOption.WorkflowControl).distinct()
+                        } else {
+                            tools
+                        }
+                    }
                     assistant.copy(
                         // 过滤掉不存在的 MCP 服务器 ID
                         mcpServers = assistant.mcpServers.filter { serverId ->
@@ -266,7 +358,19 @@ class SettingsStore(
                         // 过滤掉不存在的 Lorebook ID
                         lorebookIds = assistant.lorebookIds.filter { id ->
                             id in validLorebookIds
-                        }.toSet()
+                        }.toSet(),
+                        // 过滤掉不存在的快捷消息 ID
+                        quickMessageIds = assistant.quickMessageIds.filter { id ->
+                            id in validQuickMessageIds
+                        }.toSet(),
+                        enabledSkills = assistant.enabledSkills.mapNotNull { skillKey ->
+                            when {
+                                skillKey in validSkillDirectoryNames -> skillKey
+                                skillDirectoryAliases.containsKey(skillKey) -> skillDirectoryAliases.getValue(skillKey)
+                                else -> null
+                            }
+                        }.toSet(),
+                        localTools = sanitizedLocalTools,
                     )
                 },
                 ttsProviders = settings.ttsProviders.distinctBy { it.id },
@@ -275,6 +379,25 @@ class SettingsStore(
                 },
                 modeInjections = settings.modeInjections.distinctBy { it.id },
                 lorebooks = settings.lorebooks.distinctBy { it.id },
+                quickMessages = settings.quickMessages.distinctBy { it.id },
+                scheduledTasks = settings.scheduledTasks
+                    .distinctBy { it.id }
+                    .map { task ->
+                        task.copy(
+                            assistantId = if (task.assistantId in validAssistantIds) {
+                                task.assistantId
+                            } else {
+                                fallbackAssistantId
+                            },
+                            overrideMcpServers = task.overrideMcpServers?.filter { it in validMcpServerIds }?.toSet(),
+                            overrideSearchServiceIndex = task.overrideSearchServiceIndex?.let { index ->
+                                if (settings.searchServices.isEmpty()) null else index.coerceIn(0, maxSearchIndex)
+                            },
+                            overrideLocalTools = task.overrideLocalTools
+                                ?.filterNot { tool -> tool == LocalToolOption.SandboxFile }
+                                ?.distinct(),
+                        )
+                    },
             )
         }
         .onEach {
@@ -291,6 +414,20 @@ class SettingsStore(
             return
         }
         settingsFlow.value = settings
+        val assistantsForStorage = settings.assistants.map { assistant ->
+            assistant.copy(
+                localTools = assistant.localTools.filterNot { tool ->
+                    tool == LocalToolOption.WorkflowControl || tool == LocalToolOption.SandboxFile
+                }
+            )
+        }
+        val scheduledTasksForStorage = settings.scheduledTasks.map { task ->
+            task.copy(
+                overrideLocalTools = task.overrideLocalTools
+                    ?.filterNot { tool -> tool == LocalToolOption.SandboxFile }
+                    ?.distinct()
+            )
+        }
         dataStore.edit { preferences ->
             preferences[DYNAMIC_COLOR] = settings.dynamicColor
             preferences[THEME_ID] = settings.themeId
@@ -306,19 +443,31 @@ class SettingsStore(
             preferences[IMAGE_GENERATION_MODEL] = settings.imageGenerationModelId.toString()
             preferences[TITLE_PROMPT] = settings.titlePrompt
             preferences[TRANSLATION_PROMPT] = settings.translatePrompt
+            preferences[TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
             preferences[SUGGESTION_PROMPT] = settings.suggestionPrompt
             preferences[OCR_MODEL] = settings.ocrModelId.toString()
             preferences[OCR_PROMPT] = settings.ocrPrompt
             preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
             preferences[COMPRESS_PROMPT] = settings.compressPrompt
-            preferences[CODE_COMPRESS_MODEL] = settings.codeCompressModelId.toString()
-            preferences[CODE_COMPRESS_PROMPT] = settings.codeCompressPrompt
+            preferences[DIALOGUE_COMPRESS_PROMPT] = settings.dialogueCompressPrompt
+            settings.embeddingModelId?.let {
+                preferences[EMBEDDING_MODEL] = it.toString()
+            } ?: preferences.remove(EMBEDDING_MODEL)
+            preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
+            preferences[AUTO_COMPRESS_TRIGGER_TOKENS] = settings.autoCompressTriggerTokens.coerceAtLeast(1000)
+            preferences[MANUAL_COMPRESS_KEEP_RECENT_MESSAGES] =
+                settings.manualCompressKeepRecentMessages.coerceAtLeast(0)
+            preferences[MANUAL_COMPRESS_GENERATE_MEMORY_LEDGER] = settings.manualCompressGenerateMemoryLedger
+            preferences[TOKEN_ESTIMATOR_CHARS_PER_TOKEN] = settings.tokenEstimatorCharsPerToken.toString()
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
-            preferences[ASSISTANTS] = JsonInstant.encodeToString(settings.assistants)
+            preferences[ASSISTANTS] = JsonInstant.encodeToString(assistantsForStorage)
             preferences[SELECT_ASSISTANT] = settings.assistantId.toString()
             preferences[ASSISTANT_TAGS] = JsonInstant.encodeToString(settings.assistantTags)
+            preferences[ENABLE_WORKFLOW_CONTROL] = settings.enableWorkflowControl
+            preferences[SCHEDULED_TASKS] = JsonInstant.encodeToString(scheduledTasksForStorage)
+            preferences[SCHEDULED_TASK_KEEP_ALIVE_ENABLED] = settings.scheduledTaskKeepAliveEnabled
 
             preferences[SEARCH_SERVICES] = JsonInstant.encodeToString(settings.searchServices)
             preferences[SEARCH_COMMON] = JsonInstant.encodeToString(settings.searchCommonOptions)
@@ -333,7 +482,16 @@ class SettingsStore(
             } ?: preferences.remove(SELECTED_TTS_PROVIDER)
             preferences[MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
+            preferences[QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
+            preferences[WEB_SERVER_ENABLED] = settings.webServerEnabled
+            preferences[WEB_SERVER_PORT] = settings.webServerPort
+            preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
+            preferences[WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
             preferences[ENABLE_CONTAINER_RUNTIME] = settings.enableContainerRuntime
+            preferences[WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
+            preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
+            preferences[LAUNCH_COUNT] = settings.launchCount
+            preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
         }
     }
 
@@ -344,6 +502,71 @@ class SettingsStore(
     suspend fun updateAssistant(assistantId: Uuid) {
         dataStore.edit { preferences ->
             preferences[SELECT_ASSISTANT] = assistantId.toString()
+        }
+    }
+
+    suspend fun updateAssistantModel(assistantId: Uuid, modelId: Uuid) {
+        update { settings ->
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == assistantId) {
+                        assistant.copy(chatModelId = modelId)
+                    } else {
+                        assistant
+                    }
+                }
+            )
+        }
+    }
+
+    suspend fun updateAssistantThinkingBudget(assistantId: Uuid, thinkingBudget: Int?) {
+        update { settings ->
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == assistantId) {
+                        assistant.copy(thinkingBudget = thinkingBudget)
+                    } else {
+                        assistant
+                    }
+                }
+            )
+        }
+    }
+
+    suspend fun updateAssistantMcpServers(assistantId: Uuid, mcpServers: Set<Uuid>) {
+        update { settings ->
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == assistantId) {
+                        assistant.copy(mcpServers = mcpServers)
+                    } else {
+                        assistant
+                    }
+                }
+            )
+        }
+    }
+
+    suspend fun updateAssistantInjections(
+        assistantId: Uuid,
+        modeInjectionIds: Set<Uuid>,
+        lorebookIds: Set<Uuid>,
+        quickMessageIds: Set<Uuid> = emptySet(),
+    ) {
+        update { settings ->
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == assistantId) {
+                        assistant.copy(
+                            modeInjectionIds = modeInjectionIds,
+                            lorebookIds = lorebookIds,
+                            quickMessageIds = quickMessageIds,
+                        )
+                    } else {
+                        assistant
+                    }
+                }
+            )
         }
     }
 }
@@ -364,18 +587,27 @@ data class Settings(
     val titlePrompt: String = DEFAULT_TITLE_PROMPT,
     val translateModeId: Uuid = Uuid.random(),
     val translatePrompt: String = DEFAULT_TRANSLATION_PROMPT,
+    val translateThinkingBudget: Int = 0,
     val suggestionModelId: Uuid = Uuid.random(),
     val suggestionPrompt: String = DEFAULT_SUGGESTION_PROMPT,
     val ocrModelId: Uuid = Uuid.random(),
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val compressModelId: Uuid = Uuid.random(),
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
-    val codeCompressModelId: Uuid = Uuid.random(),
-    val codeCompressPrompt: String = DEFAULT_CODE_COMPRESS_PROMPT,
+    val dialogueCompressPrompt: String = DEFAULT_DIALOGUE_COMPRESS_PROMPT,
+    val embeddingModelId: Uuid? = null,
+    val autoCompressEnabled: Boolean = false,
+    val autoCompressTriggerTokens: Int = 12000,
+    val manualCompressKeepRecentMessages: Int = 6,
+    val manualCompressGenerateMemoryLedger: Boolean = true,
+    val tokenEstimatorCharsPerToken: Float = 4.0f,
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
     val assistants: List<Assistant> = DEFAULT_ASSISTANTS,
     val assistantTags: List<Tag> = emptyList(),
+    val enableWorkflowControl: Boolean = false,
+    val scheduledTasks: List<ScheduledPromptTask> = emptyList(),
+    val scheduledTaskKeepAliveEnabled: Boolean = false,
     val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
@@ -386,10 +618,16 @@ data class Settings(
     val selectedTTSProviderId: Uuid = DEFAULT_SYSTEM_TTS_ID,
     val modeInjections: List<PromptInjection.ModeInjection> = DEFAULT_MODE_INJECTIONS,
     val lorebooks: List<Lorebook> = emptyList(),
+    val quickMessages: List<QuickMessage> = emptyList(),
+    val webServerEnabled: Boolean = false,
+    val webServerPort: Int = 8080,
+    val webServerJwtEnabled: Boolean = false,
+    val webServerAccessPassword: String = "",
     val enableContainerRuntime: Boolean = true,
-    
-    // 子代理设置
-    val enabledSubAgentIds: Set<Uuid> = emptySet(),  // 启用的子代理ID
+    val webServerLocalhostOnly: Boolean = false,
+    val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
+    val launchCount: Int = 0,
+    val sponsorAlertDismissedAt: Int = 0,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储
@@ -398,14 +636,27 @@ data class Settings(
 }
 
 @Serializable
+enum class ChatFontFamily {
+    @SerialName("default")
+    DEFAULT,
+    @SerialName("serif")
+    SERIF,
+    @SerialName("monospace")
+    MONOSPACE,
+}
+
+@Serializable
 data class DisplaySetting(
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
+    val useAppIconStyleLoadingIndicator: Boolean = true,
     val showUserAvatar: Boolean = true,
     val showAssistantBubble: Boolean = false,
     val showModelIcon: Boolean = true,
     val showModelName: Boolean = true,
+    val showDateBelowName: Boolean = false,
     val showTokenUsage: Boolean = true,
+    val showThinkingContent: Boolean = true,
     val autoCloseThinking: Boolean = true,
     val showUpdates: Boolean = true,
     val showMessageJumper: Boolean = true,
@@ -424,6 +675,9 @@ data class DisplaySetting(
     val pasteLongTextThreshold: Int = 1000,
     val sendOnEnter: Boolean = false,
     val enableAutoScroll: Boolean = true,
+    val enableLatexRendering: Boolean = true,
+    val enableBlurEffect: Boolean = false,
+    val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
 )
 
 @Serializable
@@ -443,6 +697,13 @@ data class WebDavConfig(
         FILES,
     }
 }
+
+@Serializable
+data class BackupReminderConfig(
+    val enabled: Boolean = false,
+    val intervalDays: Int = 7,
+    val lastBackupTime: Long = 0L,
+)
 
 fun Settings.isNotConfigured() = providers.all { it.models.isEmpty() }
 
@@ -465,6 +726,12 @@ fun Settings.getCurrentChatModel(): Model? {
     return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
 }
 
+fun Settings.getEmbeddingModel(): Model? {
+    val modelId = embeddingModelId ?: return null
+    val model = findModelById(modelId) ?: return null
+    return model.takeIf { it.type == ModelType.EMBEDDING }
+}
+
 fun Settings.getCurrentAssistant(): Assistant {
     return this.assistants.find { it.id == assistantId } ?: this.assistants.first()
 }
@@ -472,6 +739,9 @@ fun Settings.getCurrentAssistant(): Assistant {
 fun Settings.getAssistantById(id: Uuid): Assistant? {
     return this.assistants.find { it.id == id }
 }
+
+fun Settings.getQuickMessagesOfAssistant(assistant: Assistant) =
+    quickMessages.filter { it.id in assistant.quickMessageIds }
 
 fun Settings.getSelectedTTSProvider(): TTSProviderSetting? {
     return selectedTTSProviderId?.let { id ->
@@ -483,7 +753,7 @@ fun Model.findProvider(providers: List<ProviderSetting>, checkOverwrite: Boolean
     val provider = findModelProviderFromList(providers) ?: return null
     val providerOverwrite = this.providerOverwrite
     if (checkOverwrite && providerOverwrite != null) {
-        return providerOverwrite.copyProvider(proxy = provider.proxy, models = emptyList())
+        return providerOverwrite.copyProvider(models = emptyList())
     }
     return provider
 }
@@ -499,18 +769,23 @@ private fun Model.findModelProviderFromList(providers: List<ProviderSetting>): P
     return null
 }
 
-/**
- * 获取启用的子代理列表
- */
-fun Settings.getEnabledSubAgents(): List<me.rerere.rikkahub.data.model.SubAgent> {
-    return if (enabledSubAgentIds.isEmpty()) {
-        // 默认启用所有内置子代理
-        me.rerere.rikkahub.data.model.SubAgentTemplates.All
-    } else {
-        me.rerere.rikkahub.data.model.SubAgentTemplates.All.filter { 
-            enabledSubAgentIds.contains(it.id) 
+private fun loadSkillDirectoryAliases(context: Context): Map<String, String> {
+    val skillsRoot = File(context.filesDir, FileFolders.SKILLS)
+    if (!skillsRoot.exists()) return emptyMap()
+    val aliases = linkedMapOf<String, String>()
+    skillsRoot.listFiles()
+        ?.filter { it.isDirectory }
+        ?.forEach { directory ->
+            val skillFile = directory.resolve("SKILL.md")
+            if (!skillFile.exists()) return@forEach
+            val content = runCatching { skillFile.readText() }.getOrNull() ?: return@forEach
+            val name = SkillFrontmatterParser.parse(content)["name"]?.trim().orEmpty()
+            aliases[directory.name] = directory.name
+            if (name.isNotBlank()) {
+                aliases.putIfAbsent(name, directory.name)
+            }
         }
-    }
+    return aliases
 }
 
 internal val DEFAULT_ASSISTANT_ID = Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")

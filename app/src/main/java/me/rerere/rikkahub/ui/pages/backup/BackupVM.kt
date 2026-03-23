@@ -17,6 +17,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.sync.importer.CherryStudioProviderImporter
 import me.rerere.rikkahub.data.sync.webdav.WebDavBackupItem
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.rikkahub.data.sync.S3BackupItem
@@ -75,6 +76,7 @@ class BackupVM(
 
     suspend fun backup() {
         webDavSync.backup(settings.value.webDavConfig)
+        recordBackupTime()
     }
 
     suspend fun restore(item: WebDavBackupItem) {
@@ -86,7 +88,9 @@ class BackupVM(
     }
 
     suspend fun exportToFile(): File {
-        return webDavSync.prepareBackupFile(settings.value.webDavConfig.copy())
+        val file = webDavSync.prepareBackupFile(settings.value.webDavConfig.copy())
+        recordBackupTime()
+        return file
     }
 
     suspend fun restoreFromLocalFile(file: File) {
@@ -171,6 +175,22 @@ class BackupVM(
         )
     }
 
+    fun restoreFromCherryStudio(file: File) {
+        val importProviders = CherryStudioProviderImporter.importProviders(file)
+
+        if (importProviders.isEmpty()) {
+            throw IllegalArgumentException("No importable providers found in Cherry Studio backup")
+        }
+
+        Log.i(TAG, "restoreFromCherryStudio: import ${importProviders.size} providers: $importProviders")
+
+        updateSettings(
+            settings.value.copy(
+                providers = importProviders + settings.value.providers,
+            )
+        )
+    }
+
     // S3 Backup methods
     fun loadS3BackupFileItems() {
         viewModelScope.launch {
@@ -195,6 +215,7 @@ class BackupVM(
 
     suspend fun backupToS3() {
         s3Sync.backupToS3(settings.value.s3Config)
+        recordBackupTime()
     }
 
     suspend fun restoreFromS3(item: S3BackupItem) {
@@ -203,5 +224,15 @@ class BackupVM(
 
     suspend fun deleteS3BackupFile(item: S3BackupItem) {
         s3Sync.deleteS3BackupFile(settings.value.s3Config, item)
+    }
+
+    private suspend fun recordBackupTime() {
+        settingsStore.update { settings ->
+            settings.copy(
+                backupReminderConfig = settings.backupReminderConfig.copy(
+                    lastBackupTime = System.currentTimeMillis()
+                )
+            )
+        }
     }
 }

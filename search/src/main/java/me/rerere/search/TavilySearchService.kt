@@ -1,5 +1,6 @@
 package me.rerere.search
 
+import android.content.Context
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -18,6 +19,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.KeyCursorStore
+import me.rerere.ai.util.KeyRoulette
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -25,9 +28,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 private const val TAG = "TavilySearchService"
+private const val TAVILY_CURSOR_PREF = "search_tavily_key_cursor"
 
 object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
     override val name: String = "Tavily"
+    private var keyRoulette: KeyRoulette? = null
 
     @Composable
     override fun Description() {
@@ -73,6 +78,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
         )
 
     override suspend fun search(
+        context: android.content.Context,
         params: JsonObject,
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.TavilyOptions
@@ -96,7 +102,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             val request = Request.Builder()
                 .url("https://api.tavily.com/search")
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Authorization", "Bearer ${nextApiKey(context, serviceOptions)}")
                 .build()
             val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {
@@ -121,6 +127,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
     }
 
     override suspend fun scrape(
+        context: android.content.Context,
         params: JsonObject,
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.TavilyOptions
@@ -135,7 +142,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             val request = Request.Builder()
                 .url("https://api.tavily.com/extract")
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Authorization", "Bearer ${nextApiKey(context, serviceOptions)}")
                 .build()
             val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {
@@ -187,4 +194,25 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
         @SerialName("raw_content")
         val rawContent: String,
     )
+
+    private fun nextApiKey(context: Context, options: SearchServiceOptions.TavilyOptions): String {
+        val roulette = keyRoulette ?: synchronized(this) {
+            keyRoulette ?: KeyRoulette.default(
+                cursorStore = TavilyKeyCursorStore(context.applicationContext)
+            ).also { keyRoulette = it }
+        }
+        return roulette.next("search:tavily:${options.id}", options.apiKey)
+    }
+}
+
+private class TavilyKeyCursorStore(context: Context) : KeyCursorStore {
+    private val preferences = context.getSharedPreferences(TAVILY_CURSOR_PREF, Context.MODE_PRIVATE)
+
+    override fun get(scopeKey: String): Int {
+        return preferences.getInt(scopeKey, 0)
+    }
+
+    override fun put(scopeKey: String, nextIndex: Int) {
+        preferences.edit().putInt(scopeKey, nextIndex).commit()
+    }
 }

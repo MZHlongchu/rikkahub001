@@ -1,5 +1,11 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.DragDropHorizontal
+import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.QuillWrite01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
@@ -16,11 +22,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
@@ -29,27 +37,25 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.GripHorizontal
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Plus
-import com.composables.icons.lucide.SquarePen
-import com.composables.icons.lucide.Trash2
-import com.composables.icons.lucide.X
+import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -59,6 +65,7 @@ import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchService
@@ -68,26 +75,54 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.reflect.full.primaryConstructor
 
+private const val MAX_SEARCH_API_KEYS = 100
+private val SEARCH_API_KEY_SPLIT_REGEX = "[\\s,]+".toRegex()
+
 @Composable
 fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val lazyListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            LargeFlexibleTopAppBar(
                 title = {
                     Text(stringResource(R.string.setting_page_search_title))
                 },
                 navigationIcon = {
                     BackButton()
-                }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            vm.updateSettings(
+                                settings.copy(
+                                    searchServices = listOf(SearchServiceOptions.BingLocalOptions()) + settings.searchServices
+                                )
+                            )
+                            scope.launch {
+                                lazyListState.animateScrollToItem(0)
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Add01,
+                            contentDescription = stringResource(R.string.setting_page_search_add_provider)
+                        )
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = CustomColors.topBarColors
             )
-        }
+        },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = CustomColors.topBarColors.containerColor
     ) {
-        val lazyListState = rememberLazyListState()
         val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-            // 需要考虑标题和按钮以及通用选项可能占用的位置
-            val offset = 1 // 第一个item是标题和按钮
+            // Search services start at visual index 0 after the header removal.
+            val offset = 0
             val fromIndex = from.index - offset
             val toIndex = to.index - offset
 
@@ -112,37 +147,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
             state = lazyListState
         ) {
-            // 搜索提供商标题和添加按钮
-            item("providers_header") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_page_search_providers),
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-                    OutlinedButton(
-                        onClick = {
-                            vm.updateSettings(
-                                settings.copy(
-                                    searchServices =  listOf(SearchServiceOptions.BingLocalOptions()) + settings.searchServices
-                                )
-                            )
-                        }
-                    ) {
-                        Icon(
-                            Lucide.Plus,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(stringResource(R.string.setting_page_search_add_provider))
-                    }
-                }
-            }
-
-            // 搜索提供商列表
+            // Search service list.
             items(settings.searchServices, key = { it.id }) { service ->
                 val index = settings.searchServices.indexOf(service)
                 ReorderableItem(
@@ -177,7 +182,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                             .animateItem(),
                         dragHandle = {
                             Icon(
-                                imageVector = Lucide.GripHorizontal,
+                                imageVector = HugeIcons.DragDropHorizontal,
                                 contentDescription = null,
                                 modifier = Modifier.longPressDraggableHandle(
                                     onDragStarted = {
@@ -193,7 +198,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            // 通用选项
+            // Common search options.
             item("common_options") {
                 CommonOptions(
                     settings = settings,
@@ -225,7 +230,10 @@ private fun SearchProviderCard(
     }
     var expand by remember { mutableStateOf(false) }
     Card(
-        modifier = modifier
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        )
     ) {
         Column(
             modifier = Modifier
@@ -266,7 +274,7 @@ private fun SearchProviderCard(
                     }
                 ) {
                     Icon(
-                        imageVector = if (expand) Lucide.X else Lucide.SquarePen,
+                        imageVector = if (expand) HugeIcons.Cancel01 else HugeIcons.QuillWrite01,
                         contentDescription = if (expand) "Hide details" else "Show details"
                     )
                 }
@@ -371,6 +379,15 @@ private fun SearchProviderCard(
                                 onUpdateService(options)
                             }
                         }
+
+                        is SearchServiceOptions.RikkaLocalOptions -> {}
+
+                        is SearchServiceOptions.GrokOptions -> {
+                            GrokOptions(options as SearchServiceOptions.GrokOptions) {
+                                options = it
+                                onUpdateService(options)
+                            }
+                        }
                     }
 
                     ProvideTextStyle(MaterialTheme.typography.labelMedium) {
@@ -389,7 +406,7 @@ private fun SearchProviderCard(
                         onClick = onDeleteService
                     ) {
                         Icon(
-                            Lucide.Trash2,
+                            HugeIcons.Delete01,
                             contentDescription = stringResource(R.string.setting_page_search_delete_provider)
                         )
                     }
@@ -437,23 +454,13 @@ private fun TavilyOptions(
     options: SearchServiceOptions.TavilyOptions,
     onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text("API Key")
+    SearchApiKeysEditor(
+        apiKeysRaw = options.apiKey,
+        poolLabel = "Tavily Key Pool",
+        onUpdate = { updated ->
+            onUpdateOptions(options.copy(apiKey = updated))
         }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(
-                    options.copy(
-                        apiKey = it
-                    )
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    )
 
     FormItem(
         label = {
@@ -481,6 +488,111 @@ private fun TavilyOptions(
             }
         }
     }
+}
+
+@Composable
+private fun SearchApiKeysEditor(
+    apiKeysRaw: String,
+    poolLabel: String,
+    onUpdate: (String) -> Unit
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var keyInputs by remember(apiKeysRaw) { mutableStateOf(parseSearchApiKeys(apiKeysRaw)) }
+
+    FormItem(
+        label = {
+            Text("API Key")
+        }
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = poolLabel,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(text = "${keyInputs.size}/$MAX_SEARCH_API_KEYS")
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = if (expanded) HugeIcons.Cancel01 else HugeIcons.QuillWrite01,
+                        contentDescription = null
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    keyInputs.forEachIndexed { index, value ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = value,
+                                onValueChange = { text ->
+                                    val updated = keyInputs.toMutableList()
+                                    updated[index] = text
+                                    keyInputs = updated
+                                    onUpdate(joinSearchApiKeys(updated))
+                                },
+                                label = { Text("Key ${index + 1}") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            IconButton(
+                                onClick = {
+                                    val updated = keyInputs.toMutableList().apply { removeAt(index) }
+                                    keyInputs = updated
+                                    onUpdate(joinSearchApiKeys(updated))
+                                }
+                            ) {
+                                Icon(imageVector = HugeIcons.Delete01, contentDescription = "Remove key")
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            if (keyInputs.size >= MAX_SEARCH_API_KEYS) return@Button
+                            val updated = keyInputs + ""
+                            keyInputs = updated
+                            onUpdate(joinSearchApiKeys(updated))
+                        },
+                        enabled = keyInputs.size < MAX_SEARCH_API_KEYS
+                    ) {
+                        Icon(imageVector = HugeIcons.Add01, contentDescription = null)
+                        Text("Add Key")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun parseSearchApiKeys(raw: String): List<String> {
+    return raw
+        .split(SEARCH_API_KEY_SPLIT_REGEX)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(MAX_SEARCH_API_KEYS)
+}
+
+private fun joinSearchApiKeys(keys: List<String>): String {
+    return keys
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(MAX_SEARCH_API_KEYS)
+        .joinToString(separator = "\n")
 }
 
 @Composable
@@ -540,7 +652,11 @@ private fun CommonOptions(
     var commonOptions by remember(settings.searchCommonOptions) {
         mutableStateOf(settings.searchCommonOptions)
     }
-    Card {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        )
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -673,23 +789,15 @@ private fun SearchLinkUpOptions(
     options: SearchServiceOptions.LinkUpOptions,
     onUpdateOptions: (SearchServiceOptions.LinkUpOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text("API Key")
+    // LinkUp rotates over a newline-delimited key pool just like Tavily, so exposing only a
+    // single input here silently breaks the rotation feature at the configuration layer.
+    SearchApiKeysEditor(
+        apiKeysRaw = options.apiKey,
+        poolLabel = "LinkUp Key Pool",
+        onUpdate = { updated ->
+            onUpdateOptions(options.copy(apiKey = updated))
         }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(
-                    options.copy(
-                        apiKey = it
-                    )
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    )
 
     FormItem(
         label = {
@@ -817,6 +925,25 @@ private fun PerplexityOptions(
 
     FormItem(
         label = {
+            Text("Max Tokens")
+        }
+    ) {
+        OutlinedTextField(
+            value = options.maxTokens?.takeIf { it > 0 }?.toString() ?: "",
+            onValueChange = { value ->
+                onUpdateOptions(
+                    options.copy(
+                        maxTokens = value.toIntOrNull()
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+    }
+
+    FormItem(
+        label = {
             Text("Max Tokens / Page")
         }
     ) {
@@ -840,6 +967,27 @@ private fun FirecrawlOptions(
     options: SearchServiceOptions.FirecrawlOptions,
     onUpdateOptions: (SearchServiceOptions.FirecrawlOptions) -> Unit
 ) {
+    FormItem(
+        label = {
+            Text("Base URL")
+        }
+    ) {
+        OutlinedTextField(
+            value = options.baseUrl,
+            onValueChange = {
+                onUpdateOptions(
+                    options.copy(
+                        baseUrl = it
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = {
+                Text("https://api.firecrawl.dev")
+            }
+        )
+    }
+
     FormItem(
         label = {
             Text("API Key")
@@ -976,5 +1124,47 @@ private fun RikkaHubOptions(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun GrokOptions(
+    options: SearchServiceOptions.GrokOptions,
+    onUpdateOptions: (SearchServiceOptions.GrokOptions) -> Unit
+) {
+    FormItem(
+        label = {
+            Text("API Key")
+        }
+    ) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = {
+                onUpdateOptions(
+                    options.copy(
+                        apiKey = it
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    FormItem(
+        label = {
+            Text("Model")
+        }
+    ) {
+        OutlinedTextField(
+            value = options.model,
+            onValueChange = {
+                onUpdateOptions(
+                    options.copy(
+                        model = it
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
