@@ -861,13 +861,43 @@ private fun FileSystemItemRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = item.subtitle ?: if (item.isDirectory) item.path else formatFileSize(item.size),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // 文件大小和修改时间放在同一行
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (item.subtitle != null) {
+                        Text(
+                            text = item.subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    } else if (!item.isDirectory) {
+                        // 文件：显示大小和时间
+                        Text(
+                            text = formatFileSize(item.size),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = formatCompactTime(item.modifiedTime),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    } else {
+                        // 文件夹：只显示路径
+                        Text(
+                            text = item.path,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
 
             if (item.canShare) {
@@ -954,3 +984,26 @@ private fun formatFileSize(size: Long): String {
         else -> "${size / (1024 * 1024 * 1024)} GB"
     }
 }
+
+/**
+ * 格式化时间为精简格式：1月2日 13:04 → 01021304
+ */
+private fun formatCompactTime(timestamp: Long): String {
+    if (timestamp <= 0) return ""
+    val date = java.util.Date(timestamp)
+    val cal = java.util.Calendar.getInstance()
+    cal.time = date
+    val month = cal.get(java.util.Calendar.MONTH) + 1 // 0-based
+    val day = cal.get(java.util.Calendar.DAY_OF_MONTH)
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    val minute = cal.get(java.util.Calendar.MINUTE)
+    return String.format("%02d%02d%02d%02d", month, day, hour, minute)
+}
+
+data class SandboxFileInfo(
+    val name: String,
+    val path: String,
+    val isDirectory: Boolean,
+    val size: Long,
+    val modified: Long,
+)
