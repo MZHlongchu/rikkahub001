@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,7 +39,8 @@ import me.rerere.rikkahub.data.model.WorkflowPhase
 
 /**
  * 工作流悬浮面板
- * - 贴齐屏幕下边缘、左右边缘
+ * - 贴齐手机屏幕下边缘
+ * - 左右边缘贴齐屏幕左右边缘
  * - 显示当前工作流阶段选择
  * - 提供沙箱文件管理入口
  */
@@ -70,7 +70,9 @@ fun WorkflowFloatingPanel(
             Surface(
                 shape = RoundedCornerShape(
                     topStart = 20.dp,
-                    topEnd = 20.dp
+                    topEnd = 20.dp,
+                    bottomStart = 0.dp,
+                    bottomEnd = 0.dp
                 ),
                 tonalElevation = 8.dp,
                 color = MaterialTheme.colorScheme.surface,
@@ -83,7 +85,9 @@ fun WorkflowFloatingPanel(
                     ) {}
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     // 标题栏
@@ -160,6 +164,7 @@ private fun WorkflowPhaseCard(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
         color = background,
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
