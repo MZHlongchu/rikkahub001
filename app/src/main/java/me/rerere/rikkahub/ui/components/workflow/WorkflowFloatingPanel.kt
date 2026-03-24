@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -38,8 +39,10 @@ import me.rerere.rikkahub.data.model.WorkflowPhase
 fun WorkflowFloatingPanel(
     visible: Boolean,
     onDismiss: () -> Unit,
-    currentPhase: WorkflowPhase,
-    onPhaseChange: (WorkflowPhase) -> Unit,
+    autoContinue: Boolean,
+    currentPhase: WorkflowPhase?,
+    onAutoContinueChange: (Boolean) -> Unit,
+    onPhaseChange: (WorkflowPhase?) -> Unit,
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -93,11 +96,51 @@ fun WorkflowFloatingPanel(
                         }
                     }
 
+                    // AutoContinue 开关
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "自动继续",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = if (autoContinue) "打开" else "关闭",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = autoContinue,
+                            onCheckedChange = onAutoContinueChange
+                        )
+                    }
+
+                    // 阶段卡片
+                    if (autoContinue) {
+                        // 提示文字
+                        Text(
+                            text = "可不选择阶段；若选择，则自动继续时将按该阶段执行",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     WorkflowPhase.entries.forEach { phase ->
                         WorkflowPhaseCard(
                             phase = phase,
                             selected = phase == currentPhase,
-                            onClick = { onPhaseChange(phase) }
+                            onClick = {
+                                if (autoContinue) {
+                                    // AutoContinue 模式：点击已选中的可以取消，否则选中
+                                    onPhaseChange(if (currentPhase == phase) null else phase)
+                                } else {
+                                    // 非 AutoContinue 模式：必须选中一个
+                                    onPhaseChange(phase)
+                                }
+                            }
                         )
                     }
                 }
