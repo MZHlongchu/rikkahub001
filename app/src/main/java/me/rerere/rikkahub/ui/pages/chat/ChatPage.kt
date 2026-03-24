@@ -1,4 +1,4 @@
-﻿package me.rerere.rikkahub.ui.pages.chat
+package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -300,6 +300,12 @@ private fun ChatPageContent(
     val hazeState = rememberHazeState()
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
+    WorkflowAutoContinue(
+        vm = vm,
+        conversation = conversation,
+        settings = setting,
+        loadingJob = loadingJob,
+    )
     val assistant = setting.assistants.find { it.id == conversation.assistantId }
         ?: setting.getCurrentAssistant()
     val workflowEnabled = assistant.localTools.contains(LocalToolOption.WorkflowControl)
@@ -528,7 +534,11 @@ private fun ChatPageContent(
             WorkflowFloatingPanel(
                 visible = showWorkflowPanel,
                 onDismiss = { showWorkflowPanel = false },
+                autoContinue = currentWorkflowState.autoContinue,
                 currentPhase = currentWorkflowState.phase,
+                onAutoContinueChange = { enabled ->
+                    vm.updateWorkflowAutoContinue(enabled)
+                },
                 onPhaseChange = { phase ->
                     vm.updateWorkflowPhase(phase)
                 },
@@ -690,4 +700,3 @@ private fun Conversation.findCompressionScrollIndex(eventId: Long): Int? {
     }
     return null
 }
-
