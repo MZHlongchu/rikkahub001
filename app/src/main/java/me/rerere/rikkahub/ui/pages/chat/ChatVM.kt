@@ -1,4 +1,4 @@
-﻿package me.rerere.rikkahub.ui.pages.chat
+package me.rerere.rikkahub.ui.pages.chat
 
 import android.app.Application
 import android.content.Context
@@ -483,12 +483,32 @@ class ChatVM(
         }
     }
 
-    fun updateWorkflowPhase(phase: me.rerere.rikkahub.data.model.WorkflowPhase) {
+    fun updateWorkflowPhase(phase: me.rerere.rikkahub.data.model.WorkflowPhase?) {
         viewModelScope.launch {
             val currentConversation = conversation.value
             val currentState = currentConversation.workflowState
             if (currentState != null) {
                 val newState = currentState.copy(phase = phase)
+                val updatedConversation = currentConversation.copy(workflowState = newState)
+                chatService.saveConversation(_conversationId, updatedConversation)
+            }
+        }
+    }
+
+    fun updateWorkflowAutoContinue(enabled: Boolean) {
+        viewModelScope.launch {
+            val currentConversation = conversation.value
+            val currentState = currentConversation.workflowState
+            if (currentState != null) {
+                val nextPhase = when {
+                    enabled -> null
+                    currentState.phase == null -> me.rerere.rikkahub.data.model.WorkflowPhase.PLAN
+                    else -> currentState.phase
+                }
+                val newState = currentState.copy(
+                    autoContinue = enabled,
+                    phase = nextPhase
+                )
                 val updatedConversation = currentConversation.copy(workflowState = newState)
                 chatService.saveConversation(_conversationId, updatedConversation)
             }
@@ -527,5 +547,3 @@ class ChatVM(
         }
     }
 }
-
-
