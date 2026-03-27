@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Process
 import android.util.Log
 import androidx.compose.foundation.ComposeFoundationFlags
 import androidx.compose.runtime.Composer
@@ -248,13 +249,24 @@ class RikkaHubApp : Application() {
 
     private fun startIndexMigrationIfNeeded() {
         get<AppScope>().launch(Dispatchers.IO) {
-            runCatching {
-                delay(750)
-                get<IndexMigrationManager>().migrateIfNeeded()
-            }.onFailure {
-                Log.e(TAG, "startIndexMigrationIfNeeded failed", it)
+            val migrationManager = get<IndexMigrationManager>()
+            try {
+                migrationManager.migrateIfNeeded()
+                check(migrationManager.shouldUseIndexBackend()) {
+                    "Index migration did not cut over to the sqlite-vector backend"
+                }
+            } catch (error: Throwable) {
+                Log.e(TAG, "startIndexMigrationIfNeeded failed", error)
+                crashProcessOnIndexMigrationFailure(error)
             }
         }
+    }
+
+    private fun crashProcessOnIndexMigrationFailure(error: Throwable): Nothing {
+        val fatal = IllegalStateException("Index migration failed", error)
+        Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), fatal)
+        Process.killProcess(Process.myPid())
+        throw fatal
     }
 
     private fun resumeKnowledgeBaseIndexingIfNeeded() {
