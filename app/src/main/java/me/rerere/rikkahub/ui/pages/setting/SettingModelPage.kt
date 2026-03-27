@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -653,11 +654,45 @@ private fun DefaultCompressModelSetting(
     }
 }
 
+private data class EmbeddingTuningRecommendation(
+    val batchSize: Int,
+    val delayMs: Int,
+    val note: String,
+)
+
+private fun embeddingRecommendation(settings: Settings): EmbeddingTuningRecommendation {
+    val model = settings.providers
+        .flatMap { it.models }
+        .firstOrNull { it.id == settings.embeddingModelId }
+        ?.modelId
+        ?.lowercase()
+        .orEmpty()
+
+    return when {
+        model.contains("qwen/qwen3-embedding-0.6b") -> EmbeddingTuningRecommendation(
+            batchSize = 4,
+            delayMs = 1200,
+            note = "推荐较小批量和较高间隔，适合 RPM 敏感环境。"
+        )
+        model.contains("baai/bge-m3") || model.contains("baal/bge-m3") -> EmbeddingTuningRecommendation(
+            batchSize = 6,
+            delayMs = 900,
+            note = "推荐中等批量与中等间隔，兼顾吞吐和稳定性。"
+        )
+        else -> EmbeddingTuningRecommendation(
+            batchSize = 8,
+            delayMs = 750,
+            note = "默认推荐配置，适用于大多数 OpenAI 兼容 embedding 模型。"
+        )
+    }
+}
+
 @Composable
 private fun DefaultEmbeddingModelSetting(
     settings: Settings,
     vm: SettingVM
 ) {
+    val recommendation = embeddingRecommendation(settings)
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -692,6 +727,45 @@ private fun DefaultEmbeddingModelSetting(
                 }
             }
         )
+        
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "推荐频率策略",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = "推荐批量 ${recommendation.batchSize}，间隔 ${recommendation.delayMs}ms。${recommendation.note}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Button(
+                    onClick = {
+                        vm.updateSettings(
+                            settings.copy(
+                                embeddingBatchSize = recommendation.batchSize,
+                                embeddingRequestDelayMs = recommendation.delayMs,
+                            )
+                        )
+                    }
+                ) {
+                    Text("一键应用")
+                }
+            }
+        }
         
         // Embedding Batch Size Setting
         OutlinedCard(
