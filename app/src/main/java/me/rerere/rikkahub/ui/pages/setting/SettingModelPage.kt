@@ -51,7 +51,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
-import androidx.compose.material3.TextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import me.rerere.rikkahub.R
@@ -206,7 +205,7 @@ private fun DefaultTranslationModelSetting(
                         Text(stringResource(R.string.setting_model_page_translate_prompt_vars))
                     }
                 ) {
-                    OutlinedTextField(
+                    OutlinedOutlinedTextField(
                         value = settings.translatePrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -303,7 +302,7 @@ private fun DefaultSuggestionModelSetting(
                         Text(stringResource(R.string.setting_model_page_suggestion_prompt_vars))
                     }
                 ) {
-                    OutlinedTextField(
+                    OutlinedOutlinedTextField(
                         value = settings.suggestionPrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -397,7 +396,7 @@ private fun DefaultTitleModelSetting(
                         Text(stringResource(R.string.setting_model_page_suggestion_prompt_vars))
                     }
                 ) {
-                    OutlinedTextField(
+                    OutlinedOutlinedTextField(
                         value = settings.titlePrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -528,7 +527,7 @@ private fun DefaultOcrModelSetting(
                         Text(stringResource(R.string.setting_model_page_ocr_prompt_vars))
                     }
                 ) {
-                    OutlinedTextField(
+                    OutlinedOutlinedTextField(
                         value = settings.ocrPrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -624,7 +623,7 @@ private fun DefaultCompressModelSetting(
                         Text(stringResource(R.string.setting_model_page_compress_prompt_vars_v2))
                     }
                 ) {
-                    OutlinedTextField(
+                    OutlinedOutlinedTextField(
                         value = settings.dialogueCompressPrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -717,7 +716,7 @@ private fun DefaultEmbeddingModelSetting(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                TextField(
+                OutlinedTextField(
                     value = settings.embeddingBatchSize.toString(),
                     onValueChange = { newValue ->
                         newValue.toIntOrNull()?.let { value ->
@@ -759,7 +758,7 @@ private fun DefaultEmbeddingModelSetting(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                TextField(
+                OutlinedTextField(
                     value = settings.embeddingRequestDelayMs.toString(),
                     onValueChange = { newValue ->
                         newValue.toIntOrNull()?.let { value ->
