@@ -158,8 +158,8 @@ val DEFAULT_PROVIDERS = listOf(
             // Embedding Models
             Model(
                 id = Uuid.parse("f8c3a2b1-4d5e-4a7b-8c9d-0e1f2a3b4c5d"),
-                modelId = "Qwen/Qwen3-Embedding-4B",
-                displayName = "Qwen3-Embedding-4B (32K)",
+                modelId = "Qwen/Qwen3-Embedding-0.6B",
+                displayName = "Qwen3-Embedding-0.6B (32K)",
                 type = ModelType.EMBEDDING,
             ),
             Model(
