@@ -351,8 +351,6 @@ private fun KnowledgeBaseToolSwitchCard(
 }
 
 @Composable
-
-@Composable
 private fun KnowledgeBaseImageSwitchCard(
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
