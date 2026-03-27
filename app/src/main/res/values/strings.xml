@@ -465,7 +465,7 @@
   <string name="setting_model_page_embedding_batch_size">Embedding 批处理大小</string>
   <string name="setting_model_page_embedding_batch_size_desc">每批发送的文本块数量（1-32）。数值越大速度越快，但可能触发 RPM 限制。</string>
   <string name="setting_model_page_embedding_delay">Embedding 请求间隔</string>
-  <string name="setting_model_page_embedding_delay_desc">每次重试之间的延迟（0-5000ms）。遇到 RPM 限制时请增大此值。</string>
+  <string name="setting_model_page_embedding_delay_desc">每次请求/重试之间的延迟（0-500000ms）。遇到 RPM 限制时请增大此值。</string>
   <string name="setting_page_about">About</string>
   <string name="setting_page_about_desc">About this app</string>
   <string name="setting_page_assistant">Assistant</string>

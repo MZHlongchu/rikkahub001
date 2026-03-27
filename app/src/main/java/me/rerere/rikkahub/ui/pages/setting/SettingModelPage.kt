@@ -674,7 +674,7 @@ private fun embeddingRecommendation(settings: Settings): EmbeddingTuningRecommen
             delayMs = 1200,
             note = "推荐较小批量和较高间隔，适合 RPM 敏感环境。"
         )
-        model.contains("baai/bge-m3") || model.contains("baal/bge-m3") -> EmbeddingTuningRecommendation(
+        model.contains("baai/bge-m3") -> EmbeddingTuningRecommendation(
             batchSize = 6,
             delayMs = 900,
             note = "推荐中等批量与中等间隔，兼顾吞吐和稳定性。"
@@ -839,7 +839,7 @@ private fun DefaultEmbeddingModelSetting(
                         newValue.toIntOrNull()?.let { value ->
                             vm.updateSettings(
                                 settings.copy(
-                                    embeddingRequestDelayMs = value.coerceIn(0, 5000)
+                                    embeddingRequestDelayMs = value.coerceIn(0, 500000)
                                 )
                             )
                         }

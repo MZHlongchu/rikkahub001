@@ -489,7 +489,7 @@ class KnowledgeBaseService(
                 charsPerToken = settings.tokenEstimatorCharsPerToken
             )
             val embeddingBatchSize = settings.embeddingBatchSize.coerceIn(1, 32)
-            val embeddingDelayMs = settings.embeddingRequestDelayMs.coerceIn(0, 5000)
+            val embeddingDelayMs = settings.embeddingRequestDelayMs.coerceIn(0, 500000)
             val assistant = settings.assistants.find { it.id == existing.assistantId }
             val extractOptions = DocumentExtractOptions(
                 enableImageOcr = assistant?.enableKnowledgeBaseImageOcr == true
@@ -642,7 +642,7 @@ class KnowledgeBaseService(
                 }
                 
                 if (attempt < KB_EMBEDDING_RETRY_COUNT - 1) {
-                    delay((attempt + 1) * baseDelayMs.toLong())
+                    delay((attempt + 1L) * baseDelayMs.toLong())
                 }
             }
         }
