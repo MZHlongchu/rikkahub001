@@ -382,6 +382,7 @@ private fun KnowledgeBaseImageSwitchCard(
         }
     }
 }
+@Composable
 private fun KnowledgeBaseQueueCard(indexState: KnowledgeBaseIndexState) {
     Card(
         colors = CardDefaults.cardColors(
