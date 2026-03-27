@@ -101,6 +101,8 @@ class SettingsStore(
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
         val DIALOGUE_COMPRESS_PROMPT = stringPreferencesKey("dialogue_compress_prompt")
         val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
+        val EMBEDDING_BATCH_SIZE = intPreferencesKey("embedding_batch_size")
+        val EMBEDDING_REQUEST_DELAY_MS = intPreferencesKey("embedding_request_delay_ms")
         val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
         val AUTO_COMPRESS_TRIGGER_TOKENS = intPreferencesKey("auto_compress_trigger_tokens")
         val MANUAL_COMPRESS_KEEP_RECENT_MESSAGES = intPreferencesKey("manual_compress_keep_recent_messages")
@@ -194,6 +196,8 @@ class SettingsStore(
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
                 dialogueCompressPrompt = preferences[DIALOGUE_COMPRESS_PROMPT] ?: DEFAULT_DIALOGUE_COMPRESS_PROMPT,
                 embeddingModelId = preferences[EMBEDDING_MODEL]?.takeIf { it.isNotBlank() }?.let { Uuid.parse(it) },
+                embeddingBatchSize = preferences[EMBEDDING_BATCH_SIZE] ?: 8,
+                embeddingRequestDelayMs = preferences[EMBEDDING_REQUEST_DELAY_MS] ?: 750,
                 autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] == true,
                 autoCompressTriggerTokens = preferences[AUTO_COMPRESS_TRIGGER_TOKENS] ?: 12000,
                 manualCompressKeepRecentMessages = preferences[MANUAL_COMPRESS_KEEP_RECENT_MESSAGES] ?: 6,
@@ -453,6 +457,8 @@ class SettingsStore(
             settings.embeddingModelId?.let {
                 preferences[EMBEDDING_MODEL] = it.toString()
             } ?: preferences.remove(EMBEDDING_MODEL)
+            preferences[EMBEDDING_BATCH_SIZE] = settings.embeddingBatchSize
+            preferences[EMBEDDING_REQUEST_DELAY_MS] = settings.embeddingRequestDelayMs
             preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
             preferences[AUTO_COMPRESS_TRIGGER_TOKENS] = settings.autoCompressTriggerTokens.coerceAtLeast(1000)
             preferences[MANUAL_COMPRESS_KEEP_RECENT_MESSAGES] =
@@ -596,6 +602,8 @@ data class Settings(
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
     val dialogueCompressPrompt: String = DEFAULT_DIALOGUE_COMPRESS_PROMPT,
     val embeddingModelId: Uuid? = null,
+    val embeddingBatchSize: Int = 8,
+    val embeddingRequestDelayMs: Int = 750,
     val autoCompressEnabled: Boolean = false,
     val autoCompressTriggerTokens: Int = 12000,
     val manualCompressKeepRecentMessages: Int = 6,

@@ -51,6 +51,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
+import androidx.compose.material3.TextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_DIALOGUE_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
@@ -655,37 +658,125 @@ private fun DefaultEmbeddingModelSetting(
     settings: Settings,
     vm: SettingVM
 ) {
-    ModelFeatureCard(
-        title = {
-            Text(stringResource(R.string.setting_model_page_embedding_model), maxLines = 1)
-        },
-        description = {
-            Text(stringResource(R.string.setting_model_page_embedding_model_desc))
-        },
-        icon = {
-            Icon(HugeIcons.Mortarboard01, null)
-        },
-        actions = {
-            Box(modifier = Modifier.weight(1f)) {
-                ModelSelector(
-                    modelId = settings.embeddingModelId,
-                    type = ModelType.EMBEDDING,
-                    onSelect = {
-                        vm.updateSettings(
-                            settings.copy(
-                                embeddingModelId = it.takeIf { model ->
-                                    model.modelId.isNotBlank()
-                                }?.id
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        ModelFeatureCard(
+            title = {
+                Text(stringResource(R.string.setting_model_page_embedding_model), maxLines = 1)
+            },
+            description = {
+                Text(stringResource(R.string.setting_model_page_embedding_model_desc))
+            },
+            icon = {
+                Icon(HugeIcons.Mortarboard01, null)
+            },
+            actions = {
+                Box(modifier = Modifier.weight(1f)) {
+                    ModelSelector(
+                        modelId = settings.embeddingModelId,
+                        type = ModelType.EMBEDDING,
+                        onSelect = {
+                            vm.updateSettings(
+                                settings.copy(
+                                    embeddingModelId = it.takeIf { model ->
+                                        model.modelId.isNotBlank()
+                                    }?.id
+                                )
                             )
-                        )
+                        },
+                        providers = settings.providers,
+                        allowClear = true,
+                        modifier = Modifier.wrapContentWidth()
+                    )
+                }
+            }
+        )
+        
+        // Embedding Batch Size Setting
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = stringResource(R.string.setting_model_page_embedding_batch_size),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = stringResource(R.string.setting_model_page_embedding_batch_size_desc),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextField(
+                    value = settings.embeddingBatchSize.toString(),
+                    onValueChange = { newValue ->
+                        newValue.toIntOrNull()?.let { value ->
+                            vm.updateSettings(
+                                settings.copy(
+                                    embeddingBatchSize = value.coerceIn(1, 32)
+                                )
+                            )
+                        }
                     },
-                    providers = settings.providers,
-                    allowClear = true,
-                    modifier = Modifier.wrapContentWidth()
+                    modifier = Modifier.width(80.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
             }
         }
-    )
+        
+        // Embedding Delay Setting
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = stringResource(R.string.setting_model_page_embedding_delay),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = stringResource(R.string.setting_model_page_embedding_delay_desc),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextField(
+                    value = settings.embeddingRequestDelayMs.toString(),
+                    onValueChange = { newValue ->
+                        newValue.toIntOrNull()?.let { value ->
+                            vm.updateSettings(
+                                settings.copy(
+                                    embeddingRequestDelayMs = value.coerceIn(0, 5000)
+                                )
+                            )
+                        }
+                    },
+                    modifier = Modifier.width(80.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
+        }
+    }
 }
 
 @Composable

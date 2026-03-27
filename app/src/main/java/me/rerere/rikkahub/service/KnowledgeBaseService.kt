@@ -54,8 +54,9 @@ private const val KB_TOP_K = 6
 private const val KB_MAX_RETURN_TOKENS = 2_400
 private const val KB_FTS_CANDIDATE_LIMIT = 200
 private const val KB_MIN_CANDIDATE_COUNT = 12
-private const val KB_EMBEDDING_BATCH_SIZE = 8
+private const val KB_EMBEDDING_BATCH_SIZE_DEFAULT = 8
 private const val KB_EMBEDDING_RETRY_COUNT = 3
+private const val KB_EMBEDDING_DELAY_MS_DEFAULT = 750
 private const val KB_STALE_INDEX_MINUTES = 10L
 
 class KnowledgeBaseService(
@@ -487,6 +488,8 @@ class KnowledgeBaseService(
             val chunker = IncrementalKnowledgeBaseChunker(
                 charsPerToken = settings.tokenEstimatorCharsPerToken
             )
+            val embeddingBatchSize = settings.embeddingBatchSize.coerceIn(1, 32)
+            val embeddingDelayMs = settings.embeddingRequestDelayMs.coerceIn(0, 5000)
             val assistant = settings.assistants.find { it.id == existing.assistantId }
             val extractOptions = DocumentExtractOptions(
                 enableImageOcr = assistant?.enableKnowledgeBaseImageOcr == true
@@ -546,8 +549,8 @@ class KnowledgeBaseService(
                 val emitted = chunker.appendText(block.text)
                 if (emitted.isNotEmpty()) {
                     pendingDrafts += emitted
-                    while (pendingDrafts.size >= KB_EMBEDDING_BATCH_SIZE) {
-                        flushBatch(KB_EMBEDDING_BATCH_SIZE)
+                    while (pendingDrafts.size >= embeddingBatchSize) {
+                        flushBatch(embeddingBatchSize)
                     }
                 }
                 true
@@ -598,6 +601,7 @@ class KnowledgeBaseService(
         provider: T,
         embeddingModel: Model,
         inputs: List<String>,
+        baseDelayMs: Int = KB_EMBEDDING_DELAY_MS_DEFAULT,
     ): List<List<Float>> {
         var lastError: Throwable? = null
         repeat(KB_EMBEDDING_RETRY_COUNT) { attempt ->
@@ -638,7 +642,7 @@ class KnowledgeBaseService(
                 }
                 
                 if (attempt < KB_EMBEDDING_RETRY_COUNT - 1) {
-                    delay((attempt + 1) * 750L)
+                    delay((attempt + 1) * baseDelayMs.toLong())
                 }
             }
         }
