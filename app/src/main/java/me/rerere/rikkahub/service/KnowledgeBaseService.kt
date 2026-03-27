@@ -185,7 +185,7 @@ class KnowledgeBaseService(
 
         refreshIndexState()
         if (imported > 0) {
-            startForegroundIndexing()
+            resumePendingWorkIfNeeded()
         }
         return imported
     }
@@ -227,7 +227,12 @@ class KnowledgeBaseService(
         knowledgeBaseFtsManager.deleteDocument(documentId)
         filesManager.deleteByRelativePath(document.relativePath, deleteFromDisk = true)
         knowledgeBaseRepository.deleteDocument(documentId)
+
+        recoverInterruptedIndexing()
         refreshIndexState()
+        if (knowledgeBaseRepository.countQueuedDocuments() > 0) {
+            startForegroundIndexing()
+        }
         return true
     }
 

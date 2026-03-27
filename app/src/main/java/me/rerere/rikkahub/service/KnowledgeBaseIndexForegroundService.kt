@@ -68,8 +68,11 @@ class KnowledgeBaseIndexForegroundService : Service() {
                 if (documentId > 0L && knowledgeBaseService.indexState.value.currentDocumentId == documentId) {
                     processingJob?.cancel(CancellationException("Knowledge base document deleted"))
                 }
-                if (processingJob == null) {
-                    startProcessingIfNeeded()
+                serviceScope.launch {
+                    knowledgeBaseService.refreshIndexState()
+                    if (processingJob == null && knowledgeBaseService.indexState.value.queuedCount > 0) {
+                        startProcessingIfNeeded()
+                    }
                 }
             }
 
