@@ -964,11 +964,11 @@ private fun formatFileSize(size: Long): String {
  */
 private fun formatModifiedTime(timestamp: Long): String {
     if (timestamp <= 0) return ""
-    val utcCalendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
-    utcCalendar.timeInMillis = timestamp
-    val month = utcCalendar.get(java.util.Calendar.MONTH) + 1
-    val day = utcCalendar.get(java.util.Calendar.DAY_OF_MONTH)
-    val hour = utcCalendar.get(java.util.Calendar.HOUR_OF_DAY)
-    val minute = utcCalendar.get(java.util.Calendar.MINUTE)
+    val calendar = java.util.Calendar.getInstance()
+    calendar.timeInMillis = timestamp
+    val month = calendar.get(java.util.Calendar.MONTH) + 1
+    val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+    val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+    val minute = calendar.get(java.util.Calendar.MINUTE)
     return String.format("%02d%02d %02d:%02d", month, day, hour, minute)
 }
