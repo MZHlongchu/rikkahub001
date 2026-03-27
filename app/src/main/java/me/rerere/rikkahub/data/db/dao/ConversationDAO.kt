@@ -48,6 +48,35 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     suspend fun getConversationById(id: String): ConversationEntity?
 
+    @Query(
+        "SELECT id, assistant_id as assistantId, title, create_at as createAt, update_at as updateAt, " +
+            "suggestions as chatSuggestions, is_pinned as isPinned, workflow_state as workflowState, " +
+            "dialogue_summary_token_estimate as dialogueSummaryTokenEstimate, " +
+            "dialogue_summary_updated_at as dialogueSummaryUpdatedAt, " +
+            "rolling_summary_token_estimate as rollingSummaryTokenEstimate, " +
+            "memory_ledger_status as memoryLedgerStatus, memory_ledger_error as memoryLedgerError, " +
+            "last_compressed_message_index as lastCompressedMessageIndex, " +
+            "last_compressed_at as lastCompressedAt, last_index_status as lastIndexStatus, " +
+            "last_indexed_at as lastIndexedAt, last_index_error as lastIndexError " +
+            "FROM conversationentity WHERE id = :id"
+    )
+    suspend fun getConversationRecordById(id: String): ConversationRecord?
+
+    @Query(
+        "SELECT id, assistant_id as assistantId, title, create_at as createAt, update_at as updateAt, " +
+            "suggestions as chatSuggestions, is_pinned as isPinned, workflow_state as workflowState, " +
+            "dialogue_summary_token_estimate as dialogueSummaryTokenEstimate, " +
+            "dialogue_summary_updated_at as dialogueSummaryUpdatedAt, " +
+            "rolling_summary_token_estimate as rollingSummaryTokenEstimate, " +
+            "memory_ledger_status as memoryLedgerStatus, memory_ledger_error as memoryLedgerError, " +
+            "last_compressed_message_index as lastCompressedMessageIndex, " +
+            "last_compressed_at as lastCompressedAt, last_index_status as lastIndexStatus, " +
+            "last_indexed_at as lastIndexedAt, last_index_error as lastIndexError " +
+            "FROM conversationentity WHERE assistant_id = :assistantId " +
+            "ORDER BY is_pinned DESC, update_at DESC LIMIT :limit"
+    )
+    suspend fun getRecentConversationRecordsOfAssistant(assistantId: String, limit: Int): List<ConversationRecord>
+
     @Query("SELECT EXISTS(SELECT 1 FROM conversationentity WHERE id = :id)")
     suspend fun existsById(id: String): Boolean
 
@@ -89,3 +118,24 @@ interface ConversationDAO {
 }
 
 data class ConversationDayCount(val day: String, val count: Int)
+
+data class ConversationRecord(
+    val id: String,
+    val assistantId: String,
+    val title: String,
+    val createAt: Long,
+    val updateAt: Long,
+    val chatSuggestions: String,
+    val isPinned: Boolean,
+    val workflowState: String,
+    val dialogueSummaryTokenEstimate: Int,
+    val dialogueSummaryUpdatedAt: Long,
+    val rollingSummaryTokenEstimate: Int,
+    val memoryLedgerStatus: String,
+    val memoryLedgerError: String,
+    val lastCompressedMessageIndex: Int,
+    val lastCompressedAt: Long,
+    val lastIndexStatus: String,
+    val lastIndexedAt: Long,
+    val lastIndexError: String,
+)

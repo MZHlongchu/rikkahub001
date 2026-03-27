@@ -28,24 +28,12 @@ class MessageFtsManager(private val database: AppDatabase) {
     suspend fun indexConversation(conversation: Conversation) = withContext(Dispatchers.IO) {
         val conversationId = conversation.id.toString()
         db.execSQL("DELETE FROM message_fts WHERE conversation_id = ?", arrayOf(conversationId))
-        conversation.messageNodes.forEach { node ->
-            node.messages.forEach { message ->
-                val text = message.extractFtsText()
-                if (text.isNotBlank()) {
-                    db.execSQL(
-                        "INSERT INTO message_fts(text, node_id, message_id, conversation_id, title, update_at) VALUES (?, ?, ?, ?, ?, ?)",
-                        arrayOf(
-                            text,
-                            node.id.toString(),
-                            message.id.toString(),
-                            conversationId,
-                            conversation.title,
-                            conversation.updateAt.toEpochMilli().toString(),
-                        )
-                    )
-                }
-            }
-        }
+        insertNodes(
+            conversationId = conversationId,
+            title = conversation.title,
+            updateAtMillis = conversation.updateAt.toEpochMilli(),
+            nodes = conversation.messageNodes,
+        )
     }
 
     suspend fun deleteConversation(conversationId: String) = withContext(Dispatchers.IO) {
@@ -54,6 +42,31 @@ class MessageFtsManager(private val database: AppDatabase) {
 
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         db.execSQL("DELETE FROM message_fts")
+    }
+
+    suspend fun syncConversation(
+        conversation: Conversation,
+        changedNodes: List<MessageNode>,
+        deletedNodeIds: List<String>,
+    ) = withContext(Dispatchers.IO) {
+        val conversationId = conversation.id.toString()
+        db.execSQL(
+            "UPDATE message_fts SET title = ?, update_at = ? WHERE conversation_id = ?",
+            arrayOf<Any>(conversation.title, conversation.updateAt.toEpochMilli(), conversationId)
+        )
+        if (deletedNodeIds.isNotEmpty()) {
+            deleteNodes(conversationId, deletedNodeIds)
+        }
+        if (changedNodes.isNotEmpty()) {
+            val changedNodeIds = changedNodes.map { it.id.toString() }
+            deleteNodes(conversationId, changedNodeIds)
+            insertNodes(
+                conversationId = conversationId,
+                title = conversation.title,
+                updateAtMillis = conversation.updateAt.toEpochMilli(),
+                nodes = changedNodes,
+            )
+        }
     }
 
     suspend fun search(keyword: String): List<MessageSearchResult> = withContext(Dispatchers.IO) {
@@ -85,6 +98,39 @@ class MessageFtsManager(private val database: AppDatabase) {
             }
         }
         results
+    }
+
+    private fun deleteNodes(conversationId: String, nodeIds: List<String>) {
+        val placeholders = nodeIds.joinToString(",") { "?" }
+        db.execSQL(
+            "DELETE FROM message_fts WHERE conversation_id = ? AND node_id IN ($placeholders)",
+            arrayOf(conversationId, *nodeIds.toTypedArray())
+        )
+    }
+
+    private fun insertNodes(
+        conversationId: String,
+        title: String,
+        updateAtMillis: Long,
+        nodes: List<MessageNode>,
+    ) {
+        nodes.forEach { node ->
+            node.messages.forEach { message ->
+                val text = message.extractFtsText()
+                if (text.isBlank()) return@forEach
+                db.execSQL(
+                    "INSERT INTO message_fts(text, node_id, message_id, conversation_id, title, update_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    arrayOf(
+                        text,
+                        node.id.toString(),
+                        message.id.toString(),
+                        conversationId,
+                        title,
+                        updateAtMillis.toString(),
+                    )
+                )
+            }
+        }
     }
 }
 

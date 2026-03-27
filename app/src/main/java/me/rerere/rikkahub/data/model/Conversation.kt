@@ -142,6 +142,12 @@ data class ConversationMemoryIndexState(
 )
 
 @Serializable
+data class ConversationCompressionPayload(
+    val dialogueSummaryText: String = "",
+    val rollingSummaryJson: String = "",
+)
+
+@Serializable
 data class CompressionEvent(
     val id: Long = 0L,
     val boundaryIndex: Int,
@@ -161,11 +167,43 @@ data class CompressionEvent(
     val createdAt: Instant = Instant.now()
 )
 
+@Serializable
+data class CompressionEventPayload(
+    val dialogueSummaryText: String = "",
+    val ledgerSnapshot: String = "",
+    val summarySnapshot: String = "",
+    val baseDialogueSummaryText: String = "",
+    val baseLedgerJson: String = "",
+    val baseSummaryJson: String = "",
+)
+
 val compressionEventOrder: Comparator<CompressionEvent> =
     compareBy<CompressionEvent>({ it.createdAt }, { it.id })
 
 fun List<CompressionEvent>.latestCompressionEvent(): CompressionEvent? =
     maxWithOrNull(compressionEventOrder)
+
+fun Conversation.withCompressionPayload(payload: ConversationCompressionPayload?): Conversation {
+    val appliedPayload = payload ?: ConversationCompressionPayload()
+    return copy(
+        compressionState = compressionState.copy(
+            dialogueSummaryText = appliedPayload.dialogueSummaryText,
+            rollingSummaryJson = appliedPayload.rollingSummaryJson,
+        )
+    )
+}
+
+fun CompressionEvent.withPayload(payload: CompressionEventPayload?): CompressionEvent {
+    val appliedPayload = payload ?: CompressionEventPayload()
+    return copy(
+        dialogueSummaryText = appliedPayload.dialogueSummaryText,
+        ledgerSnapshot = appliedPayload.ledgerSnapshot,
+        summarySnapshot = appliedPayload.summarySnapshot,
+        baseDialogueSummaryText = appliedPayload.baseDialogueSummaryText,
+        baseLedgerJson = appliedPayload.baseLedgerJson,
+        baseSummaryJson = appliedPayload.baseSummaryJson,
+    )
+}
 
 @Serializable
 data class MessageNode(

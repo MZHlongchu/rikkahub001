@@ -97,6 +97,7 @@ import me.rerere.rikkahub.data.memory.sourceRef
 import me.rerere.rikkahub.data.model.applyLedgerPatchDocument
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.AssistantAffectScope
+import me.rerere.rikkahub.data.model.CompressionEvent
 import me.rerere.rikkahub.data.model.ConversationCompressionState
 import me.rerere.rikkahub.data.model.LedgerPatchDocument
 import me.rerere.rikkahub.data.model.MemoryIndexChunk
@@ -117,6 +118,7 @@ import me.rerere.rikkahub.data.model.normalizeRollingSummaryJson
 import me.rerere.rikkahub.data.model.parseRollingSummaryDocument
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.rikkahub.data.model.withCompressionPayload
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryIndexRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
@@ -252,6 +254,7 @@ class ChatService(
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
+    private val compressionArtifactWarmJobs = ConcurrentHashMap<Uuid, Job>()
     private val _sessionsVersion = MutableStateFlow(0L)
 
     // 错误状态
@@ -548,6 +551,8 @@ class ChatService(
 
     fun cleanup() = runCatching {
         ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)
+        compressionArtifactWarmJobs.values.forEach { it.cancel() }
+        compressionArtifactWarmJobs.clear()
         sessions.values.forEach { it.cleanup() }
         sessions.clear()
     }
@@ -636,11 +641,16 @@ class ChatService(
     // ---- 初始化对话 ----
 
     suspend fun initializeConversation(conversationId: Uuid) {
-        getOrCreateSession(conversationId) // 确保 session 存在
+        val session = getOrCreateSession(conversationId) // 确保 session 存在
         val conversation = conversationRepo.getConversationById(conversationId)
         if (conversation != null) {
-            updateConversation(conversationId, conversation)
-            settingsStore.updateAssistant(conversation.assistantId)
+            val mergedConversation = mergeMissingCompressionArtifacts(
+                base = conversation,
+                fallback = session.state.value,
+            )
+            updateConversation(conversationId, mergedConversation)
+            settingsStore.updateAssistant(mergedConversation.assistantId)
+            warmCompressionArtifactsAsync(conversationId, mergedConversation)
         } else {
             // 新建对话, 并添加预设消息
             val currentSettings = settingsStore.settingsFlowRaw.first()
@@ -854,6 +864,7 @@ class ChatService(
             // check invalid messages
             checkInvalidMessages(conversationId)
             conversation = getConversationFlow(conversationId).value
+            conversation = hydrateCompressionPayload(conversationId, conversation)
 
             // If container tool is enabled, import current user documents into sandbox first.
             if (assistant.localTools.contains(LocalToolOption.Container)) {
@@ -1262,10 +1273,12 @@ class ChatService(
             )
 
             // 生成完，conversation可能不是最新了，因此需要重新获取
+            val sessionConversation = sessions[conversationId]?.state?.value
             conversationRepo.getConversationById(conversation.id)?.let {
                 saveConversation(
                     conversationId,
-                    it.copy(title = result.choices[0].message?.toText()?.trim() ?: "")
+                    mergeMissingCompressionArtifacts(it, sessionConversation ?: it)
+                        .copy(title = result.choices[0].message?.toText()?.trim() ?: "")
                 )
             }
         }.onFailure {
@@ -1309,8 +1322,10 @@ class ChatService(
                 result.choices[0].message?.toText()?.split("\n")?.map { it.trim() }
                     ?.filter { it.isNotBlank() } ?: emptyList()
 
+            val sessionConversation = sessions[conversationId]?.state?.value
             val latestConversation = conversationRepo.getConversationById(conversationId)
-                ?: sessions[conversationId]?.state?.value
+                ?.let { mergeMissingCompressionArtifacts(it, sessionConversation ?: it) }
+                ?: sessionConversation
                 ?: conversation
             saveConversation(
                 conversationId,
@@ -1336,9 +1351,10 @@ class ChatService(
     ): Result<Unit> {
         updateCompressionWorkerJob(conversationId, currentCoroutineContext()[Job])
         return runCatching<Unit> {
+            val hydratedConversation = hydrateCompressionPayload(conversationId, conversation)
             compressConversationInternal(
                 conversationId = conversationId,
-                conversation = conversation,
+                conversation = hydratedConversation,
                 additionalPrompt = additionalPrompt,
                 keepRecentMessages = keepRecentMessages,
                 trigger = "manual",
@@ -1352,7 +1368,7 @@ class ChatService(
 
     suspend fun generateMemoryIndex(conversationId: Uuid): Result<Int> = runCatching {
         val settings = settingsStore.settingsFlow.first()
-        val conversation = conversationRepo.getConversationById(conversationId)
+        val conversation = conversationRepo.getConversationWithCompressionPayload(conversationId)
             ?: throw IllegalStateException("Conversation not found")
         try {
             val indexedCount = rebuildConversationIndexes(
@@ -1386,7 +1402,7 @@ class ChatService(
     ): Result<Unit> {
         updateCompressionWorkerJob(conversationId, currentCoroutineContext()[Job])
         return runCatching<Unit> {
-            val conversation = conversationRepo.getConversationById(conversationId)
+            val conversation = getConversationWithCompressionArtifacts(conversationId)
                 ?: throw IllegalStateException("Conversation not found")
             val latestEvent = conversation.compressionEvents.latestCompressionEvent()
                 ?: throw IllegalStateException(context.getString(R.string.chat_page_compress_no_latest_summary))
@@ -1513,7 +1529,7 @@ class ChatService(
                 throw IllegalStateException("Dialogue summary cannot be blank")
             }
 
-            val conversation = conversationRepo.getConversationById(conversationId)
+            val conversation = getConversationWithCompressionArtifacts(conversationId)
                 ?: throw IllegalStateException("Conversation not found")
             val latestEvent = conversation.compressionEvents.latestCompressionEvent()
                 ?: throw IllegalStateException(context.getString(R.string.chat_page_compress_no_latest_summary))
@@ -2752,6 +2768,142 @@ class ChatService(
         )
     }
 
+    private fun mergeMissingCompressionArtifacts(
+        base: Conversation,
+        fallback: Conversation,
+    ): Conversation {
+        if (base.id != fallback.id) return base
+
+        val mergedCompressionState = base.compressionState.copy(
+            dialogueSummaryText = base.compressionState.dialogueSummaryText.ifBlank {
+                fallback.compressionState.dialogueSummaryText
+            },
+            rollingSummaryJson = base.compressionState.rollingSummaryJson.ifBlank {
+                fallback.compressionState.rollingSummaryJson
+            },
+        )
+        val mergedEvents = if (base.compressionEvents.isNotEmpty() || fallback.compressionEvents.isEmpty()) {
+            base.compressionEvents
+        } else {
+            fallback.compressionEvents
+        }
+
+        if (mergedCompressionState == base.compressionState && mergedEvents === base.compressionEvents) {
+            return base
+        }
+
+        return base.copy(
+            compressionState = mergedCompressionState,
+            compressionEvents = mergedEvents,
+        )
+    }
+
+    private fun needsCompressionArtifactWarmup(conversation: Conversation): Boolean {
+        val likelyHasPersistedArtifacts =
+            conversation.compressionState.lastCompressedMessageIndex >= 0 ||
+                conversation.compressionState.dialogueSummaryTokenEstimate > 0 ||
+                conversation.compressionState.rollingSummaryTokenEstimate > 0 ||
+                conversation.compressionState.memoryLedgerStatus != "idle"
+        if (!likelyHasPersistedArtifacts) return false
+
+        return !conversation.compressionState.hasSummary || conversation.compressionEvents.isEmpty()
+    }
+
+    private fun applyCompressionArtifacts(
+        conversation: Conversation,
+        payload: me.rerere.rikkahub.data.model.ConversationCompressionPayload?,
+        events: List<CompressionEvent>,
+    ): Conversation {
+        val withPayload = if (payload != null) {
+            conversation.withCompressionPayload(payload)
+        } else {
+            conversation
+        }
+        return if (events.isEmpty()) {
+            withPayload
+        } else {
+            withPayload.copy(compressionEvents = events.sortedWith(compressionEventOrder))
+        }
+    }
+
+    private fun warmCompressionArtifactsAsync(conversationId: Uuid, conversation: Conversation) {
+        if (!needsCompressionArtifactWarmup(conversation)) return
+        val existingJob = compressionArtifactWarmJobs[conversationId]
+        if (existingJob?.isActive == true) return
+
+        val job = launchWithConversationReference(conversationId) {
+            runCatching {
+                val current = getConversationFlow(conversationId).value
+                if (!needsCompressionArtifactWarmup(current)) return@runCatching
+
+                val payload = if (current.compressionState.hasSummary) {
+                    null
+                } else {
+                    conversationRepo.getCompressionPayload(conversationId)
+                }
+                val events = if (current.compressionEvents.isEmpty()) {
+                    conversationRepo.getCompressionEvents(conversationId)
+                } else {
+                    emptyList()
+                }
+                if (payload == null && events.isEmpty()) return@runCatching
+
+                val latest = getConversationFlow(conversationId).value
+                updateConversation(
+                    conversationId,
+                    applyCompressionArtifacts(latest, payload, events)
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "warmCompressionArtifactsAsync failed for $conversationId", error)
+            }
+        }
+        compressionArtifactWarmJobs[conversationId] = job
+        job.invokeOnCompletion {
+            compressionArtifactWarmJobs.remove(conversationId, job)
+        }
+    }
+
+    private suspend fun hydrateCompressionPayload(
+        conversationId: Uuid,
+        conversation: Conversation,
+    ): Conversation {
+        val mergedConversation = sessions[conversationId]?.state?.value
+            ?.let { mergeMissingCompressionArtifacts(conversation, it) }
+            ?: conversation
+        if (!needsCompressionArtifactWarmup(mergedConversation)) {
+            return mergedConversation
+        }
+
+        val payload = if (mergedConversation.compressionState.hasSummary) {
+            null
+        } else {
+            conversationRepo.getCompressionPayload(conversationId)
+        }
+        val events = if (mergedConversation.compressionEvents.isEmpty()) {
+            conversationRepo.getCompressionEvents(conversationId)
+        } else {
+            emptyList()
+        }
+        if (payload == null && events.isEmpty()) {
+            return mergedConversation
+        }
+
+        val hydratedConversation = applyCompressionArtifacts(
+            conversation = mergedConversation,
+            payload = payload,
+            events = events,
+        )
+        updateConversation(conversationId, hydratedConversation)
+        return hydratedConversation
+    }
+
+    private suspend fun getConversationWithCompressionArtifacts(conversationId: Uuid): Conversation? {
+        val conversation = conversationRepo.getConversationWithCompressionPayload(conversationId) ?: return null
+        return conversation.copy(
+            compressionEvents = conversationRepo.getCompressionEvents(conversationId)
+        )
+    }
+
     private fun estimatePromptTokenUsage(
         conversation: Conversation,
         charsPerToken: Float,
@@ -2946,7 +3098,10 @@ class ChatService(
             return // 新会话且为空时不保存
         }
 
-        val updatedConversation = normalizeCompressionState(conversation.copy())
+        val updatedConversation = hydrateCompressionPayload(
+            conversationId = conversationId,
+            conversation = normalizeCompressionState(conversation.copy())
+        )
         updateConversation(conversationId, updatedConversation)
 
         if (!exists) {

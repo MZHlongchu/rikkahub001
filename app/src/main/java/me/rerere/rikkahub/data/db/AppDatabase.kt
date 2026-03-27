@@ -8,6 +8,8 @@ import androidx.room.TypeConverters
 import me.rerere.ai.core.TokenUsage
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.CompressionEventDAO
+import me.rerere.rikkahub.data.db.dao.CompressionEventPayloadDAO
+import me.rerere.rikkahub.data.db.dao.ConversationCompressionPayloadDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.KnowledgeBaseChunkDAO
@@ -21,6 +23,8 @@ import me.rerere.rikkahub.data.db.dao.ScheduledTaskRunDAO
 import me.rerere.rikkahub.data.db.dao.SourcePreviewChunkDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.CompressionEventEntity
+import me.rerere.rikkahub.data.db.entity.CompressionEventPayloadEntity
+import me.rerere.rikkahub.data.db.entity.ConversationCompressionPayloadEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseChunkEntity
@@ -39,18 +43,21 @@ import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_23_24
 import me.rerere.rikkahub.data.db.migrations.Migration_24_25
 import me.rerere.rikkahub.data.db.migrations.Migration_25_26
+import me.rerere.rikkahub.data.db.migrations.Migration_26_27
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
 @Database(
     entities = [
         ConversationEntity::class,
+        ConversationCompressionPayloadEntity::class,
         MemoryEntity::class,
         GenMediaEntity::class,
         MessageNodeEntity::class,
         ManagedFileEntity::class,
         FavoriteEntity::class,
         CompressionEventEntity::class,
+        CompressionEventPayloadEntity::class,
         PendingLedgerBatchEntity::class,
         MemoryIndexChunkEntity::class,
         SourcePreviewChunkEntity::class,
@@ -58,7 +65,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         KnowledgeBaseDocumentEntity::class,
         KnowledgeBaseChunkEntity::class,
     ],
-    version = 26,
+    version = 27,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -89,6 +96,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDAO
 
     abstract fun compressionEventDao(): CompressionEventDAO
+
+    abstract fun conversationCompressionPayloadDao(): ConversationCompressionPayloadDAO
+
+    abstract fun compressionEventPayloadDao(): CompressionEventPayloadDAO
 
     abstract fun pendingLedgerBatchDao(): PendingLedgerBatchDAO
 
