@@ -122,7 +122,7 @@ fun AssistantKnowledgeBasePage(id: String) {
                         vm.deleteKnowledgeBaseDocument(document.id) { result ->
                             result.fold(
                                 onSuccess = {
-                                    toaster.show("文档已删除", type = ToastType.Success)
+                                    toaster.show("文档已删除，索引状态已重置", type = ToastType.Success)
                                 },
                                 onFailure = { error ->
                                     toaster.show(error.message ?: "删除失败", type = ToastType.Error)
@@ -225,6 +225,22 @@ fun AssistantKnowledgeBasePage(id: String) {
                         }
                     ) {
                         Text("全部重建索引")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            vm.clearKnowledgeBaseIndexQueue { result ->
+                                result.fold(
+                                    onSuccess = {
+                                        toaster.show("索引队列已清空，状态已重置", type = ToastType.Success)
+                                    },
+                                    onFailure = { error ->
+                                        toaster.show(error.message ?: "重置失败", type = ToastType.Error)
+                                    }
+                                )
+                            }
+                        }
+                    ) {
+                        Text("清空索引队列/重置状态")
                     }
                 }
             }
@@ -397,6 +413,13 @@ private fun KnowledgeBaseQueueCard(indexState: KnowledgeBaseIndexState) {
                 text = "索引状态",
                 style = MaterialTheme.typography.titleMedium
             )
+            if (indexState.phase.isNotBlank()) {
+                Text(
+                    text = "阶段：${indexState.phase}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             when {
                 indexState.isRunning -> {
                     Text(

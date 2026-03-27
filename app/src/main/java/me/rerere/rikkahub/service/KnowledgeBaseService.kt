@@ -71,6 +71,11 @@ class KnowledgeBaseService(
     private val _indexState = MutableStateFlow(KnowledgeBaseIndexState())
     val indexState: StateFlow<KnowledgeBaseIndexState> = _indexState.asStateFlow()
 
+    suspend fun resetIndexState() {
+        _indexState.value = KnowledgeBaseIndexState()
+    }
+
+
     fun observeDocuments(assistantId: Uuid): Flow<List<KnowledgeBaseDocument>> {
         return knowledgeBaseRepository.observeDocumentsOfAssistant(assistantId)
     }
@@ -223,17 +228,30 @@ class KnowledgeBaseService(
 
     suspend fun deleteDocument(documentId: Long): Boolean {
         val document = knowledgeBaseRepository.getDocument(documentId) ?: return false
+        val wasCurrentIndexing = indexState.value.currentDocumentId == documentId
         KnowledgeBaseIndexForegroundService.cancelDocument(context, documentId)
         knowledgeBaseFtsManager.deleteDocument(documentId)
         filesManager.deleteByRelativePath(document.relativePath, deleteFromDisk = true)
         knowledgeBaseRepository.deleteDocument(documentId)
 
+        if (wasCurrentIndexing) {
+            resetIndexState()
+        }
         recoverInterruptedIndexing()
         refreshIndexState()
         if (knowledgeBaseRepository.countQueuedDocuments() > 0) {
             startForegroundIndexing()
         }
         return true
+    }
+
+    suspend fun clearIndexQueueAndResetState() {
+        indexState.value.currentDocumentId?.let { currentId ->
+            KnowledgeBaseIndexForegroundService.cancelDocument(context, currentId)
+        }
+        recoverInterruptedIndexing()
+        resetIndexState()
+        refreshIndexState()
     }
 
     suspend fun deleteDocumentsOfAssistant(assistantId: Uuid) {
@@ -441,6 +459,12 @@ class KnowledgeBaseService(
                 progressCurrent = indexingDocument.progressCurrent,
                 progressTotal = indexingDocument.progressTotal,
                 progressLabel = indexingDocument.progressLabel,
+                phase = when {
+                    indexingDocument.progressLabel.contains("文本") || indexingDocument.progressLabel.contains("章节") || indexingDocument.progressLabel.contains("图片") -> "解析文本"
+                    indexingDocument.progressLabel.contains("Embedding", ignoreCase = true) || indexingDocument.progressLabel.contains("向量") -> "构建 embedding"
+                    indexingDocument.progressLabel.contains("写入") || indexingDocument.progressLabel.contains("索引") -> "写入索引"
+                    else -> if (indexingDocument.progressLabel.isNotBlank()) indexingDocument.progressLabel else "排队"
+                },
             )
         } else {
             KnowledgeBaseIndexState(
@@ -475,6 +499,7 @@ class KnowledgeBaseService(
             progressCurrent = 0,
             progressTotal = 0,
             progressLabel = "准备中",
+            // phase will be reflected in index state via progressLabel
             lastHeartbeatAt = Instant.now(),
             lastError = "",
             updatedAt = Instant.now(),
@@ -513,6 +538,9 @@ class KnowledgeBaseService(
                     baseDelayMs = embeddingDelayMs,
                 )
                 val now = Instant.now()
+                workingDocument = workingDocument.copy(progressLabel = "构建 embedding")
+                knowledgeBaseRepository.updateDocument(workingDocument)
+                refreshIndexState()
                 val chunks = batch.mapIndexed { index, draft ->
                     KnowledgeBaseChunk(
                         documentId = existing.id,
@@ -525,6 +553,9 @@ class KnowledgeBaseService(
                         updatedAt = now,
                     )
                 }
+                workingDocument = workingDocument.copy(progressLabel = "写入索引")
+                knowledgeBaseRepository.updateDocument(workingDocument)
+                refreshIndexState()
                 knowledgeBaseRepository.insertChunkBatch(chunks)
                 pendingDrafts.subList(0, batch.size).clear()
                 workingDocument = workingDocument.copy(

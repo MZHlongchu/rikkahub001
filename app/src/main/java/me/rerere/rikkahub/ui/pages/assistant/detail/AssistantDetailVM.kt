@@ -237,6 +237,18 @@ class AssistantDetailVM(
         }
     }
 
+
+    fun clearKnowledgeBaseIndexQueue(
+        onResult: (Result<Unit>) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val result = runCatching {
+                knowledgeBaseService.clearIndexQueueAndResetState()
+            }
+            onResult(result)
+        }
+    }
+
     fun deleteKnowledgeBaseDocument(
         documentId: Long,
         onResult: (Result<Boolean>) -> Unit = {},

@@ -114,4 +114,5 @@ data class KnowledgeBaseIndexState(
     val progressCurrent: Int = 0,
     val progressTotal: Int = 0,
     val progressLabel: String = "",
+    val phase: String = "",
 )
