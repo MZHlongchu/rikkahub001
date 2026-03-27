@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -205,7 +206,7 @@ private fun DefaultTranslationModelSetting(
                         Text(stringResource(R.string.setting_model_page_translate_prompt_vars))
                     }
                 ) {
-                    OutlinedOutlinedTextField(
+                    OutlinedTextField(
                         value = settings.translatePrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -302,7 +303,7 @@ private fun DefaultSuggestionModelSetting(
                         Text(stringResource(R.string.setting_model_page_suggestion_prompt_vars))
                     }
                 ) {
-                    OutlinedOutlinedTextField(
+                    OutlinedTextField(
                         value = settings.suggestionPrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -396,7 +397,7 @@ private fun DefaultTitleModelSetting(
                         Text(stringResource(R.string.setting_model_page_suggestion_prompt_vars))
                     }
                 ) {
-                    OutlinedOutlinedTextField(
+                    OutlinedTextField(
                         value = settings.titlePrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -527,7 +528,7 @@ private fun DefaultOcrModelSetting(
                         Text(stringResource(R.string.setting_model_page_ocr_prompt_vars))
                     }
                 ) {
-                    OutlinedOutlinedTextField(
+                    OutlinedTextField(
                         value = settings.ocrPrompt,
                         onValueChange = {
                             vm.updateSettings(
@@ -623,7 +624,7 @@ private fun DefaultCompressModelSetting(
                         Text(stringResource(R.string.setting_model_page_compress_prompt_vars_v2))
                     }
                 ) {
-                    OutlinedOutlinedTextField(
+                    OutlinedTextField(
                         value = settings.dialogueCompressPrompt,
                         onValueChange = {
                             vm.updateSettings(
