@@ -613,6 +613,30 @@ class KnowledgeBaseService(
                 return embeddings
             } catch (error: Throwable) {
                 lastError = error
+                
+                // Check for rate limit / quota errors (don't retry these)
+                val errorMsg = error.message?.lowercase() ?: ""
+                val isRateLimitError = errorMsg.contains("rpm limit") ||
+                    errorMsg.contains("rate limit") ||
+                    errorMsg.contains("quota") ||
+                    errorMsg.contains("identity verification") ||
+                    (errorMsg.contains("403") && (errorMsg.contains("limit") || errorMsg.contains("exceeded")))
+                
+                if (isRateLimitError) {
+                    // Wrap with user-friendly message
+                    val friendlyMessage = when {
+                        errorMsg.contains("rpm limit") -> 
+                            "Embedding 供应商返回 403（RPM 限制）。请降低请求频率、切换模型，或完成账号验证后重试。"
+                        errorMsg.contains("identity verification") ->
+                            "Embedding 供应商返回 403（身份验证未完成）。请完成账号验证后重试。"
+                        errorMsg.contains("quota") ->
+                            "Embedding 供应商额度不足。请检查账户余额或切换模型。"
+                        else ->
+                            "Embedding 供应商限流或权限不足（${error.message}）。请稍后重试或切换模型。"
+                    }
+                    throw EmbeddingProviderException(friendlyMessage, error)
+                }
+                
                 if (attempt < KB_EMBEDDING_RETRY_COUNT - 1) {
                     delay((attempt + 1) * 750L)
                 }
@@ -620,6 +644,9 @@ class KnowledgeBaseService(
         }
         throw lastError ?: IllegalStateException("Embedding generation failed")
     }
+    
+    // Custom exception for embedding provider errors with user-friendly messages
+    class EmbeddingProviderException(message: String, cause: Throwable) : Exception(message, cause)
 
     private fun startForegroundIndexing() {
         KnowledgeBaseIndexForegroundService.start(context)

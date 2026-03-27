@@ -12,6 +12,7 @@ import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -153,6 +154,19 @@ val DEFAULT_PROVIDERS = listOf(
                 inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
                 outputModalities = listOf(Modality.TEXT),
                 abilities = listOf(),
+            ),
+            // Embedding Models
+            Model(
+                id = Uuid.parse("f8c3a2b1-4d5e-4a7b-8c9d-0e1f2a3b4c5d"),
+                modelId = "Qwen/Qwen3-Embedding-4B",
+                displayName = "Qwen3-Embedding-4B (32K)",
+                type = ModelType.EMBEDDING,
+            ),
+            Model(
+                id = Uuid.parse("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"),
+                modelId = "BAAl/bge-m3",
+                displayName = "bge-m3 (8K)",
+                type = ModelType.EMBEDDING,
             ),
         ),
         balanceOption = BalanceOption(
