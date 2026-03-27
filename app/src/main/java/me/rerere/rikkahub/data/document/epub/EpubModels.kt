@@ -8,7 +8,7 @@ internal data class EpubManifestItem(
 )
 
 internal fun String.containsEpubProperty(value: String): Boolean {
-    return split(Regex("\s+"))
+    return split(Regex("\\s+"))
         .filter { it.isNotBlank() }
         .any { it.equals(value, ignoreCase = true) }
 }

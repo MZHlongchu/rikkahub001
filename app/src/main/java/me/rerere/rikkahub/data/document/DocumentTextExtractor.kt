@@ -159,7 +159,9 @@ object DocumentTextExtractor {
     ): String {
         val result = StringBuilder()
         streamText(file, fileName, mimeType, options) { block ->
-            if (result.length >= maxChars) return@streamText false
+            if (result.length >= maxChars) {
+                return@streamText false
+            }
             if (result.isNotEmpty()) {
                 result.appendLine()
                 result.appendLine()
@@ -173,19 +175,12 @@ object DocumentTextExtractor {
 
     fun normalizeExtractedText(text: String): String {
         return text
-            .replace("
-", "
-")
-            .replace('', '
-')
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
             .lines()
-            .joinToString("
-") { line -> line.trimEnd() }
-            .replace(Regex("[\t\x0B\f]+"), " ")
-            .replace(Regex("
-{3,}"), "
-
-")
+            .joinToString("\n") { line -> line.trimEnd() }
+            .replace(Regex("[\\t\\x0B\\f]+"), " ")
+            .replace(Regex("\n{3,}"), "\n\n")
             .trim()
     }
 
@@ -198,8 +193,7 @@ object DocumentTextExtractor {
             val buffer = StringBuilder()
             while (true) {
                 val line = reader.readLine() ?: break
-                if (buffer.isNotEmpty()) buffer.append('
-')
+                if (buffer.isNotEmpty()) buffer.append('\n')
                 buffer.append(line)
                 if (buffer.length >= TEXT_BLOCK_SIZE) {
                     progress += 1
