@@ -504,7 +504,8 @@ class KnowledgeBaseService(
                     providerHandler = providerHandler,
                     provider = provider,
                     embeddingModel = embeddingModel,
-                    inputs = batch.map { it.content }
+                    inputs = batch.map { it.content },
+                    baseDelayMs = embeddingDelayMs,
                 )
                 val now = Instant.now()
                 val chunks = batch.mapIndexed { index, draft ->
@@ -527,6 +528,9 @@ class KnowledgeBaseService(
                 )
                 knowledgeBaseRepository.updateDocument(workingDocument)
                 refreshIndexState()
+                if (embeddingDelayMs > 0 && pendingDrafts.isNotEmpty()) {
+                    delay(embeddingDelayMs.toLong())
+                }
             }
 
             DocumentTextExtractor.streamTextSuspend(
