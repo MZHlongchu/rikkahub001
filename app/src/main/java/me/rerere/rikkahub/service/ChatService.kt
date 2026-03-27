@@ -91,6 +91,7 @@ import me.rerere.rikkahub.data.memory.buildSourcePreviewChunks
 import me.rerere.rikkahub.data.memory.isWeakSourceResult
 import me.rerere.rikkahub.data.memory.parseSourceRef
 import me.rerere.rikkahub.data.memory.rankMemoryChunks
+import me.rerere.rikkahub.data.memory.rankMemoryChunksByVectorScores
 import me.rerere.rikkahub.data.memory.rankSourcePreviewChunks
 import me.rerere.rikkahub.data.memory.sourceRef
 import me.rerere.rikkahub.data.model.applyLedgerPatchDocument
@@ -2550,16 +2551,38 @@ class ChatService(
                 metadata = indexed.chunk.metadata
             )
         }
-        val ranked = rankMemoryChunks(
-            query = normalizedQuery,
-            chunks = retrievalChunks,
-            documentEmbeddings = indexedChunks.map { it.chunk.embedding },
-            queryEmbedding = queryEmbedding,
-            channel = channel,
-            role = role,
-            bm25TopK = RECALL_BM25_TOP_K,
-            vectorTopK = RECALL_VECTOR_RERANK_K
-        ).map { score ->
+        val ranked = if (indexedChunks.any { it.chunk.embedding.isNotEmpty() }) {
+            rankMemoryChunks(
+                query = normalizedQuery,
+                chunks = retrievalChunks,
+                documentEmbeddings = indexedChunks.map { it.chunk.embedding },
+                queryEmbedding = queryEmbedding,
+                channel = channel,
+                role = role,
+                bm25TopK = RECALL_BM25_TOP_K,
+                vectorTopK = RECALL_VECTOR_RERANK_K
+            )
+        } else {
+            val vectorDistances = memoryIndexRepository.searchVectorDistances(
+                assistantId = assistantId,
+                queryEmbedding = queryEmbedding,
+                limit = RECALL_VECTOR_RERANK_K,
+            )
+            val vectorScoresByIndex = indexedChunks.mapIndexedNotNull { index, item ->
+                vectorDistances[item.chunk.id]?.let { distance ->
+                    index to (1.0 / (1.0 + distance.coerceAtLeast(0.0)))
+                }
+            }.toMap()
+            rankMemoryChunksByVectorScores(
+                query = normalizedQuery,
+                chunks = retrievalChunks,
+                vectorScoresByIndex = vectorScoresByIndex,
+                channel = channel,
+                role = role,
+                bm25TopK = RECALL_BM25_TOP_K,
+                vectorTopK = RECALL_VECTOR_RERANK_K
+            )
+        }.map { score ->
             val indexed = indexedChunks[score.docIndex]
             RecallMemoryChunk(
                 chunkId = indexed.chunk.id,

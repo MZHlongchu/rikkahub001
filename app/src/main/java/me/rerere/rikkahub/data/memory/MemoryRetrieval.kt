@@ -241,6 +241,115 @@ internal fun rankMemoryChunks(
     )
 }
 
+internal fun rankMemoryChunksByVectorScores(
+    query: String,
+    chunks: List<MemorySummaryChunk>,
+    vectorScoresByIndex: Map<Int, Double>,
+    channel: String,
+    role: String,
+    bm25TopK: Int,
+    vectorTopK: Int,
+    minFinalScore: Double = MIN_FINAL_RECALL_SCORE,
+): List<RankedMemoryChunk> {
+    val normalizedQuery = query.trim()
+    val queryTerms = tokenizeForRetrieval(normalizedQuery)
+    if (queryTerms.isEmpty() || chunks.isEmpty()) return emptyList()
+
+    val candidateChunks = chunks.mapIndexedNotNull { index, chunk ->
+        if (role != "any" && chunk.metadata.sourceRoles.isNotEmpty() && !chunk.metadata.sourceRoles.contains(role)) {
+            null
+        } else {
+            index to chunk
+        }
+    }
+    if (candidateChunks.isEmpty()) return emptyList()
+
+    val candidateIndexes = candidateChunks.map { it.first }
+    val documents = candidateChunks.map { it.second.content }
+    val docTerms = documents.map(::tokenizeForRetrieval)
+    val queryIdentifiers = extractExactIdentifiers(normalizedQuery)
+    val avgDocLength = docTerms.map { it.size }.average().takeIf { it > 0 } ?: 1.0
+    val docFrequency = mutableMapOf<String, Int>()
+    docTerms.forEach { terms ->
+        terms.toSet().forEach { term ->
+            docFrequency[term] = (docFrequency[term] ?: 0) + 1
+        }
+    }
+    val totalDocs = docTerms.size.toDouble().coerceAtLeast(1.0)
+
+    fun bm25Score(terms: List<String>): Double {
+        if (terms.isEmpty()) return 0.0
+        val tf = terms.groupingBy { it }.eachCount()
+        val docLength = terms.size.toDouble().coerceAtLeast(1.0)
+        val k1 = 1.2
+        val b = 0.75
+        var score = 0.0
+        queryTerms.forEach { term ->
+            val freq = tf[term]?.toDouble() ?: return@forEach
+            val df = docFrequency[term]?.toDouble() ?: 0.0
+            val idf = ln((totalDocs - df + 0.5) / (df + 0.5) + 1.0)
+            val numerator = freq * (k1 + 1.0)
+            val denominator = freq + k1 * (1.0 - b + b * (docLength / avgDocLength))
+            score += idf * (numerator / denominator)
+        }
+        return score
+    }
+
+    val bm25Ranked = candidateChunks.mapIndexed { localIndex, _ ->
+        localIndex to bm25Score(docTerms[localIndex])
+    }.filter { it.second > 0.0 }
+        .sortedByDescending { it.second }
+        .take(bm25TopK)
+    val vectorRanked = candidateChunks.mapIndexedNotNull { localIndex, (globalIndex, _) ->
+        vectorScoresByIndex[globalIndex]?.let { localIndex to it }
+    }.sortedByDescending { it.second }
+        .take(vectorTopK)
+    val exactRanked = candidateChunks.mapIndexedNotNull { localIndex, (_, chunk) ->
+        val exactScore = exactIdentifierScore(queryIdentifiers, chunk.metadata, chunk.content)
+        if (exactScore <= 0.0) null else localIndex to exactScore
+    }.sortedByDescending { it.second }
+        .take(20)
+
+    val bm25Ranks = bm25Ranked.mapIndexed { rank, pair -> pair.first to rank + 1 }.toMap()
+    val vectorRanks = vectorRanked.mapIndexed { rank, pair -> pair.first to rank + 1 }.toMap()
+    val exactRanks = exactRanked.mapIndexed { rank, pair -> pair.first to rank + 1 }.toMap()
+    val bm25ScoresByIndex = bm25Ranked.toMap()
+    val vectorScoresByLocalIndex = vectorRanked.toMap()
+    val exactScoresByIndex = exactRanked.toMap()
+
+    val candidateSet = (bm25Ranks.keys + vectorRanks.keys + exactRanks.keys).toSet()
+    if (candidateSet.isEmpty()) return emptyList()
+
+    val ranked = candidateSet.mapNotNull { localIndex ->
+        val chunk = candidateChunks[localIndex].second
+        val rrf = sequenceOf(
+            bm25Ranks[localIndex],
+            vectorRanks[localIndex],
+            exactRanks[localIndex]
+        ).filterNotNull()
+            .sumOf { rank -> 1.0 / (RRF_K + rank.toDouble()) }
+        val metadataBoost = channelLaneBoost(channel, chunk.metadata) *
+            roleBoost(role, chunk.metadata.sourceRoles) *
+            salienceBoost(chunk.metadata.salience) *
+            exactMetadataBoost(exactScoresByIndex[localIndex] ?: 0.0)
+        val finalScore = rrf * metadataBoost
+        if (finalScore < minFinalScore) return@mapNotNull null
+        RankedMemoryChunk(
+            docIndex = candidateIndexes[localIndex],
+            bm25Score = normalizeScore(bm25ScoresByIndex[localIndex], bm25Ranked.maxOfOrNull { it.second } ?: 1.0),
+            vectorScore = normalizeScore(vectorScoresByLocalIndex[localIndex], vectorRanked.maxOfOrNull { it.second } ?: 1.0),
+            exactScore = exactScoresByIndex[localIndex] ?: 0.0,
+            finalScore = finalScore,
+        )
+    }.sortedByDescending { it.finalScore }
+
+    return applyLexicalMmrToMemoryChunks(
+        ranked = ranked,
+        chunks = chunks,
+        lambda = 0.72,
+    )
+}
+
 internal fun buildSourcePreviewChunks(
     messages: List<IndexedSourceMessage>,
 ): List<SourceChunkDraft> {
@@ -799,6 +908,30 @@ private fun applyMmrToMemoryChunks(
                         chunks[chosen.docIndex].content
                     )
                 }
+            } ?: 0.0
+            lambda * candidate.finalScore - (1.0 - lambda) * noveltyPenalty
+        } ?: break
+        selected += next
+        remaining.remove(next)
+    }
+    return selected
+}
+
+private fun applyLexicalMmrToMemoryChunks(
+    ranked: List<RankedMemoryChunk>,
+    chunks: List<MemorySummaryChunk>,
+    lambda: Double,
+): List<RankedMemoryChunk> {
+    if (ranked.size <= 1) return ranked
+    val selected = mutableListOf<RankedMemoryChunk>()
+    val remaining = ranked.toMutableList()
+    while (remaining.isNotEmpty() && selected.size < ranked.size) {
+        val next = remaining.maxByOrNull { candidate ->
+            val noveltyPenalty = selected.maxOfOrNull { chosen ->
+                lexicalSimilarity(
+                    chunks[candidate.docIndex].content,
+                    chunks[chosen.docIndex].content
+                )
             } ?: 0.0
             lambda * candidate.finalScore - (1.0 - lambda) * noveltyPenalty
         } ?: break

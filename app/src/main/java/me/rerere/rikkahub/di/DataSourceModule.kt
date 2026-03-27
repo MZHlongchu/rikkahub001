@@ -29,6 +29,12 @@ import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.KnowledgeBaseFtsManager
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.SimpleDictManager
+import me.rerere.rikkahub.data.db.index.INDEX_DB_NAME
+import me.rerere.rikkahub.data.db.index.IndexDatabase
+import me.rerere.rikkahub.data.db.index.IndexMigrationManager
+import me.rerere.rikkahub.data.db.index.IndexVectorTableManager
+import me.rerere.rikkahub.data.db.index.createKnowledgeBaseFtsTable
+import me.rerere.rikkahub.data.db.index.initializeExistingVectorTables
 import me.rerere.rikkahub.data.db.migrations.Migration_11_12
 import me.rerere.rikkahub.data.db.migrations.Migration_13_14
 import me.rerere.rikkahub.data.db.migrations.Migration_14_15
@@ -40,6 +46,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_21_22
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_23_24
 import me.rerere.rikkahub.data.db.migrations.Migration_24_25
+import me.rerere.rikkahub.data.db.migrations.Migration_25_26
 import me.rerere.rikkahub.data.db.migrations.Migration_6_7
 import me.rerere.search.SearchService
 import me.rerere.rikkahub.data.sync.S3Sync
@@ -74,6 +81,7 @@ val dataSourceModule = module {
                 Migration_22_23,
                 Migration_23_24,
                 Migration_24_25,
+                Migration_25_26,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -124,6 +132,39 @@ val dataSourceModule = module {
                             options.customExtensions.add(
                                 SQLiteCustomExtension(
                                     context.applicationInfo.nativeLibraryDir + "/libsimple",
+                                    null
+                                )
+                            )
+                            options
+                        }
+                    )
+                )
+            )
+            .build()
+    }
+
+    single {
+        val context: Context = get()
+        Room.databaseBuilder(context, IndexDatabase::class.java, INDEX_DB_NAME)
+            .addCallback(object : RoomDatabase.Callback() {
+                override fun onOpen(db: SupportSQLiteDatabase) {
+                    createKnowledgeBaseFtsTable(db)
+                    initializeExistingVectorTables(db)
+                }
+            })
+            .openHelperFactory(
+                RequerySQLiteOpenHelperFactory(
+                    listOf(
+                        RequerySQLiteOpenHelperFactory.ConfigurationOptions { options ->
+                            options.customExtensions.add(
+                                SQLiteCustomExtension(
+                                    context.applicationInfo.nativeLibraryDir + "/libsimple",
+                                    null
+                                )
+                            )
+                            options.customExtensions.add(
+                                SQLiteCustomExtension(
+                                    context.applicationInfo.nativeLibraryDir + "/vector",
                                     null
                                 )
                             )
@@ -202,11 +243,48 @@ val dataSourceModule = module {
     }
 
     single {
+        get<IndexDatabase>().knowledgeBaseChunkDao()
+    }
+
+    single {
+        get<IndexDatabase>().memoryIndexChunkDao()
+    }
+
+    single {
+        get<IndexDatabase>().sourcePreviewChunkDao()
+    }
+
+    single {
+        get<IndexDatabase>().pendingLedgerBatchDao()
+    }
+
+    single {
+        get<IndexDatabase>().migrationStateDao()
+    }
+
+    single {
+        IndexVectorTableManager(get())
+    }
+
+    single {
+        IndexMigrationManager(
+            appDatabase = get(),
+            indexDatabase = get(),
+            migrationStateDAO = get(),
+            knowledgeBaseChunkDAO = get(),
+            memoryIndexChunkDAO = get(),
+            sourcePreviewChunkDAO = get(),
+            pendingLedgerBatchDAO = get(),
+            vectorTableManager = get(),
+        )
+    }
+
+    single {
         MessageFtsManager(get())
     }
 
     single {
-        KnowledgeBaseFtsManager(get(), get())
+        KnowledgeBaseFtsManager(get(), get(), get(), get())
     }
 
     single { McpManager(settingsStore = get(), appScope = get(), filesManager = get()) }

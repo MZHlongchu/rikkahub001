@@ -32,6 +32,7 @@ import me.rerere.rikkahub.data.knowledgebase.IncrementalKnowledgeBaseChunker
 import me.rerere.rikkahub.data.knowledgebase.KnowledgeBaseCandidateChunk
 import me.rerere.rikkahub.data.knowledgebase.KnowledgeBaseChunkDraft
 import me.rerere.rikkahub.data.knowledgebase.rankKnowledgeBaseChunks
+import me.rerere.rikkahub.data.knowledgebase.rankKnowledgeBaseChunksByVectorScores
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.KnowledgeBaseChunk
 import me.rerere.rikkahub.data.model.KnowledgeBaseChunkReadResult
@@ -342,16 +343,35 @@ class KnowledgeBaseService(
                 chunks = emptyList()
             )
 
-        val ranked = rankKnowledgeBaseChunks(
-            query = normalizedQuery,
-            chunks = candidateChunks.map { candidate ->
-                KnowledgeBaseCandidateChunk(
-                    content = candidate.chunk.content,
-                    embedding = candidate.chunk.embedding
-                )
-            },
-            queryEmbedding = queryEmbedding,
-        ).map { score -> score to candidateChunks[score.index] }
+        val ranked = if (candidateChunks.any { it.chunk.embedding.isNotEmpty() }) {
+            rankKnowledgeBaseChunks(
+                query = normalizedQuery,
+                chunks = candidateChunks.map { candidate ->
+                    KnowledgeBaseCandidateChunk(
+                        content = candidate.chunk.content,
+                        embedding = candidate.chunk.embedding
+                    )
+                },
+                queryEmbedding = queryEmbedding,
+            )
+        } else {
+            val vectorDistances = knowledgeBaseRepository.searchVectorDistances(
+                assistantId = assistantId,
+                candidateChunkIds = candidateChunks.map { it.chunk.id },
+                queryEmbedding = queryEmbedding,
+                limit = KB_FTS_CANDIDATE_LIMIT,
+            )
+            val vectorScoresByIndex = candidateChunks.mapIndexedNotNull { index, candidate ->
+                vectorDistances[candidate.chunk.id]?.let { distance ->
+                    index to (1.0 / (1.0 + distance.coerceAtLeast(0.0)))
+                }
+            }.toMap()
+            rankKnowledgeBaseChunksByVectorScores(
+                query = normalizedQuery,
+                chunkContents = candidateChunks.map { it.chunk.content },
+                vectorScoresByIndex = vectorScoresByIndex,
+            )
+        }.map { score -> score to candidateChunks[score.index] }
         val filtered = filterRankedKnowledgeBaseChunks(ranked.map { it.first })
         if (filtered.quality == KnowledgeBaseResultQuality.EMPTY || filtered.chunks.isEmpty()) {
             return KnowledgeBaseSearchResult(

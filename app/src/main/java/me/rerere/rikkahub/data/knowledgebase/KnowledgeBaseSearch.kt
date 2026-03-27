@@ -91,6 +91,76 @@ fun rankKnowledgeBaseChunks(
     }.sortedByDescending { it.finalScore }
 }
 
+fun rankKnowledgeBaseChunksByVectorScores(
+    query: String,
+    chunkContents: List<String>,
+    vectorScoresByIndex: Map<Int, Double>,
+    bm25TopK: Int = 40,
+    vectorTopK: Int = 24,
+    minFinalScore: Double = 0.08,
+): List<RankedKnowledgeBaseChunk> {
+    val queryTerms = tokenizeForKnowledgeBase(query)
+    if (queryTerms.isEmpty() || chunkContents.isEmpty()) return emptyList()
+
+    val docTerms = chunkContents.map(::tokenizeForKnowledgeBase)
+    val avgDocLength = docTerms.map { it.size }.average().takeIf { it > 0 } ?: 1.0
+    val totalDocs = docTerms.size.toDouble().coerceAtLeast(1.0)
+    val docFrequency = mutableMapOf<String, Int>()
+    docTerms.forEach { terms ->
+        terms.toSet().forEach { term ->
+            docFrequency[term] = (docFrequency[term] ?: 0) + 1
+        }
+    }
+
+    fun bm25Score(terms: List<String>): Double {
+        if (terms.isEmpty()) return 0.0
+        val tf = terms.groupingBy { it }.eachCount()
+        val docLength = terms.size.toDouble().coerceAtLeast(1.0)
+        val k1 = 1.2
+        val b = 0.75
+        var score = 0.0
+        queryTerms.forEach { term ->
+            val freq = tf[term]?.toDouble() ?: return@forEach
+            val df = docFrequency[term]?.toDouble() ?: 0.0
+            val idf = ln((totalDocs - df + 0.5) / (df + 0.5) + 1.0)
+            val numerator = freq * (k1 + 1.0)
+            val denominator = freq + k1 * (1.0 - b + b * (docLength / avgDocLength))
+            score += idf * (numerator / denominator)
+        }
+        return score
+    }
+
+    val bm25Ranked = docTerms.mapIndexed { index, terms ->
+        index to bm25Score(terms)
+    }.filter { it.second > 0.0 }
+        .sortedByDescending { it.second }
+        .take(bm25TopK)
+
+    val vectorRanked = vectorScoresByIndex.entries
+        .map { it.key to it.value }
+        .sortedByDescending { it.second }
+        .take(vectorTopK)
+
+    val bm25Scores = bm25Ranked.toMap()
+    val vectorScores = vectorRanked.toMap()
+    val maxBm25 = bm25Ranked.maxOfOrNull { it.second } ?: 1.0
+    val maxVector = vectorRanked.maxOfOrNull { it.second } ?: 1.0
+    val candidateIndexes = (bm25Scores.keys + vectorScores.keys).toSet()
+
+    return candidateIndexes.mapNotNull { index ->
+        val bm25 = normalizeScore(bm25Scores[index], maxBm25)
+        val vector = normalizeScore(vectorScores[index], maxVector)
+        val finalScore = (bm25 * 0.45) + (vector * 0.55)
+        if (finalScore < minFinalScore) return@mapNotNull null
+        RankedKnowledgeBaseChunk(
+            index = index,
+            bm25Score = bm25,
+            vectorScore = vector,
+            finalScore = finalScore,
+        )
+    }.sortedByDescending { it.finalScore }
+}
+
 fun filterRankedKnowledgeBaseChunks(
     ranked: List<RankedKnowledgeBaseChunk>,
     absoluteThreshold: Double = 0.08,

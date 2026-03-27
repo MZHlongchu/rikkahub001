@@ -26,6 +26,7 @@ import me.rerere.rikkahub.di.dataSourceModule
 import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.container.PRootManager
+import me.rerere.rikkahub.data.db.index.IndexMigrationManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.KnowledgeBaseIndexForegroundService
@@ -80,6 +81,7 @@ class RikkaHubApp : Application() {
         startWebServerIfEnabled()
         startScheduledPromptManager()
         startScheduledTaskKeepAliveIfEnabled()
+        startIndexMigrationIfNeeded()
         resumeKnowledgeBaseIndexingIfNeeded()
 
         // Increment launch count
@@ -240,6 +242,17 @@ class RikkaHubApp : Application() {
                 startForegroundService(intent)
             }.onFailure {
                 Log.e(TAG, "startScheduledTaskKeepAliveIfEnabled failed", it)
+            }
+        }
+    }
+
+    private fun startIndexMigrationIfNeeded() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                delay(750)
+                get<IndexMigrationManager>().migrateIfNeeded()
+            }.onFailure {
+                Log.e(TAG, "startIndexMigrationIfNeeded failed", it)
             }
         }
     }

@@ -304,6 +304,7 @@ dependencies {
 
     // sqlite-android (requery SQLite for Android)
     implementation(libs.sqlite.android)
+    implementation(libs.sqlite.vector)
 
     // modules
     implementation(project(":ai"))

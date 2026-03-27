@@ -21,7 +21,7 @@ val repositoryModule = module {
     }
 
     single {
-        PendingLedgerBatchRepository(get())
+        PendingLedgerBatchRepository(get(), get(), get())
     }
 
     single {
@@ -29,11 +29,11 @@ val repositoryModule = module {
     }
 
     single {
-        MemoryIndexRepository(get(), get(), get())
+        MemoryIndexRepository(get(), get(), get(), get(), get(), get(), get())
     }
 
     single {
-        SourcePreviewRepository(get(), get())
+        SourcePreviewRepository(get(), get(), get(), get(), get())
     }
 
     single {
@@ -41,7 +41,7 @@ val repositoryModule = module {
     }
 
     single {
-        KnowledgeBaseRepository(get(), get(), get())
+        KnowledgeBaseRepository(get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

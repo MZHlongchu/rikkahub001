@@ -1,23 +1,35 @@
 package me.rerere.rikkahub.data.db.fts
 
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.index.IndexDatabase
+import me.rerere.rikkahub.data.db.index.IndexMigrationManager
+import me.rerere.rikkahub.data.db.index.createKnowledgeBaseFtsTable
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 
 private const val KB_FTS_TABLE = "knowledge_base_chunk_fts"
 
 class KnowledgeBaseFtsManager(
-    private val database: AppDatabase,
+    private val appDatabase: AppDatabase,
+    private val indexDatabase: IndexDatabase,
+    private val indexMigrationManager: IndexMigrationManager,
     private val knowledgeBaseRepository: KnowledgeBaseRepository,
 ) {
-    private val db get() = database.openHelper.writableDatabase
+    private val db: SupportSQLiteDatabase
+        get() = if (indexMigrationManager.shouldUseIndexBackend()) {
+            indexDatabase.openHelper.writableDatabase
+        } else {
+            appDatabase.openHelper.writableDatabase
+        }
 
     suspend fun deleteDocument(documentId: Long) = withContext(Dispatchers.IO) {
         db.execSQL("DELETE FROM $KB_FTS_TABLE WHERE document_id = ?", arrayOf(documentId))
     }
 
     suspend fun rebuildDocument(documentId: Long, generation: Int) = withContext(Dispatchers.IO) {
+        createKnowledgeBaseFtsTable(db)
         db.execSQL("DELETE FROM $KB_FTS_TABLE WHERE document_id = ?", arrayOf(documentId))
         knowledgeBaseRepository.getFtsRowsOfDocumentGeneration(documentId, generation).forEach { row ->
             db.execSQL(
@@ -28,6 +40,7 @@ class KnowledgeBaseFtsManager(
     }
 
     suspend fun ensureReady() = withContext(Dispatchers.IO) {
+        createKnowledgeBaseFtsTable(db)
         val cursor = db.query("SELECT COUNT(*) FROM $KB_FTS_TABLE")
         val rowCount = cursor.use {
             if (it.moveToFirst()) it.getInt(0) else 0
@@ -47,6 +60,7 @@ class KnowledgeBaseFtsManager(
         limit: Int,
         documentIds: List<Long> = emptyList(),
     ): List<Long> = withContext(Dispatchers.IO) {
+        createKnowledgeBaseFtsTable(db)
         val matchQuery = buildMatchQuery(query)
         if (matchQuery.isBlank()) return@withContext emptyList()
         val results = mutableListOf<Long>()
