@@ -16,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.KNOWLEDGE_BASE_INDEX_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
