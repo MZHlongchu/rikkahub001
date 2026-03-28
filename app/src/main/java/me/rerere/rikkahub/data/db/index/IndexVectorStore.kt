@@ -280,7 +280,7 @@ class IndexVectorStore(
         }
         return SQLiteDatabase.openDatabase(configuration, null, null).also { opened ->
             opened.execSQL("PRAGMA busy_timeout=5000")
-            opened.execSQL("PRAGMA journal_mode=DELETE")
+            opened.query("PRAGMA journal_mode=DELETE").use { }
             opened.execSQL("PRAGMA synchronous=NORMAL")
             opened.execSQL("PRAGMA foreign_keys=ON")
             Log.i(TAG, "Opened raw sqlite-vector database at $databasePath with WAL disabled")
