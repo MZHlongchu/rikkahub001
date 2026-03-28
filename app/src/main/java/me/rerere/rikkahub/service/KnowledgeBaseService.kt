@@ -190,7 +190,9 @@ class KnowledgeBaseService(
 
         refreshIndexState()
         if (imported > 0) {
-            resumePendingWorkIfNeeded()
+            // Always start foreground service to process new documents
+            // Service will check queue internally
+            startForegroundIndexing()
         }
         return imported
     }
@@ -229,16 +231,23 @@ class KnowledgeBaseService(
     suspend fun deleteDocument(documentId: Long): Boolean {
         val document = knowledgeBaseRepository.getDocument(documentId) ?: return false
         val wasCurrentIndexing = indexState.value.currentDocumentId == documentId
-        KnowledgeBaseIndexForegroundService.cancelDocument(context, documentId)
+        
+        // Cancel current indexing if this document is being processed
+        if (wasCurrentIndexing) {
+            KnowledgeBaseIndexForegroundService.cancelDocument(context, documentId)
+            resetIndexState()
+            // Give service time to process cancellation
+            kotlinx.coroutines.delay(300)
+        }
+        
         knowledgeBaseFtsManager.deleteDocument(documentId)
         filesManager.deleteByRelativePath(document.relativePath, deleteFromDisk = true)
         knowledgeBaseRepository.deleteDocument(documentId)
 
-        if (wasCurrentIndexing) {
-            resetIndexState()
-        }
         recoverInterruptedIndexing()
         refreshIndexState()
+        
+        // Always try to start indexing if there are queued documents
         if (knowledgeBaseRepository.countQueuedDocuments() > 0) {
             startForegroundIndexing()
         }

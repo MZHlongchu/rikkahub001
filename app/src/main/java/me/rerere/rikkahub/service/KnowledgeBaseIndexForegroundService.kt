@@ -65,13 +65,19 @@ class KnowledgeBaseIndexForegroundService : Service() {
         when (intent?.action) {
             ACTION_CANCEL_DOCUMENT -> {
                 val documentId = intent.getLongExtra(EXTRA_DOCUMENT_ID, -1L)
-                if (documentId > 0L && knowledgeBaseService.indexState.value.currentDocumentId == documentId) {
-                    processingJob?.cancel(CancellationException("Knowledge base document deleted"))
-                }
                 serviceScope.launch {
+                    if (documentId > 0L && knowledgeBaseService.indexState.value.currentDocumentId == documentId) {
+                        processingJob?.cancelAndJoin()
+                        processingJob = null
+                    }
                     knowledgeBaseService.refreshIndexState()
-                    if (processingJob == null && knowledgeBaseService.indexState.value.queuedCount > 0) {
+                    // Always check and restart if needed
+                    if (knowledgeBaseService.indexState.value.queuedCount > 0) {
                         startProcessingIfNeeded()
+                    } else if (processingJob == null) {
+                        // No more work, stop service
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
                     }
                 }
             }
