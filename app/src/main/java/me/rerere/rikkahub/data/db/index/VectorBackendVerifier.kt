@@ -108,9 +108,7 @@ class VectorBackendVerifier(
         db.query(
             """
             SELECT rowid, distance
-            FROM vector_full_scan('$VECTOR_HEALTH_TABLE', 'embedding', vector_as_f32(?))
-            ORDER BY distance
-            LIMIT 2
+            FROM vector_full_scan('$VECTOR_HEALTH_TABLE', 'embedding', ?, 2)
             """.trimIndent(),
             arrayOf("[1.0,0.0]")
         ).use { cursor ->

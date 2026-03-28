@@ -30,9 +30,10 @@ class IndexVectorTableManager(
         records: List<VectorInsertRecord>,
     ) {
         if (records.isEmpty() || dimension <= 0) return
+        val databaseHandle = db
         val tableName = buildKnowledgeBaseVectorTableName(dimension)
-        ensureVectorTable(tableName, dimension, "knowledge_base_chunk")
-        insertVectorRows(tableName, records)
+        ensureVectorTable(databaseHandle, tableName, dimension, "knowledge_base_chunk")
+        insertVectorRows(databaseHandle, tableName, records)
     }
 
     suspend fun insertMemoryVectors(
@@ -40,9 +41,10 @@ class IndexVectorTableManager(
         records: List<VectorInsertRecord>,
     ) {
         if (records.isEmpty() || dimension <= 0) return
+        val databaseHandle = db
         val tableName = buildMemoryVectorTableName(dimension)
-        ensureVectorTable(tableName, dimension, "memory_index_chunk")
-        insertVectorRows(tableName, records)
+        ensureVectorTable(databaseHandle, tableName, dimension, "memory_index_chunk")
+        insertVectorRows(databaseHandle, tableName, records)
     }
 
     suspend fun searchKnowledgeBaseDistances(
@@ -54,8 +56,9 @@ class IndexVectorTableManager(
         if (candidateIds.isEmpty() || queryEmbeddingJson.isBlank() || dimension <= 0 || limit <= 0) {
             return emptyMap()
         }
+        val databaseHandle = db
         val tableName = buildKnowledgeBaseVectorTableName(dimension)
-        if (!hasTable(tableName)) {
+        if (!hasTable(databaseHandle, tableName)) {
             throw VectorSearchExecutionException(
                 operation = "knowledge_base",
                 tableName = tableName,
@@ -64,8 +67,9 @@ class IndexVectorTableManager(
                 message = "Knowledge base vector table is missing"
             )
         }
-        ensureVectorTable(tableName, dimension, "knowledge_base_chunk")
+        ensureVectorTable(databaseHandle, tableName, dimension, "knowledge_base_chunk")
         return searchDistancesByRowIds(
+            databaseHandle = databaseHandle,
             tableName = tableName,
             candidateIds = candidateIds,
             queryEmbeddingJson = queryEmbeddingJson,
@@ -83,8 +87,9 @@ class IndexVectorTableManager(
         if (candidateIds.isEmpty() || queryEmbeddingJson.isBlank() || dimension <= 0 || limit <= 0) {
             return emptyMap()
         }
+        val databaseHandle = db
         val tableName = buildMemoryVectorTableName(dimension)
-        if (!hasTable(tableName)) {
+        if (!hasTable(databaseHandle, tableName)) {
             throw VectorSearchExecutionException(
                 operation = "memory",
                 tableName = tableName,
@@ -93,8 +98,9 @@ class IndexVectorTableManager(
                 message = "Memory vector table is missing"
             )
         }
-        ensureVectorTable(tableName, dimension, "memory_index_chunk")
+        ensureVectorTable(databaseHandle, tableName, dimension, "memory_index_chunk")
         return searchDistancesByRowIds(
+            databaseHandle = databaseHandle,
             tableName = tableName,
             candidateIds = candidateIds,
             queryEmbeddingJson = queryEmbeddingJson,
@@ -104,7 +110,8 @@ class IndexVectorTableManager(
     }
 
     suspend fun clearAllVectorTables() {
-        val cursor = db.query(
+        val databaseHandle = db
+        val cursor = databaseHandle.query(
             """
             SELECT name
             FROM sqlite_master
@@ -120,21 +127,25 @@ class IndexVectorTableManager(
             }
         }
         tableNames.forEach { tableName ->
-            db.execSQL("DROP TABLE IF EXISTS `$tableName`")
+            databaseHandle.execSQL("DROP TABLE IF EXISTS `$tableName`")
         }
     }
 
     suspend fun deleteMemoryVectors(chunkIdsByDimension: Map<Int, List<Long>>) {
+        val databaseHandle = db
         chunkIdsByDimension.forEach { (dimension, chunkIds) ->
             if (dimension <= 0 || chunkIds.isEmpty()) return@forEach
             val tableName = buildMemoryVectorTableName(dimension)
-            if (!hasTable(tableName)) return@forEach
-            deleteVectorRows(tableName, chunkIds.distinct())
+            if (!hasTable(databaseHandle, tableName)) return@forEach
+            deleteVectorRows(databaseHandle, tableName, chunkIds.distinct())
         }
     }
 
-    private fun hasTable(tableName: String): Boolean {
-        db.query(
+    private fun hasTable(
+        databaseHandle: SupportSQLiteDatabase,
+        tableName: String,
+    ): Boolean {
+        databaseHandle.query(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
             arrayOf(tableName)
         ).use {
@@ -143,11 +154,12 @@ class IndexVectorTableManager(
     }
 
     private fun ensureVectorTable(
+        databaseHandle: SupportSQLiteDatabase,
         tableName: String,
         dimension: Int,
         parentTable: String,
     ) {
-        db.execSQL(
+        databaseHandle.execSQL(
             """
             CREATE TABLE IF NOT EXISTS `$tableName` (
                 `chunk_id` INTEGER PRIMARY KEY NOT NULL,
@@ -156,14 +168,15 @@ class IndexVectorTableManager(
             )
             """.trimIndent()
         )
-        initializeVectorTable(db, tableName, dimension)
+        initializeVectorTable(databaseHandle, tableName, dimension)
     }
 
     private fun insertVectorRows(
+        databaseHandle: SupportSQLiteDatabase,
         tableName: String,
         records: List<VectorInsertRecord>,
     ) {
-        val statement = db.compileStatement(
+        val statement = databaseHandle.compileStatement(
             "INSERT OR REPLACE INTO `$tableName` (`chunk_id`, `embedding`) VALUES (?, vector_as_f32(?))"
         )
         records.forEach { record ->
@@ -175,11 +188,12 @@ class IndexVectorTableManager(
     }
 
     private fun queryDistanceMap(
+        databaseHandle: SupportSQLiteDatabase,
         sql: String,
         args: List<Any>,
     ): Map<Long, Double> {
         val result = linkedMapOf<Long, Double>()
-        db.query(sql, args.toTypedArray()).use { cursor ->
+        databaseHandle.query(sql, args.toTypedArray()).use { cursor ->
             while (cursor.moveToNext()) {
                 result[cursor.getLong(0)] = cursor.getDouble(1)
             }
@@ -188,6 +202,7 @@ class IndexVectorTableManager(
     }
 
     private suspend fun searchDistancesByRowIds(
+        databaseHandle: SupportSQLiteDatabase,
         tableName: String,
         candidateIds: List<Long>,
         queryEmbeddingJson: String,
@@ -204,31 +219,26 @@ class IndexVectorTableManager(
         )
 
         return try {
-            uniqueIds
-                .chunked(SQLITE_BIND_LIMIT_HEADROOM)
+            val totalVectorRows = countRows(databaseHandle, tableName)
+            if (totalVectorRows == 0) {
+                return emptyMap()
+            }
+            val candidateIdSet = uniqueIds.toHashSet()
+            val result = queryDistanceMap(
+                databaseHandle = databaseHandle,
+                sql = buildTopKDistanceQuery(tableName),
+                args = listOf(queryEmbeddingJson, totalVectorRows)
+            )
                 .asSequence()
-                .flatMap { batch ->
-                    queryDistanceMap(
-                        sql = buildRowIdDistanceQuery(tableName, batch),
-                        args = buildList {
-                            add(queryEmbeddingJson)
-                            addAll(batch)
-                            add(limit)
-                        }
-                    ).asSequence()
-                }
-                .groupBy({ it.key }, { it.value })
-                .mapValues { (_, distances) -> distances.minOrNull() ?: Double.POSITIVE_INFINITY }
-                .entries
+                .filter { (rowId, _) -> candidateIdSet.contains(rowId) }
                 .sortedBy { it.value }
                 .take(limit)
                 .associate { it.key to it.value }
-                .also { result ->
-                    Log.i(
-                        TAG,
-                        "sqlite-vector $operation search succeeded for $tableName with ${result.size} hits from ${uniqueIds.size} candidates"
-                    )
-                }
+            Log.i(
+                TAG,
+                "sqlite-vector $operation search succeeded for $tableName with ${result.size} hits from ${uniqueIds.size} candidates"
+            )
+            result
         } catch (error: Throwable) {
             Log.e(TAG, "sqlite-vector $operation distance query failed for $tableName", error)
             throw VectorSearchExecutionException(
@@ -243,32 +253,32 @@ class IndexVectorTableManager(
     }
 
     private fun deleteVectorRows(
+        databaseHandle: SupportSQLiteDatabase,
         tableName: String,
         chunkIds: List<Long>,
     ) {
         if (chunkIds.isEmpty()) return
         chunkIds.chunked(SQLITE_BIND_LIMIT_HEADROOM).forEach { batch ->
-            db.execSQL(
+            databaseHandle.execSQL(
                 "DELETE FROM `$tableName` WHERE chunk_id IN (${batch.joinToString(",") { "?" }})",
                 batch.map { it as Any }.toTypedArray()
             )
         }
     }
 
-    private fun buildRowIdDistanceQuery(
+    private fun buildTopKDistanceQuery(tableName: String): String {
+        return """
+            SELECT rowid, distance
+            FROM vector_full_scan('$tableName', 'embedding', ?, ?)
+        """.trimIndent()
+    }
+
+    private fun countRows(
+        databaseHandle: SupportSQLiteDatabase,
         tableName: String,
-        candidateIds: List<Long>,
-    ): String {
-        return buildString {
-            append(
-                """
-                SELECT v.rowid, v.distance
-                FROM vector_full_scan('$tableName', 'embedding', vector_as_f32(?)) AS v
-                WHERE v.rowid IN (
-                """.trimIndent()
-            )
-            append(candidateIds.joinToString(",") { "?" })
-            append(") ORDER BY v.distance LIMIT ?")
+    ): Int {
+        databaseHandle.query("SELECT COUNT(*) FROM `$tableName`").use { cursor ->
+            return if (cursor.moveToFirst()) cursor.getInt(0) else 0
         }
     }
 
