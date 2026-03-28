@@ -43,6 +43,7 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getEmbeddingModel
 import me.rerere.rikkahub.data.model.KnowledgeBaseDocument
 import me.rerere.rikkahub.data.model.KnowledgeBaseDocumentStatus
+import me.rerere.rikkahub.data.model.KnowledgeBaseIndexPhase
 import me.rerere.rikkahub.data.model.KnowledgeBaseIndexState
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -190,7 +191,7 @@ fun AssistantKnowledgeBasePage(id: String) {
             }
 
             item {
-                KnowledgeBaseQueueCard(indexState = indexState)
+                KnowledgeBaseQueueCard(indexState = indexState, documents = documents)
             }
 
             item {
@@ -231,7 +232,7 @@ fun AssistantKnowledgeBasePage(id: String) {
                             vm.clearKnowledgeBaseIndexQueue { result ->
                                 result.fold(
                                     onSuccess = {
-                                        toaster.show("索引队列已清空，状态已重置", type = ToastType.Success)
+                                        toaster.show("索引状态已重置", type = ToastType.Success)
                                     },
                                     onFailure = { error ->
                                         toaster.show(error.message ?: "重置失败", type = ToastType.Error)
@@ -240,7 +241,7 @@ fun AssistantKnowledgeBasePage(id: String) {
                             }
                         }
                     ) {
-                        Text("清空索引队列/重置状态")
+                        Text("重置索引状态")
                     }
                 }
             }
@@ -399,7 +400,10 @@ private fun KnowledgeBaseImageSwitchCard(
     }
 }
 @Composable
-private fun KnowledgeBaseQueueCard(indexState: KnowledgeBaseIndexState) {
+private fun KnowledgeBaseQueueCard(
+    indexState: KnowledgeBaseIndexState,
+    documents: List<KnowledgeBaseDocument>,
+) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -413,14 +417,71 @@ private fun KnowledgeBaseQueueCard(indexState: KnowledgeBaseIndexState) {
                 text = "索引状态",
                 style = MaterialTheme.typography.titleMedium
             )
-            if (indexState.phase.isNotBlank()) {
+            val latestCompleted = documents
+                .filter { it.status == KnowledgeBaseDocumentStatus.READY && it.lastIndexedAt != null }
+                .maxByOrNull { it.lastIndexedAt ?: it.updatedAt }
+            val latestFailed = documents
+                .filter { it.status == KnowledgeBaseDocumentStatus.FAILED }
+                .maxByOrNull { it.updatedAt }
+            val latestResult = listOfNotNull(
+                latestCompleted?.let { Triple(it, it.lastIndexedAt ?: it.updatedAt, true) },
+                latestFailed?.let { Triple(it, it.updatedAt, false) },
+            ).maxByOrNull { it.second }
+
+            val phaseText = when (indexState.phase) {
+                KnowledgeBaseIndexPhase.QUEUED -> "排队"
+                KnowledgeBaseIndexPhase.CANCELLING -> "正在取消…"
+                KnowledgeBaseIndexPhase.PARSING -> "解析文本"
+                KnowledgeBaseIndexPhase.EMBEDDING -> "构建 embedding"
+                KnowledgeBaseIndexPhase.WRITING -> "写入索引"
+                KnowledgeBaseIndexPhase.FAILED -> "失败"
+                else -> ""
+            }
+            if (phaseText.isNotBlank()) {
                 Text(
-                    text = "阶段：${indexState.phase}",
+                    text = "阶段：$phaseText",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (!indexState.isRunning && indexState.phase != KnowledgeBaseIndexPhase.CANCELLING) {
+                latestResult?.let { (document, time, success) ->
+                    Text(
+                        text = if (success) "最近完成：${document.displayName}" else "最近失败：${document.displayName}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = "时间：${knowledgeBaseTimeFormatter.format(time.atZone(ZoneId.systemDefault()))}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (!success && document.lastError.isNotBlank()) {
+                        Text(
+                            text = document.lastError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
             when {
+                indexState.phase == KnowledgeBaseIndexPhase.CANCELLING -> {
+                    Text(
+                        text = "正在取消：${indexState.currentDocumentName}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (indexState.queuedCount > 0) {
+                        Text(
+                            text = "队列剩余：${indexState.queuedCount}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+
                 indexState.isRunning -> {
                     Text(
                         text = "当前文档：${indexState.currentDocumentName}",

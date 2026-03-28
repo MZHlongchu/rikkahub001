@@ -67,16 +67,20 @@ class KnowledgeBaseIndexForegroundService : Service() {
             ACTION_CANCEL_DOCUMENT -> {
                 val documentId = intent.getLongExtra(EXTRA_DOCUMENT_ID, -1L)
                 serviceScope.launch {
-                    if (documentId > 0L && knowledgeBaseService.indexState.value.currentDocumentId == documentId) {
+                    val currentState = knowledgeBaseService.indexState.value
+                    if (documentId > 0L && currentState.currentDocumentId == documentId) {
+                        knowledgeBaseService.markCancelling(
+                            documentId = documentId,
+                            documentName = currentState.currentDocumentName,
+                            queuedCount = currentState.queuedCount,
+                        )
                         processingJob?.cancelAndJoin()
                         processingJob = null
                     }
                     knowledgeBaseService.refreshIndexState()
-                    // Always check and restart if needed
                     if (knowledgeBaseService.indexState.value.queuedCount > 0) {
                         startProcessingIfNeeded()
                     } else if (processingJob == null) {
-                        // No more work, stop service
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
@@ -152,6 +156,18 @@ class KnowledgeBaseIndexForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val contentText = when {
+            state.phase == me.rerere.rikkahub.data.model.KnowledgeBaseIndexPhase.CANCELLING &&
+                state.currentDocumentName.isNotBlank() -> {
+                buildString {
+                    append("正在取消：")
+                    append(state.currentDocumentName)
+                    if (state.queuedCount > 0) {
+                        append(" · 队列剩余 ")
+                        append(state.queuedCount)
+                    }
+                }
+            }
+
             state.isRunning && state.currentDocumentName.isNotBlank() -> {
                 buildString {
                     append("正在索引：")
@@ -189,7 +205,7 @@ class KnowledgeBaseIndexForegroundService : Service() {
             .setProgress(
                 state.progressTotal.takeIf { it > 0 } ?: 0,
                 state.progressCurrent.coerceAtLeast(0),
-                state.isRunning && state.progressTotal <= 0
+                (state.isRunning || state.phase == me.rerere.rikkahub.data.model.KnowledgeBaseIndexPhase.CANCELLING) && state.progressTotal <= 0
             )
             .build()
     }

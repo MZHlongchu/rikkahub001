@@ -39,6 +39,7 @@ import me.rerere.rikkahub.data.model.KnowledgeBaseChunk
 import me.rerere.rikkahub.data.model.KnowledgeBaseChunkReadResult
 import me.rerere.rikkahub.data.model.KnowledgeBaseDocument
 import me.rerere.rikkahub.data.model.KnowledgeBaseDocumentSummary
+import me.rerere.rikkahub.data.model.KnowledgeBaseIndexPhase
 import me.rerere.rikkahub.data.model.KnowledgeBaseIndexState
 import me.rerere.rikkahub.data.model.KnowledgeBaseReadChunk
 import me.rerere.rikkahub.data.model.KnowledgeBaseResultQuality
@@ -73,6 +74,17 @@ class KnowledgeBaseService(
 
     suspend fun resetIndexState() {
         _indexState.value = KnowledgeBaseIndexState()
+    }
+
+    suspend fun markCancelling(documentId: Long, documentName: String, queuedCount: Int) {
+        _indexState.value = KnowledgeBaseIndexState(
+            isRunning = false,
+            currentDocumentId = documentId,
+            currentDocumentName = documentName,
+            queuedCount = queuedCount,
+            progressLabel = "正在取消…",
+            phase = KnowledgeBaseIndexPhase.CANCELLING,
+        )
     }
 
 
@@ -231,32 +243,61 @@ class KnowledgeBaseService(
     suspend fun deleteDocument(documentId: Long): Boolean {
         val document = knowledgeBaseRepository.getDocument(documentId) ?: return false
         val wasCurrentIndexing = indexState.value.currentDocumentId == documentId
-        
-        // Cancel current indexing if this document is being processed
+
         if (wasCurrentIndexing) {
+            markCancelling(
+                documentId = documentId,
+                documentName = indexState.value.currentDocumentName.ifBlank { document.displayName },
+                queuedCount = indexState.value.queuedCount,
+            )
             KnowledgeBaseIndexForegroundService.cancelDocument(context, documentId)
+            waitUntilCurrentDocumentCleared(documentId)
             resetIndexState()
-            // Give service time to process cancellation
-            kotlinx.coroutines.delay(300)
         }
-        
+
         knowledgeBaseFtsManager.deleteDocument(documentId)
         filesManager.deleteByRelativePath(document.relativePath, deleteFromDisk = true)
         knowledgeBaseRepository.deleteDocument(documentId)
 
         recoverInterruptedIndexing()
         refreshIndexState()
-        
-        // Always try to start indexing if there are queued documents
         if (knowledgeBaseRepository.countQueuedDocuments() > 0) {
             startForegroundIndexing()
         }
         return true
     }
 
+    private suspend fun waitUntilCurrentDocumentCleared(documentId: Long, timeoutMs: Long = 2_000L) {
+        val startedAt = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startedAt < timeoutMs) {
+            val current = knowledgeBaseRepository.getDocument(documentId)
+            if (current == null || current.status != KnowledgeBaseDocumentStatus.INDEXING) {
+                return
+            }
+            delay(100)
+        }
+    }
+
+    private fun phaseOf(document: KnowledgeBaseDocument): KnowledgeBaseIndexPhase {
+        return when {
+            document.status == KnowledgeBaseDocumentStatus.FAILED -> KnowledgeBaseIndexPhase.FAILED
+            document.status == KnowledgeBaseDocumentStatus.QUEUED -> KnowledgeBaseIndexPhase.QUEUED
+            document.progressLabel == "构建 embedding" -> KnowledgeBaseIndexPhase.EMBEDDING
+            document.progressLabel == "写入索引" -> KnowledgeBaseIndexPhase.WRITING
+            document.progressLabel.isNotBlank() -> KnowledgeBaseIndexPhase.PARSING
+            else -> KnowledgeBaseIndexPhase.QUEUED
+        }
+    }
+
     suspend fun clearIndexQueueAndResetState() {
         indexState.value.currentDocumentId?.let { currentId ->
+            markCancelling(
+                documentId = currentId,
+                documentName = indexState.value.currentDocumentName,
+                queuedCount = indexState.value.queuedCount,
+            )
             KnowledgeBaseIndexForegroundService.cancelDocument(context, currentId)
+            waitUntilCurrentDocumentCleared(currentId)
         }
         recoverInterruptedIndexing()
         resetIndexState()
@@ -468,16 +509,12 @@ class KnowledgeBaseService(
                 progressCurrent = indexingDocument.progressCurrent,
                 progressTotal = indexingDocument.progressTotal,
                 progressLabel = indexingDocument.progressLabel,
-                phase = when {
-                    indexingDocument.progressLabel.contains("文本") || indexingDocument.progressLabel.contains("章节") || indexingDocument.progressLabel.contains("图片") -> "解析文本"
-                    indexingDocument.progressLabel.contains("Embedding", ignoreCase = true) || indexingDocument.progressLabel.contains("向量") -> "构建 embedding"
-                    indexingDocument.progressLabel.contains("写入") || indexingDocument.progressLabel.contains("索引") -> "写入索引"
-                    else -> if (indexingDocument.progressLabel.isNotBlank()) indexingDocument.progressLabel else "排队"
-                },
+                phase = phaseOf(indexingDocument),
             )
         } else {
             KnowledgeBaseIndexState(
                 queuedCount = queuedCount,
+                phase = if (queuedCount > 0) KnowledgeBaseIndexPhase.QUEUED else KnowledgeBaseIndexPhase.IDLE,
             )
         }
     }
@@ -539,6 +576,9 @@ class KnowledgeBaseService(
                 if (batchSize <= 0 || pendingDrafts.isEmpty()) return
                 coroutineContext.ensureActive()
                 val batch = pendingDrafts.take(batchSize).toList()
+                workingDocument = workingDocument.copy(progressLabel = "构建 embedding")
+                knowledgeBaseRepository.updateDocument(workingDocument)
+                refreshIndexState()
                 val embeddings = generateEmbeddingsWithRetry(
                     providerHandler = providerHandler,
                     provider = provider,
@@ -547,9 +587,6 @@ class KnowledgeBaseService(
                     baseDelayMs = embeddingDelayMs,
                 )
                 val now = Instant.now()
-                workingDocument = workingDocument.copy(progressLabel = "构建 embedding")
-                knowledgeBaseRepository.updateDocument(workingDocument)
-                refreshIndexState()
                 val chunks = batch.mapIndexed { index, draft ->
                     KnowledgeBaseChunk(
                         documentId = existing.id,

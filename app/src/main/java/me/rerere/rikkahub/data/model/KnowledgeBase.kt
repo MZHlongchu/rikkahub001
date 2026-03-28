@@ -106,6 +106,16 @@ data class KnowledgeBaseChunkReadResult(
     val chunks: List<KnowledgeBaseReadChunk>,
 )
 
+enum class KnowledgeBaseIndexPhase {
+    IDLE,
+    QUEUED,
+    CANCELLING,
+    PARSING,
+    EMBEDDING,
+    WRITING,
+    FAILED,
+}
+
 data class KnowledgeBaseIndexState(
     val isRunning: Boolean = false,
     val currentDocumentId: Long? = null,
@@ -114,5 +124,5 @@ data class KnowledgeBaseIndexState(
     val progressCurrent: Int = 0,
     val progressTotal: Int = 0,
     val progressLabel: String = "",
-    val phase: String = "",
+    val phase: KnowledgeBaseIndexPhase = KnowledgeBaseIndexPhase.IDLE,
 )
