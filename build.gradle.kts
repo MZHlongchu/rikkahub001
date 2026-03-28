@@ -8,6 +8,7 @@ plugins {
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.android.test) apply false
     alias(libs.plugins.baselineprofile) apply false
+    alias(libs.plugins.objectbox) apply false
 }
 
 val projectPathContainsNonAscii = rootProject.projectDir.absolutePath.any { it.code > 127 }

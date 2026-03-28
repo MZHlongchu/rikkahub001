@@ -10,6 +10,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.objectbox)
 }
 
 android {
@@ -304,7 +305,8 @@ dependencies {
 
     // sqlite-android (requery SQLite for Android)
     implementation(libs.sqlite.android)
-    implementation(libs.sqlite.vector)
+    implementation(libs.objectbox.android)
+    annotationProcessor(libs.objectbox.processor)
 
     // modules
     implementation(project(":ai"))

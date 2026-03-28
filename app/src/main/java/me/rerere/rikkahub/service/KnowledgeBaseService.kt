@@ -353,7 +353,7 @@ class KnowledgeBaseService(
         )
         Log.i(
             TAG,
-            "searchKnowledgeBase: sqlite-vector returned ${vectorDistances.size} hits from ${searchScopeChunkIds.size} scope chunks"
+            "searchKnowledgeBase: vector search returned ${vectorDistances.size} hits from ${searchScopeChunkIds.size} scope chunks"
         )
         val fusedCandidateIds = linkedSetOf<Long>().apply {
             addAll(vectorDistances.keys)

@@ -5,8 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-
-private const val VECTOR_HEALTH_TABLE = "__vector_backend_probe"
+import me.rerere.rikkahub.data.db.index.objectbox.IndexObjectBoxVectorStore
 
 class VectorSearchExecutionException(
     val operation: String,
@@ -21,7 +20,7 @@ class VectorSearchExecutionException(
 )
 
 class VectorBackendVerifier(
-    private val vectorStore: IndexVectorStore,
+    private val vectorStore: IndexObjectBoxVectorStore,
 ) {
     companion object {
         private const val TAG = "VectorBackendVerifier"
@@ -39,16 +38,15 @@ class VectorBackendVerifier(
         verificationMutex.withLock {
             if (!force && lastKnownHealthy) return@withLock
             runCatching {
-                vectorStore.withPinnedConnection("vector_backend_probe") { db ->
-                    runBackendProbe(db)
-                }
+                vectorStore.ensureReady()
+                vectorStore.runProbe()
                 lastKnownHealthy = true
                 lastFailureMessage = ""
-                Log.i(TAG, "sqlite-vector backend health check passed for ${vectorStore.databasePath}")
+                Log.i(TAG, "ObjectBox vector backend health check passed for ${vectorStore.databasePath}")
             }.getOrElse { error ->
                 lastKnownHealthy = false
-                lastFailureMessage = error.message.orEmpty().ifBlank { "Unknown sqlite-vector health check failure" }
-                Log.e(TAG, "sqlite-vector backend health check failed for ${vectorStore.databasePath}", error)
+                lastFailureMessage = error.message.orEmpty().ifBlank { "Unknown vector backend health check failure" }
+                Log.e(TAG, "ObjectBox vector backend health check failed for ${vectorStore.databasePath}", error)
                 throw error
             }
         }
@@ -68,7 +66,7 @@ class VectorBackendVerifier(
                 tableName = tableName,
                 dimension = dimension,
                 candidateCount = candidateCount,
-                message = "sqlite-vector backend health check failed: ${error.message.orEmpty()}",
+                message = "vector backend health check failed: ${error.message.orEmpty()}",
                 cause = error
             )
         }
@@ -78,63 +76,7 @@ class VectorBackendVerifier(
                 tableName = tableName,
                 dimension = dimension,
                 candidateCount = candidateCount,
-                message = "sqlite-vector backend is unhealthy: $lastFailureMessage"
-            )
-        }
-    }
-
-    private fun runBackendProbe(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS `$VECTOR_HEALTH_TABLE` (
-                `probe_id` INTEGER PRIMARY KEY NOT NULL,
-                `embedding` BLOB NOT NULL
-            )
-            """.trimIndent()
-        )
-        runCatching {
-            initializeVectorTable(db, VECTOR_HEALTH_TABLE, 2)
-        }.getOrElse { error ->
-            throw vectorStore.buildStageError(
-                stage = "probe_vector_init",
-                tableName = VECTOR_HEALTH_TABLE,
-                detail = "dimension=2",
-                cause = error,
-            )
-        }
-        db.execSQL("DELETE FROM `$VECTOR_HEALTH_TABLE`")
-        val statement = db.compileStatement(
-            "INSERT OR REPLACE INTO `$VECTOR_HEALTH_TABLE` (`probe_id`, `embedding`) VALUES (?, vector_as_f32(?))"
-        )
-        statement.bindLong(1, 1L)
-        statement.bindString(2, "[1.0,0.0]")
-        statement.executeInsert()
-
-        statement.clearBindings()
-        statement.bindLong(1, 2L)
-        statement.bindString(2, "[0.0,1.0]")
-        statement.executeInsert()
-
-        runCatching {
-            db.query(
-                """
-                SELECT rowid, distance
-                FROM vector_full_scan('$VECTOR_HEALTH_TABLE', 'embedding', ?, 2)
-                """.trimIndent(),
-                arrayOf("[1.0,0.0]")
-            ).use { cursor ->
-                check(cursor.moveToFirst()) { "Vector backend probe returned no rows" }
-                val firstRowId = cursor.getLong(0)
-                val firstDistance = cursor.getDouble(1)
-                check(firstRowId == 1L) { "Vector backend probe returned unexpected rowid=$firstRowId" }
-                check(firstDistance.isFinite()) { "Vector backend probe returned non-finite distance=$firstDistance" }
-            }
-        }.getOrElse { error ->
-            throw vectorStore.buildStageError(
-                stage = "probe_vector_full_scan",
-                tableName = VECTOR_HEALTH_TABLE,
-                detail = "k=2, query=[1.0,0.0]",
-                cause = error,
+                message = "vector backend is unhealthy: $lastFailureMessage"
             )
         }
     }

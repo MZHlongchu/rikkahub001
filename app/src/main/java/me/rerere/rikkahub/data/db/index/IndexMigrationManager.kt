@@ -48,9 +48,11 @@ class IndexMigrationManager(
             val state = migrationStateDAO.getState() ?: IndexMigrationStateEntity()
             cutoverComplete = state.cutoverComplete
             if (state.cutoverComplete) {
+                vectorTableManager.ensureReady()
                 pruneOrphanedConversationScopedData()
-                if (!state.legacyPruned) {
-                    pruneLegacyTables(state)
+                val refreshedState = migrationStateDAO.getState() ?: state
+                if (!refreshedState.legacyPruned) {
+                    pruneLegacyTables(refreshedState)
                 }
                 return@withLock
             }

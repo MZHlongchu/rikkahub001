@@ -254,12 +254,12 @@ class RikkaHubApp : Application() {
             try {
                 migrationManager.migrateIfNeeded()
                 check(migrationManager.shouldUseIndexBackend()) {
-                    "Index migration did not cut over to the sqlite-vector backend"
+                    "Index migration did not cut over to the ObjectBox vector backend"
                 }
                 runCatching {
                     get<VectorBackendVerifier>().verifyBackendHealth(force = true)
                 }.onFailure { error ->
-                    Log.e(TAG, "sqlite-vector startup health check failed", error)
+                    Log.e(TAG, "ObjectBox vector startup health check failed", error)
                 }
             } catch (error: Throwable) {
                 Log.e(TAG, "startIndexMigrationIfNeeded failed", error)

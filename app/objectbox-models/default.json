@@ -1,0 +1,88 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:8102889585700556829",
+      "lastPropertyId": "4:5889283884306711330",
+      "name": "KnowledgeBaseVectorObject",
+      "properties": [
+        {
+          "id": "1:6423626389971490373",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:7741351404368425563",
+          "name": "chunkId",
+          "indexId": "1:3728829083977851380",
+          "type": 6,
+          "flags": 40
+        },
+        {
+          "id": "3:525783564366142294",
+          "name": "embeddingDimension",
+          "indexId": "2:7547032167578197733",
+          "type": 5,
+          "flags": 8
+        },
+        {
+          "id": "4:5889283884306711330",
+          "name": "embedding",
+          "indexId": "3:2501804259906854250",
+          "type": 28,
+          "flags": 8
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "2:7870630353407462264",
+      "lastPropertyId": "4:8772694079498455956",
+      "name": "MemoryVectorObject",
+      "properties": [
+        {
+          "id": "1:6527731230589131557",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:7890366654737894700",
+          "name": "chunkId",
+          "indexId": "4:7919591408076847656",
+          "type": 6,
+          "flags": 40
+        },
+        {
+          "id": "3:4647295510635885153",
+          "name": "embeddingDimension",
+          "indexId": "5:7234382368684365292",
+          "type": 5,
+          "flags": 8
+        },
+        {
+          "id": "4:8772694079498455956",
+          "name": "embedding",
+          "indexId": "6:1146367244794063631",
+          "type": 28,
+          "flags": 8
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "2:7870630353407462264",
+  "lastIndexId": "6:1146367244794063631",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [],
+  "retiredRelationUids": [],
+  "version": 1
+}

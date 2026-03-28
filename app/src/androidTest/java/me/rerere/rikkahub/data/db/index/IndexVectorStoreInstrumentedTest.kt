@@ -7,38 +7,34 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import me.rerere.rikkahub.data.db.index.objectbox.IndexObjectBoxVectorStore
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class IndexVectorStoreInstrumentedTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
-    private val databaseName = "index-vector-store-test-${UUID.randomUUID()}"
-    private var stores = mutableListOf<IndexVectorStore>()
+    private var stores = mutableListOf<IndexObjectBoxVectorStore>()
 
-    private fun newStore(): IndexVectorStore {
-        return IndexVectorStore(context, databaseName).also { stores += it }
+    private fun newStore(): IndexObjectBoxVectorStore {
+        return IndexObjectBoxVectorStore(context).also { stores += it }
     }
 
     @After
     fun tearDown() = runBlocking {
-        stores.forEach { it.close() }
-        context.deleteDatabase(databaseName)
+        stores.forEach {
+            it.clearAllVectors()
+            it.close()
+        }
     }
 
     @Test
     fun probeAndTableScopedSearchesWork() = runBlocking {
         val vectorStore = newStore()
-        vectorStore.withPinnedConnection("test_schema_setup") { db ->
-            db.execSQL("CREATE TABLE IF NOT EXISTS knowledge_base_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS memory_index_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-        }
-
         val verifier = VectorBackendVerifier(vectorStore)
         verifier.verifyBackendHealth(force = true)
 
@@ -79,10 +75,6 @@ class IndexVectorStoreInstrumentedTest {
     @Test
     fun reopeningStoreKeepsProbeAndSearchUsable() = runBlocking {
         val firstStore = newStore()
-        firstStore.withPinnedConnection("test_schema_setup") { db ->
-            db.execSQL("CREATE TABLE IF NOT EXISTS knowledge_base_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS memory_index_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-        }
         firstStore.insertMemoryVectors(
             dimension = 2,
             records = listOf(
@@ -108,11 +100,6 @@ class IndexVectorStoreInstrumentedTest {
     @Test
     fun repeatedEnsureReadyDoesNotThrowPragmaQueryError() = runBlocking {
         val vectorStore = newStore()
-        vectorStore.withPinnedConnection("test_schema_setup") { db ->
-            db.execSQL("CREATE TABLE IF NOT EXISTS knowledge_base_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS memory_index_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-        }
-
         repeat(3) {
             vectorStore.close()
             val reopenedStore = newStore()
@@ -121,7 +108,7 @@ class IndexVectorStoreInstrumentedTest {
             }.exceptionOrNull()
             assertFalse(
                 "ensureReady should not fail after reopen: ${failure?.message}",
-                failure?.message?.contains("Queries can be performed using SQLiteDatabase query or rawQuery methods only") == true
+                failure != null
             )
         }
     }
@@ -129,10 +116,6 @@ class IndexVectorStoreInstrumentedTest {
     @Test
     fun concurrentReadersShareSingleStoreWithoutLocking() = runBlocking {
         val vectorStore = newStore()
-        vectorStore.withPinnedConnection("test_schema_setup") { db ->
-            db.execSQL("CREATE TABLE IF NOT EXISTS knowledge_base_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS memory_index_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-        }
         vectorStore.insertKnowledgeBaseVectors(
             dimension = 2,
             records = listOf(
@@ -162,11 +145,6 @@ class IndexVectorStoreInstrumentedTest {
     @Test
     fun largeDimensionMemorySearchWorks() = runBlocking {
         val vectorStore = newStore()
-        vectorStore.withPinnedConnection("test_schema_setup") { db ->
-            db.execSQL("CREATE TABLE IF NOT EXISTS knowledge_base_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS memory_index_chunk (id INTEGER PRIMARY KEY NOT NULL)")
-        }
-
         val firstVector = List(1024) { index -> if (index == 0) 1.0f else 0.0f }
         val secondVector = List(1024) { index -> if (index == 1) 1.0f else 0.0f }
         val queryVector = firstVector.joinToString(prefix = "[", postfix = "]")

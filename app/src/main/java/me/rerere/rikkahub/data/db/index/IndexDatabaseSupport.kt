@@ -4,7 +4,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 internal const val INDEX_DB_NAME = "rikka_hub_index"
 internal const val INDEX_SCHEMA_VERSION = 1
-internal const val INDEX_BACKEND_VERSION = "sqlite_vector_full_scan_v1"
+internal const val INDEX_BACKEND_VERSION = "objectbox_hnsw_v1"
 internal const val INDEX_KB_FTS_TABLE = "knowledge_base_chunk_fts"
 internal const val INDEX_MIGRATION_STATE_TABLE = "index_migration_state"
 internal const val KB_VECTOR_TABLE_PREFIX = "knowledge_base_vector_d"
