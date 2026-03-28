@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.db.index
 
+import android.util.Log
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 data class VectorInsertRecord(
@@ -10,6 +11,11 @@ data class VectorInsertRecord(
 class IndexVectorTableManager(
     private val database: IndexDatabase,
 ) {
+    companion object {
+        private const val TAG = "IndexVectorTableManager"
+        private const val SQLITE_BIND_LIMIT_HEADROOM = 900
+    }
+
     private val db: SupportSQLiteDatabase
         get() = database.openHelper.writableDatabase
 
@@ -39,7 +45,6 @@ class IndexVectorTableManager(
     }
 
     suspend fun searchKnowledgeBaseDistances(
-        assistantId: String,
         candidateIds: List<Long>,
         queryEmbeddingJson: String,
         dimension: Int,
@@ -51,48 +56,34 @@ class IndexVectorTableManager(
         val tableName = buildKnowledgeBaseVectorTableName(dimension)
         if (!hasTable(tableName)) return emptyMap()
         ensureVectorTable(tableName, dimension, "knowledge_base_chunk")
-
-        val args = mutableListOf<Any>(queryEmbeddingJson, assistantId)
-        val sql = buildString {
-            append(
-                """
-                SELECT c.id, v.distance
-                FROM vector_full_scan('$tableName', 'embedding', vector_as_f32(?)) AS v
-                INNER JOIN knowledge_base_chunk c ON c.id = v.rowid
-                WHERE c.assistant_id = ?
-                    AND c.id IN (
-                """.trimIndent()
-            )
-            append(candidateIds.joinToString(",") { "?" })
-            append(") ORDER BY v.distance LIMIT ?")
-        }
-        args.addAll(candidateIds)
-        args.add(limit)
-        return queryDistanceMap(sql, args)
+        return searchDistancesByRowIds(
+            tableName = tableName,
+            candidateIds = candidateIds,
+            queryEmbeddingJson = queryEmbeddingJson,
+            limit = limit,
+            operation = "knowledge_base"
+        )
     }
 
     suspend fun searchMemoryDistances(
-        assistantId: String,
+        candidateIds: List<Long>,
         queryEmbeddingJson: String,
         dimension: Int,
         limit: Int,
     ): Map<Long, Double> {
-        if (queryEmbeddingJson.isBlank() || dimension <= 0 || limit <= 0) {
+        if (candidateIds.isEmpty() || queryEmbeddingJson.isBlank() || dimension <= 0 || limit <= 0) {
             return emptyMap()
         }
         val tableName = buildMemoryVectorTableName(dimension)
         if (!hasTable(tableName)) return emptyMap()
         ensureVectorTable(tableName, dimension, "memory_index_chunk")
-
-        val sql = """
-            SELECT c.id, v.distance
-            FROM vector_full_scan('$tableName', 'embedding', vector_as_f32(?)) AS v
-            INNER JOIN memory_index_chunk c ON c.id = v.rowid
-            WHERE c.assistant_id = ?
-            ORDER BY v.distance
-            LIMIT ?
-        """.trimIndent()
-        return queryDistanceMap(sql, listOf(queryEmbeddingJson, assistantId, limit))
+        return searchDistancesByRowIds(
+            tableName = tableName,
+            candidateIds = candidateIds,
+            queryEmbeddingJson = queryEmbeddingJson,
+            limit = limit,
+            operation = "memory"
+        )
     }
 
     suspend fun clearAllVectorTables() {
@@ -168,5 +159,62 @@ class IndexVectorTableManager(
             }
         }
         return result
+    }
+
+    private fun searchDistancesByRowIds(
+        tableName: String,
+        candidateIds: List<Long>,
+        queryEmbeddingJson: String,
+        limit: Int,
+        operation: String,
+    ): Map<Long, Double> {
+        val uniqueIds = candidateIds.distinct()
+        if (uniqueIds.isEmpty()) return emptyMap()
+
+        return runCatching {
+            uniqueIds
+                .chunked(SQLITE_BIND_LIMIT_HEADROOM)
+                .asSequence()
+                .flatMap { batch ->
+                    queryDistanceMap(
+                        sql = buildRowIdDistanceQuery(tableName, batch),
+                        args = buildList {
+                            add(queryEmbeddingJson)
+                            addAll(batch)
+                            add(limit)
+                        }
+                    ).asSequence()
+                }
+                .groupBy({ it.key }, { it.value })
+                .mapValues { (_, distances) -> distances.minOrNull() ?: Double.POSITIVE_INFINITY }
+                .entries
+                .sortedBy { it.value }
+                .take(limit)
+                .associate { it.key to it.value }
+        }.getOrElse { error ->
+            Log.e(
+                TAG,
+                "sqlite-vector $operation distance query failed for $tableName; falling back to lexical-only ranking",
+                error
+            )
+            emptyMap()
+        }
+    }
+
+    private fun buildRowIdDistanceQuery(
+        tableName: String,
+        candidateIds: List<Long>,
+    ): String {
+        return buildString {
+            append(
+                """
+                SELECT v.rowid, v.distance
+                FROM vector_full_scan('$tableName', 'embedding', vector_as_f32(?)) AS v
+                WHERE v.rowid IN (
+                """.trimIndent()
+            )
+            append(candidateIds.joinToString(",") { "?" })
+            append(") ORDER BY v.distance LIMIT ?")
+        }
     }
 }

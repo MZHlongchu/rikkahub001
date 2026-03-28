@@ -344,7 +344,6 @@ class KnowledgeBaseRepository(
         if (!indexMigrationManager.shouldUseIndexBackend()) return emptyMap()
         val dimension = queryEmbedding.size
         return vectorTableManager.searchKnowledgeBaseDistances(
-            assistantId = assistantId.toString(),
             candidateIds = candidateChunkIds,
             queryEmbeddingJson = JsonInstant.encodeToString(queryEmbedding),
             dimension = dimension,

@@ -109,13 +109,13 @@ class MemoryIndexRepository(
     }
 
     suspend fun searchVectorDistances(
-        assistantId: Uuid,
+        candidateChunkIds: List<Long>,
         queryEmbedding: List<Float>,
         limit: Int,
     ): Map<Long, Double> {
         if (!indexMigrationManager.shouldUseIndexBackend()) return emptyMap()
         return vectorTableManager.searchMemoryDistances(
-            assistantId = assistantId.toString(),
+            candidateIds = candidateChunkIds,
             queryEmbeddingJson = JsonInstant.encodeToString(queryEmbedding),
             dimension = queryEmbedding.size,
             limit = limit,

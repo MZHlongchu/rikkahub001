@@ -2580,7 +2580,7 @@ class ChatService(
             )
         } else {
             val vectorDistances = memoryIndexRepository.searchVectorDistances(
-                assistantId = assistantId,
+                candidateChunkIds = indexedChunks.map { it.chunk.id },
                 queryEmbedding = queryEmbedding,
                 limit = RECALL_VECTOR_RERANK_K,
             )
