@@ -28,6 +28,19 @@ class IndexVectorStore(
     val databasePath: String
         get() = context.getDatabasePath(databaseName).absolutePath
 
+    internal fun buildStageError(
+        stage: String,
+        tableName: String,
+        detail: String,
+        cause: Throwable? = null,
+    ): IllegalStateException {
+        val baseMessage = "sqlite-vector stage failed: $stage [db=$databasePath, table=$tableName, detail=$detail]"
+        return IllegalStateException(
+            if (cause == null || cause.message.isNullOrBlank()) baseMessage else "$baseMessage: ${cause.message}",
+            cause
+        )
+    }
+
     suspend fun ensureReady() {
         withPinnedConnection("ensure_ready") { }
     }
@@ -141,7 +154,7 @@ class IndexVectorStore(
     ): T = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             val db = getOrOpenDatabase()
-            db.beginTransactionNonExclusive()
+            db.beginTransaction()
             try {
                 val result = block(db)
                 db.setTransactionSuccessful()
@@ -192,7 +205,8 @@ class IndexVectorStore(
             val result = queryDistanceMap(
                 db = db,
                 sql = buildTopKDistanceQuery(tableName),
-                args = listOf(queryEmbeddingJson, totalVectorRows)
+                args = listOf(queryEmbeddingJson, totalVectorRows),
+                tableName = tableName,
             ).asSequence()
                 .filter { (rowId, _) -> candidateIdSet.contains(rowId) }
                 .sortedBy { it.value }
@@ -227,8 +241,7 @@ class IndexVectorStore(
         val configuration = SQLiteDatabaseConfiguration(
             databasePath,
             SQLiteDatabase.OPEN_READWRITE or
-                SQLiteDatabase.CREATE_IF_NECESSARY or
-                SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING
+                SQLiteDatabase.CREATE_IF_NECESSARY
         ).apply {
             foreignKeyConstraintsEnabled = true
             customExtensions.add(
@@ -245,6 +258,10 @@ class IndexVectorStore(
             )
         }
         return SQLiteDatabase.openDatabase(configuration, null, null).also { opened ->
+            opened.execSQL("PRAGMA journal_mode=DELETE")
+            opened.execSQL("PRAGMA synchronous=NORMAL")
+            opened.execSQL("PRAGMA foreign_keys=ON")
+            Log.i(TAG, "Opened raw sqlite-vector database at $databasePath with WAL disabled")
             database = opened
         }
     }
@@ -276,7 +293,16 @@ class IndexVectorStore(
             )
             """.trimIndent()
         )
-        initializeVectorTable(db, tableName, dimension)
+        runCatching {
+            initializeVectorTable(db, tableName, dimension)
+        }.getOrElse { error ->
+            throw buildStageError(
+                stage = "vector_init",
+                tableName = tableName,
+                detail = "dimension=$dimension,parent=$parentTable",
+                cause = error,
+            )
+        }
     }
 
     private fun insertVectorRows(
@@ -313,12 +339,22 @@ class IndexVectorStore(
         db: SupportSQLiteDatabase,
         sql: String,
         args: List<Any>,
+        tableName: String,
     ): Map<Long, Double> {
         val result = linkedMapOf<Long, Double>()
-        db.query(sql, args.toTypedArray()).use { cursor ->
-            while (cursor.moveToNext()) {
-                result[cursor.getLong(0)] = cursor.getDouble(1)
+        runCatching {
+            db.query(sql, args.toTypedArray()).use { cursor ->
+                while (cursor.moveToNext()) {
+                    result[cursor.getLong(0)] = cursor.getDouble(1)
+                }
             }
+        }.getOrElse { error ->
+            throw buildStageError(
+                stage = "vector_full_scan",
+                tableName = tableName,
+                detail = "sql=${sql.replace('\n', ' ')}, args=${args.joinToString()}",
+                cause = error,
+            )
         }
         return result
     }

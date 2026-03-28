@@ -34,12 +34,23 @@ class IndexVectorTableManager(
             dimension = dimension,
             candidateCount = candidateIds.size,
         )
-        return vectorStore.searchKnowledgeBaseDistances(
-            candidateIds = candidateIds,
-            queryEmbeddingJson = queryEmbeddingJson,
-            dimension = dimension,
-            limit = limit,
-        )
+        return runCatching {
+            vectorStore.searchKnowledgeBaseDistances(
+                candidateIds = candidateIds,
+                queryEmbeddingJson = queryEmbeddingJson,
+                dimension = dimension,
+                limit = limit,
+            )
+        }.getOrElse { error ->
+            throw VectorSearchExecutionException(
+                operation = "knowledge_base",
+                tableName = buildKnowledgeBaseVectorTableName(dimension),
+                dimension = dimension,
+                candidateCount = candidateIds.size,
+                message = "sqlite-vector search failed: ${error.message.orEmpty()}",
+                cause = error,
+            )
+        }
     }
 
     suspend fun searchMemoryDistances(
@@ -54,12 +65,23 @@ class IndexVectorTableManager(
             dimension = dimension,
             candidateCount = candidateIds.size,
         )
-        return vectorStore.searchMemoryDistances(
-            candidateIds = candidateIds,
-            queryEmbeddingJson = queryEmbeddingJson,
-            dimension = dimension,
-            limit = limit,
-        )
+        return runCatching {
+            vectorStore.searchMemoryDistances(
+                candidateIds = candidateIds,
+                queryEmbeddingJson = queryEmbeddingJson,
+                dimension = dimension,
+                limit = limit,
+            )
+        }.getOrElse { error ->
+            throw VectorSearchExecutionException(
+                operation = "memory",
+                tableName = buildMemoryVectorTableName(dimension),
+                dimension = dimension,
+                candidateCount = candidateIds.size,
+                message = "sqlite-vector search failed: ${error.message.orEmpty()}",
+                cause = error,
+            )
+        }
     }
 
     suspend fun clearAllVectorTables() {

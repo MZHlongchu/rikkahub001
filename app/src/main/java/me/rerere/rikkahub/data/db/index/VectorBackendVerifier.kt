@@ -92,7 +92,16 @@ class VectorBackendVerifier(
             )
             """.trimIndent()
         )
-        initializeVectorTable(db, VECTOR_HEALTH_TABLE, 2)
+        runCatching {
+            initializeVectorTable(db, VECTOR_HEALTH_TABLE, 2)
+        }.getOrElse { error ->
+            throw vectorStore.buildStageError(
+                stage = "probe_vector_init",
+                tableName = VECTOR_HEALTH_TABLE,
+                detail = "dimension=2",
+                cause = error,
+            )
+        }
         db.execSQL("DELETE FROM `$VECTOR_HEALTH_TABLE`")
         val statement = db.compileStatement(
             "INSERT OR REPLACE INTO `$VECTOR_HEALTH_TABLE` (`probe_id`, `embedding`) VALUES (?, vector_as_f32(?))"
@@ -106,18 +115,27 @@ class VectorBackendVerifier(
         statement.bindString(2, "[0.0,1.0]")
         statement.executeInsert()
 
-        db.query(
-            """
-            SELECT rowid, distance
-            FROM vector_full_scan('$VECTOR_HEALTH_TABLE', 'embedding', ?, 2)
-            """.trimIndent(),
-            arrayOf("[1.0,0.0]")
-        ).use { cursor ->
-            check(cursor.moveToFirst()) { "Vector backend probe returned no rows" }
-            val firstRowId = cursor.getLong(0)
-            val firstDistance = cursor.getDouble(1)
-            check(firstRowId == 1L) { "Vector backend probe returned unexpected rowid=$firstRowId" }
-            check(firstDistance.isFinite()) { "Vector backend probe returned non-finite distance=$firstDistance" }
+        runCatching {
+            db.query(
+                """
+                SELECT rowid, distance
+                FROM vector_full_scan('$VECTOR_HEALTH_TABLE', 'embedding', ?, 2)
+                """.trimIndent(),
+                arrayOf("[1.0,0.0]")
+            ).use { cursor ->
+                check(cursor.moveToFirst()) { "Vector backend probe returned no rows" }
+                val firstRowId = cursor.getLong(0)
+                val firstDistance = cursor.getDouble(1)
+                check(firstRowId == 1L) { "Vector backend probe returned unexpected rowid=$firstRowId" }
+                check(firstDistance.isFinite()) { "Vector backend probe returned non-finite distance=$firstDistance" }
+            }
+        }.getOrElse { error ->
+            throw vectorStore.buildStageError(
+                stage = "probe_vector_full_scan",
+                tableName = VECTOR_HEALTH_TABLE,
+                detail = "k=2, query=[1.0,0.0]",
+                cause = error,
+            )
         }
     }
 }
