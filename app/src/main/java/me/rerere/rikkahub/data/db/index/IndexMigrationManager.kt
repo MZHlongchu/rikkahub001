@@ -426,8 +426,11 @@ class IndexMigrationManager(
             val legacyDb = appDatabase.openHelper.writableDatabase
             deleteLegacyConversationScopedData(legacyDb, conversationId)
         }
-        indexDatabase.withTransaction {
+        val memoryChunkIdsByDimension = indexDatabase.withTransaction {
             deleteIndexConversationScopedData(conversationId)
+        }
+        if (memoryChunkIdsByDimension.isNotEmpty()) {
+            vectorTableManager.deleteMemoryVectors(memoryChunkIdsByDimension)
         }
     }
 
@@ -449,7 +452,7 @@ class IndexMigrationManager(
         )
     }
 
-    private suspend fun deleteIndexConversationScopedData(conversationId: String) {
+    private fun deleteIndexConversationScopedData(conversationId: String): Map<Int, List<Long>> {
         val indexDb = indexDatabase.openHelper.writableDatabase
         val memoryChunkIdsByDimension = linkedMapOf<Int, MutableList<Long>>()
         indexDb.query(
@@ -479,7 +482,7 @@ class IndexMigrationManager(
             "DELETE FROM pending_ledger_batch WHERE conversation_id = ?",
             arrayOf(conversationId)
         )
-        vectorTableManager.deleteMemoryVectors(memoryChunkIdsByDimension)
+        return memoryChunkIdsByDimension.mapValues { it.value.toList() }
     }
 
     private fun countRows(

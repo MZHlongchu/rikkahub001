@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.db.index.IndexMigrationManager
 import me.rerere.rikkahub.data.db.index.IndexVectorTableManager
 import me.rerere.rikkahub.data.db.index.VectorInsertRecord
 import me.rerere.rikkahub.data.db.index.dao.IndexKnowledgeBaseChunkDAO
+import me.rerere.rikkahub.data.db.index.dao.IndexVectorRow
 import me.rerere.rikkahub.data.db.index.entity.IndexKnowledgeBaseChunkEntity
 import me.rerere.rikkahub.data.model.KnowledgeBaseChunk
 import me.rerere.rikkahub.data.model.KnowledgeBaseDocument
@@ -121,8 +122,8 @@ class KnowledgeBaseRepository(
             return
         }
 
-        indexDatabase.withTransaction {
-            val rows = indexChunkDAO.insertAll(
+        val rows = indexDatabase.withTransaction {
+            indexChunkDAO.insertAll(
                 chunks.map { chunk ->
                     IndexKnowledgeBaseChunkEntity(
                         documentId = chunk.documentId,
@@ -136,14 +137,24 @@ class KnowledgeBaseRepository(
                     )
                 }
             )
-            chunks.zip(rows).groupBy({ it.first.embedding.size }, { pair ->
-                VectorInsertRecord(
-                    chunkId = pair.second,
-                    embeddingJson = JsonInstant.encodeToString(pair.first.embedding),
-                )
-            }).forEach { (dimension, records) ->
+        }
+        val recordsByDimension = chunks.zip(rows).groupBy({ it.first.embedding.size }, { pair ->
+            VectorInsertRecord(
+                chunkId = pair.second,
+                embeddingJson = JsonInstant.encodeToString(pair.first.embedding),
+            )
+        })
+        runCatching {
+            recordsByDimension.forEach { (dimension, records) ->
                 vectorTableManager.insertKnowledgeBaseVectors(dimension, records)
             }
+        }.onFailure { error ->
+            indexDatabase.withTransaction {
+                if (rows.isNotEmpty()) {
+                    indexChunkDAO.deleteByIds(rows)
+                }
+            }
+            throw error
         }
     }
 
@@ -157,7 +168,12 @@ class KnowledgeBaseRepository(
 
     suspend fun discardGeneration(documentId: Long, generation: Int) {
         if (indexMigrationManager.shouldUseIndexBackend()) {
+            val vectorRows = indexChunkDAO.getVectorRowsOfDocumentGeneration(documentId, generation)
             indexChunkDAO.deleteChunksOfDocumentGeneration(documentId, generation)
+            val vectorRowsByDimension = vectorRows.toDimensionMap()
+            if (vectorRowsByDimension.isNotEmpty()) {
+                vectorTableManager.deleteKnowledgeBaseVectors(vectorRowsByDimension)
+            }
         } else {
             legacyChunkDAO.deleteChunksOfDocumentGeneration(documentId, generation)
         }
@@ -188,14 +204,24 @@ class KnowledgeBaseRepository(
 
         val current = documentDAO.getDocument(documentId)?.toModel()
         if (current == null) {
+            val vectorRows = indexChunkDAO.getVectorRowsOfDocumentGeneration(documentId, generation)
             indexChunkDAO.deleteChunksOfDocumentGeneration(documentId, generation)
+            val vectorRowsByDimension = vectorRows.toDimensionMap()
+            if (vectorRowsByDimension.isNotEmpty()) {
+                vectorTableManager.deleteKnowledgeBaseVectors(vectorRowsByDimension)
+            }
             return 0 to null
         }
         val previousGeneration = current.publishedGeneration
         val updated = buildPublishedDocument(current, generation, chunkCount, now)
         documentDAO.update(updated.toEntity())
         if (previousGeneration > 0 && previousGeneration != generation) {
+            val vectorRows = indexChunkDAO.getVectorRowsOfDocumentGeneration(documentId, previousGeneration)
             indexChunkDAO.deleteChunksOfDocumentGeneration(documentId, previousGeneration)
+            val vectorRowsByDimension = vectorRows.toDimensionMap()
+            if (vectorRowsByDimension.isNotEmpty()) {
+                vectorTableManager.deleteKnowledgeBaseVectors(vectorRowsByDimension)
+            }
         }
         return previousGeneration to updated
     }
@@ -211,7 +237,12 @@ class KnowledgeBaseRepository(
             val model = entity.toModel() ?: return@forEach
             if (model.buildingGeneration > 0 && model.buildingGeneration != model.publishedGeneration) {
                 if (indexMigrationManager.shouldUseIndexBackend()) {
+                    val vectorRows = indexChunkDAO.getVectorRowsOfDocumentGeneration(model.id, model.buildingGeneration)
                     indexChunkDAO.deleteChunksOfDocumentGeneration(model.id, model.buildingGeneration)
+                    val vectorRowsByDimension = vectorRows.toDimensionMap()
+                    if (vectorRowsByDimension.isNotEmpty()) {
+                        vectorTableManager.deleteKnowledgeBaseVectors(vectorRowsByDimension)
+                    }
                 } else {
                     legacyChunkDAO.deleteChunksOfDocumentGeneration(model.id, model.buildingGeneration)
                 }
@@ -393,7 +424,11 @@ class KnowledgeBaseRepository(
             }
             return
         }
+        val vectorRowsByDimension = indexChunkDAO.getVectorRowsOfDocument(documentId).toDimensionMap()
         indexChunkDAO.deleteChunksOfDocument(documentId)
+        if (vectorRowsByDimension.isNotEmpty()) {
+            vectorTableManager.deleteKnowledgeBaseVectors(vectorRowsByDimension)
+        }
         documentDAO.deleteDocument(documentId)
     }
 
@@ -405,7 +440,11 @@ class KnowledgeBaseRepository(
             }
             return
         }
+        val vectorRowsByDimension = indexChunkDAO.getVectorRowsOfAssistant(assistantId.toString()).toDimensionMap()
         indexChunkDAO.deleteChunksOfAssistant(assistantId.toString())
+        if (vectorRowsByDimension.isNotEmpty()) {
+            vectorTableManager.deleteKnowledgeBaseVectors(vectorRowsByDimension)
+        }
         documentDAO.deleteDocumentsOfAssistant(assistantId.toString())
     }
 
@@ -534,4 +573,8 @@ class KnowledgeBaseRepository(
             mimeType = mimeType,
         )
     }
+}
+
+private fun List<IndexVectorRow>.toDimensionMap(): Map<Int, List<Long>> {
+    return groupBy({ it.embeddingDimension }, { it.id })
 }

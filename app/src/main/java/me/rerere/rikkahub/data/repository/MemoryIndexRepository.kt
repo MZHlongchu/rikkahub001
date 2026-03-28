@@ -10,6 +10,7 @@ import me.rerere.rikkahub.data.db.index.IndexMigrationManager
 import me.rerere.rikkahub.data.db.index.IndexVectorTableManager
 import me.rerere.rikkahub.data.db.index.VectorInsertRecord
 import me.rerere.rikkahub.data.db.index.dao.IndexMemoryIndexChunkDAO
+import me.rerere.rikkahub.data.db.index.dao.IndexVectorRow
 import me.rerere.rikkahub.data.db.index.entity.IndexMemoryIndexChunkEntity
 import me.rerere.rikkahub.data.model.MemoryChunkMetadata
 import me.rerere.rikkahub.data.model.MemoryIndexChunk
@@ -54,10 +55,11 @@ class MemoryIndexRepository(
             return
         }
 
-        indexDatabase.withTransaction {
+        val existingVectorRows = indexMemoryIndexChunkDAO.getVectorRowsOfConversation(conversationId.toString())
+        val rowIds = indexDatabase.withTransaction {
             indexMemoryIndexChunkDAO.deleteChunksOfConversation(conversationId.toString())
-            if (chunks.isEmpty()) return@withTransaction
-            val rowIds = indexMemoryIndexChunkDAO.insertAll(
+            if (chunks.isEmpty()) return@withTransaction emptyList<Long>()
+            indexMemoryIndexChunkDAO.insertAll(
                 chunks.map { chunk ->
                     IndexMemoryIndexChunkEntity(
                         assistantId = assistantId.toString(),
@@ -72,14 +74,30 @@ class MemoryIndexRepository(
                     )
                 }
             )
-            chunks.zip(rowIds).groupBy({ it.first.embedding.size }, { pair ->
+        }
+        if (chunks.isNotEmpty()) {
+            val recordsByDimension = chunks.zip(rowIds).groupBy({ it.first.embedding.size }, { pair ->
                 VectorInsertRecord(
                     chunkId = pair.second,
                     embeddingJson = JsonInstant.encodeToString(pair.first.embedding),
                 )
-            }).forEach { (dimension, records) ->
-                vectorTableManager.insertMemoryVectors(dimension, records)
+            })
+            runCatching {
+                recordsByDimension.forEach { (dimension, records) ->
+                    vectorTableManager.insertMemoryVectors(dimension, records)
+                }
+            }.onFailure { error ->
+                indexDatabase.withTransaction {
+                    if (rowIds.isNotEmpty()) {
+                        indexMemoryIndexChunkDAO.deleteByIds(rowIds)
+                    }
+                }
+                throw error
             }
+        }
+        val oldVectorsByDimension = existingVectorRows.toDimensionMap()
+        if (oldVectorsByDimension.isNotEmpty()) {
+            vectorTableManager.deleteMemoryVectors(oldVectorsByDimension)
         }
     }
 
@@ -126,7 +144,13 @@ class MemoryIndexRepository(
 
     suspend fun deleteConversationChunks(conversationId: Uuid) {
         if (indexMigrationManager.shouldUseIndexBackend()) {
+            val vectorRowsByDimension = indexMemoryIndexChunkDAO
+                .getVectorRowsOfConversation(conversationId.toString())
+                .toDimensionMap()
             indexMemoryIndexChunkDAO.deleteChunksOfConversation(conversationId.toString())
+            if (vectorRowsByDimension.isNotEmpty()) {
+                vectorTableManager.deleteMemoryVectors(vectorRowsByDimension)
+            }
         } else {
             legacyMemoryIndexChunkDAO.deleteChunksOfConversation(conversationId.toString())
         }
@@ -174,6 +198,10 @@ class MemoryIndexRepository(
             updatedAt = Instant.ofEpochMilli(updatedAt),
         )
     }
+}
+
+private fun List<IndexVectorRow>.toDimensionMap(): Map<Int, List<Long>> {
+    return groupBy({ it.embeddingDimension }, { it.id })
 }
 
 data class IndexedChunkWithConversation(

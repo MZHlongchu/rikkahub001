@@ -1,0 +1,341 @@
+package me.rerere.rikkahub.data.db.index
+
+import android.content.Context
+import android.util.Log
+import androidx.sqlite.db.SupportSQLiteDatabase
+import io.requery.android.database.sqlite.SQLiteCustomExtension
+import io.requery.android.database.sqlite.SQLiteDatabase
+import io.requery.android.database.sqlite.SQLiteDatabaseConfiguration
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+class IndexVectorStore(
+    private val context: Context,
+    private val databaseName: String = INDEX_DB_NAME,
+) {
+    companion object {
+        private const val TAG = "IndexVectorStore"
+        private const val SQLITE_BIND_LIMIT_HEADROOM = 900
+    }
+
+    private val operationMutex = Mutex()
+
+    @Volatile
+    private var database: SQLiteDatabase? = null
+
+    val databasePath: String
+        get() = context.getDatabasePath(databaseName).absolutePath
+
+    suspend fun ensureReady() {
+        withPinnedConnection("ensure_ready") { }
+    }
+
+    suspend fun insertKnowledgeBaseVectors(
+        dimension: Int,
+        records: List<VectorInsertRecord>,
+    ) {
+        if (records.isEmpty() || dimension <= 0) return
+        withPinnedConnection("insert_knowledge_base_vectors_d$dimension") { db ->
+            val tableName = buildKnowledgeBaseVectorTableName(dimension)
+            ensureVectorTable(db, tableName, dimension, "knowledge_base_chunk")
+            insertVectorRows(db, tableName, records)
+        }
+    }
+
+    suspend fun insertMemoryVectors(
+        dimension: Int,
+        records: List<VectorInsertRecord>,
+    ) {
+        if (records.isEmpty() || dimension <= 0) return
+        withPinnedConnection("insert_memory_vectors_d$dimension") { db ->
+            val tableName = buildMemoryVectorTableName(dimension)
+            ensureVectorTable(db, tableName, dimension, "memory_index_chunk")
+            insertVectorRows(db, tableName, records)
+        }
+    }
+
+    suspend fun searchKnowledgeBaseDistances(
+        candidateIds: List<Long>,
+        queryEmbeddingJson: String,
+        dimension: Int,
+        limit: Int,
+    ): Map<Long, Double> {
+        if (candidateIds.isEmpty() || queryEmbeddingJson.isBlank() || dimension <= 0 || limit <= 0) {
+            return emptyMap()
+        }
+        return searchDistances(
+            operation = "knowledge_base",
+            tableName = buildKnowledgeBaseVectorTableName(dimension),
+            parentTable = "knowledge_base_chunk",
+            candidateIds = candidateIds,
+            queryEmbeddingJson = queryEmbeddingJson,
+            dimension = dimension,
+            limit = limit,
+        )
+    }
+
+    suspend fun searchMemoryDistances(
+        candidateIds: List<Long>,
+        queryEmbeddingJson: String,
+        dimension: Int,
+        limit: Int,
+    ): Map<Long, Double> {
+        if (candidateIds.isEmpty() || queryEmbeddingJson.isBlank() || dimension <= 0 || limit <= 0) {
+            return emptyMap()
+        }
+        return searchDistances(
+            operation = "memory",
+            tableName = buildMemoryVectorTableName(dimension),
+            parentTable = "memory_index_chunk",
+            candidateIds = candidateIds,
+            queryEmbeddingJson = queryEmbeddingJson,
+            dimension = dimension,
+            limit = limit,
+        )
+    }
+
+    suspend fun clearAllVectorTables() {
+        withPinnedConnection("clear_all_vector_tables") { db ->
+            val cursor = db.query(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                    AND (name LIKE '${KB_VECTOR_TABLE_PREFIX}%' OR name LIKE '${MEMORY_VECTOR_TABLE_PREFIX}%')
+                """.trimIndent()
+            )
+            val tableNames = cursor.use {
+                buildList {
+                    while (it.moveToNext()) {
+                        add(it.getString(0))
+                    }
+                }
+            }
+            tableNames.forEach { tableName ->
+                db.execSQL("DROP TABLE IF EXISTS `$tableName`")
+            }
+        }
+    }
+
+    suspend fun deleteMemoryVectors(chunkIdsByDimension: Map<Int, List<Long>>) {
+        deleteVectors(
+            operation = "delete_memory_vectors",
+            tableNameBuilder = ::buildMemoryVectorTableName,
+            chunkIdsByDimension = chunkIdsByDimension,
+        )
+    }
+
+    suspend fun deleteKnowledgeBaseVectors(chunkIdsByDimension: Map<Int, List<Long>>) {
+        deleteVectors(
+            operation = "delete_knowledge_base_vectors",
+            tableNameBuilder = ::buildKnowledgeBaseVectorTableName,
+            chunkIdsByDimension = chunkIdsByDimension,
+        )
+    }
+
+    internal suspend fun <T> withPinnedConnection(
+        operation: String,
+        block: (SupportSQLiteDatabase) -> T,
+    ): T = withContext(Dispatchers.IO) {
+        operationMutex.withLock {
+            val db = getOrOpenDatabase()
+            db.beginTransactionNonExclusive()
+            try {
+                val result = block(db)
+                db.setTransactionSuccessful()
+                result
+            } catch (error: Throwable) {
+                Log.e(TAG, "Index vector operation failed: op=$operation path=$databasePath", error)
+                throw error
+            } finally {
+                db.endTransaction()
+            }
+        }
+    }
+
+    suspend fun close() = withContext(Dispatchers.IO) {
+        operationMutex.withLock {
+            database?.close()
+            database = null
+        }
+    }
+
+    private suspend fun searchDistances(
+        operation: String,
+        tableName: String,
+        parentTable: String,
+        candidateIds: List<Long>,
+        queryEmbeddingJson: String,
+        dimension: Int,
+        limit: Int,
+    ): Map<Long, Double> {
+        val uniqueIds = candidateIds.distinct()
+        if (uniqueIds.isEmpty()) return emptyMap()
+        return withPinnedConnection("${operation}_search_d$dimension") { db ->
+            if (!hasTable(db, tableName)) {
+                throw VectorSearchExecutionException(
+                    operation = operation,
+                    tableName = tableName,
+                    dimension = dimension,
+                    candidateCount = uniqueIds.size,
+                    message = "Vector table is missing"
+                )
+            }
+            ensureVectorTable(db, tableName, dimension, parentTable)
+            val totalVectorRows = countRows(db, tableName)
+            if (totalVectorRows == 0) {
+                return@withPinnedConnection emptyMap()
+            }
+            val candidateIdSet = uniqueIds.toHashSet()
+            val result = queryDistanceMap(
+                db = db,
+                sql = buildTopKDistanceQuery(tableName),
+                args = listOf(queryEmbeddingJson, totalVectorRows)
+            ).asSequence()
+                .filter { (rowId, _) -> candidateIdSet.contains(rowId) }
+                .sortedBy { it.value }
+                .take(limit)
+                .associate { it.key to it.value }
+            Log.i(
+                TAG,
+                "sqlite-vector $operation search succeeded for $tableName with ${result.size} hits from ${uniqueIds.size} candidates"
+            )
+            result
+        }
+    }
+
+    private suspend fun deleteVectors(
+        operation: String,
+        tableNameBuilder: (Int) -> String,
+        chunkIdsByDimension: Map<Int, List<Long>>,
+    ) {
+        if (chunkIdsByDimension.isEmpty()) return
+        withPinnedConnection(operation) { db ->
+            chunkIdsByDimension.forEach { (dimension, chunkIds) ->
+                if (dimension <= 0 || chunkIds.isEmpty()) return@forEach
+                val tableName = tableNameBuilder(dimension)
+                if (!hasTable(db, tableName)) return@forEach
+                deleteVectorRows(db, tableName, chunkIds.distinct())
+            }
+        }
+    }
+
+    private fun getOrOpenDatabase(): SQLiteDatabase {
+        database?.takeIf { it.isOpen }?.let { return it }
+        val configuration = SQLiteDatabaseConfiguration(
+            databasePath,
+            SQLiteDatabase.OPEN_READWRITE or
+                SQLiteDatabase.CREATE_IF_NECESSARY or
+                SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING
+        ).apply {
+            foreignKeyConstraintsEnabled = true
+            customExtensions.add(
+                SQLiteCustomExtension(
+                    context.applicationInfo.nativeLibraryDir + "/libsimple",
+                    null
+                )
+            )
+            customExtensions.add(
+                SQLiteCustomExtension(
+                    context.applicationInfo.nativeLibraryDir + "/vector",
+                    null
+                )
+            )
+        }
+        return SQLiteDatabase.openDatabase(configuration, null, null).also { opened ->
+            database = opened
+        }
+    }
+
+    private fun hasTable(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+    ): Boolean {
+        db.query(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+            arrayOf(tableName)
+        ).use { cursor ->
+            return cursor.moveToFirst() && cursor.getInt(0) > 0
+        }
+    }
+
+    private fun ensureVectorTable(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+        dimension: Int,
+        parentTable: String,
+    ) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `$tableName` (
+                `chunk_id` INTEGER PRIMARY KEY NOT NULL,
+                `embedding` BLOB NOT NULL,
+                FOREIGN KEY(`chunk_id`) REFERENCES `$parentTable`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        initializeVectorTable(db, tableName, dimension)
+    }
+
+    private fun insertVectorRows(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+        records: List<VectorInsertRecord>,
+    ) {
+        val statement = db.compileStatement(
+            "INSERT OR REPLACE INTO `$tableName` (`chunk_id`, `embedding`) VALUES (?, vector_as_f32(?))"
+        )
+        records.forEach { record ->
+            statement.clearBindings()
+            statement.bindLong(1, record.chunkId)
+            statement.bindString(2, record.embeddingJson)
+            statement.executeInsert()
+        }
+    }
+
+    private fun deleteVectorRows(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+        chunkIds: List<Long>,
+    ) {
+        if (chunkIds.isEmpty()) return
+        chunkIds.chunked(SQLITE_BIND_LIMIT_HEADROOM).forEach { batch ->
+            db.execSQL(
+                "DELETE FROM `$tableName` WHERE chunk_id IN (${batch.joinToString(",") { "?" }})",
+                batch.map { it as Any }.toTypedArray()
+            )
+        }
+    }
+
+    private fun queryDistanceMap(
+        db: SupportSQLiteDatabase,
+        sql: String,
+        args: List<Any>,
+    ): Map<Long, Double> {
+        val result = linkedMapOf<Long, Double>()
+        db.query(sql, args.toTypedArray()).use { cursor ->
+            while (cursor.moveToNext()) {
+                result[cursor.getLong(0)] = cursor.getDouble(1)
+            }
+        }
+        return result
+    }
+
+    private fun buildTopKDistanceQuery(tableName: String): String {
+        return """
+            SELECT rowid, distance
+            FROM vector_full_scan('$tableName', 'embedding', ?, ?)
+        """.trimIndent()
+    }
+
+    private fun countRows(
+        db: SupportSQLiteDatabase,
+        tableName: String,
+    ): Int {
+        db.query("SELECT COUNT(*) FROM `$tableName`").use { cursor ->
+            return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+    }
+}

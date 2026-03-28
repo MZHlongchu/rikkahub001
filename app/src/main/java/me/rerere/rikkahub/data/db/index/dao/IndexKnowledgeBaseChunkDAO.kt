@@ -17,6 +17,33 @@ interface IndexKnowledgeBaseChunkDAO {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(chunks: List<IndexKnowledgeBaseChunkEntity>): List<Long>
 
+    @Query(
+        """
+        SELECT id, embedding_dimension AS embeddingDimension
+        FROM knowledge_base_chunk
+        WHERE document_id = :documentId
+        """
+    )
+    suspend fun getVectorRowsOfDocument(documentId: Long): List<IndexVectorRow>
+
+    @Query(
+        """
+        SELECT id, embedding_dimension AS embeddingDimension
+        FROM knowledge_base_chunk
+        WHERE assistant_id = :assistantId
+        """
+    )
+    suspend fun getVectorRowsOfAssistant(assistantId: String): List<IndexVectorRow>
+
+    @Query(
+        """
+        SELECT id, embedding_dimension AS embeddingDimension
+        FROM knowledge_base_chunk
+        WHERE document_id = :documentId AND generation = :generation
+        """
+    )
+    suspend fun getVectorRowsOfDocumentGeneration(documentId: Long, generation: Int): List<IndexVectorRow>
+
     @Query("DELETE FROM knowledge_base_chunk WHERE document_id = :documentId")
     suspend fun deleteChunksOfDocument(documentId: Long)
 
@@ -25,6 +52,9 @@ interface IndexKnowledgeBaseChunkDAO {
 
     @Query("DELETE FROM knowledge_base_chunk WHERE document_id = :documentId AND generation = :generation")
     suspend fun deleteChunksOfDocumentGeneration(documentId: Long, generation: Int)
+
+    @Query("DELETE FROM knowledge_base_chunk WHERE id IN (:chunkIds)")
+    suspend fun deleteByIds(chunkIds: List<Long>)
 
     @Query("SELECT COUNT(*) FROM knowledge_base_chunk WHERE document_id = :documentId AND generation = :generation")
     suspend fun countChunksOfDocumentGeneration(documentId: Long, generation: Int): Int

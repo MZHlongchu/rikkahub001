@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.data.db.index
 
 import android.util.Log
-import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,7 +21,7 @@ class VectorSearchExecutionException(
 )
 
 class VectorBackendVerifier(
-    private val database: IndexDatabase,
+    private val vectorStore: IndexVectorStore,
 ) {
     companion object {
         private const val TAG = "VectorBackendVerifier"
@@ -40,14 +39,16 @@ class VectorBackendVerifier(
         verificationMutex.withLock {
             if (!force && lastKnownHealthy) return@withLock
             runCatching {
-                runBackendProbe(database.openHelper.writableDatabase)
+                vectorStore.withPinnedConnection("vector_backend_probe") { db ->
+                    runBackendProbe(db)
+                }
                 lastKnownHealthy = true
                 lastFailureMessage = ""
-                Log.i(TAG, "sqlite-vector backend health check passed")
+                Log.i(TAG, "sqlite-vector backend health check passed for ${vectorStore.databasePath}")
             }.getOrElse { error ->
                 lastKnownHealthy = false
                 lastFailureMessage = error.message.orEmpty().ifBlank { "Unknown sqlite-vector health check failure" }
-                Log.e(TAG, "sqlite-vector backend health check failed", error)
+                Log.e(TAG, "sqlite-vector backend health check failed for ${vectorStore.databasePath}", error)
                 throw error
             }
         }
@@ -82,7 +83,7 @@ class VectorBackendVerifier(
         }
     }
 
-    private fun runBackendProbe(db: SupportSQLiteDatabase) {
+    private fun runBackendProbe(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS `$VECTOR_HEALTH_TABLE` (
