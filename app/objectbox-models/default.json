@@ -72,10 +72,31 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "3:7468266998538600068",
+      "lastPropertyId": "2:1915537776989660346",
+      "name": "VectorProbeObject",
+      "properties": [
+        {
+          "id": "1:5456205333865282412",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1915537776989660346",
+          "name": "embedding",
+          "indexId": "7:9136453903722133108",
+          "type": 28,
+          "flags": 8
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "2:7870630353407462264",
-  "lastIndexId": "6:1146367244794063631",
+  "lastEntityId": "3:7468266998538600068",
+  "lastIndexId": "7:9136453903722133108",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

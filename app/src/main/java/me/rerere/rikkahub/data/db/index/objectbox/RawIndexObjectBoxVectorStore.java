@@ -142,27 +142,29 @@ public class RawIndexObjectBoxVectorStore {
     }
 
     public synchronized void runProbe() {
-        Box<KnowledgeBaseVectorObject> box = getOrOpenStore().boxFor(KnowledgeBaseVectorObject.class);
-        long[] probeChunkIds = new long[] { -101L, -102L };
-        List<KnowledgeBaseVectorObject> objects = new ArrayList<>(2);
-        objects.add(new KnowledgeBaseVectorObject(probeChunkIds[0], PROBE_DIMENSION, padVector(new float[] { 1f, 0f }, PROBE_DIMENSION)));
-        objects.add(new KnowledgeBaseVectorObject(probeChunkIds[1], PROBE_DIMENSION, padVector(new float[] { 0f, 1f }, PROBE_DIMENSION)));
+        Box<VectorProbeObject> box = getOrOpenStore().boxFor(VectorProbeObject.class);
+        List<VectorProbeObject> objects = new ArrayList<>(2);
+        objects.add(new VectorProbeObject(padVector(new float[] { 1f, 0f }, PROBE_DIMENSION)));
+        objects.add(new VectorProbeObject(padVector(new float[] { 0f, 1f }, PROBE_DIMENSION)));
         box.put(objects);
         try {
-            Map<Long, Double> result = searchKnowledgeBaseDistances(asLongList(probeChunkIds), new float[] { 1f, 0f }, PROBE_DIMENSION, 2);
-            Long topHit = result.keySet().stream().findFirst().orElse(null);
-            if (topHit == null || topHit != probeChunkIds[0]) {
-                throw new IllegalStateException("ObjectBox probe returned unexpected top hit=" + topHit);
-            }
-        } finally {
-            Query<KnowledgeBaseVectorObject> query = box.query(
-                KnowledgeBaseVectorObject_.chunkId.oneOf(probeChunkIds)
+            Query<VectorProbeObject> query = box.query(
+                VectorProbeObject_.embedding.nearestNeighbors(padVector(new float[] { 1f, 0f }, PROBE_DIMENSION), 2)
             ).build();
             try {
-                query.remove();
+                List<ObjectWithScore<VectorProbeObject>> results = query.findWithScores();
+                if (results.isEmpty()) {
+                    throw new IllegalStateException("ObjectBox probe returned no rows");
+                }
+                double topScore = results.get(0).getScore();
+                if (!Double.isFinite(topScore)) {
+                    throw new IllegalStateException("ObjectBox probe returned non-finite score=" + topScore);
+                }
             } finally {
                 query.close();
             }
+        } finally {
+            box.removeAll();
         }
     }
 
@@ -209,14 +211,6 @@ public class RawIndexObjectBoxVectorStore {
         long[] result = new long[values.size()];
         for (int index = 0; index < values.size(); index++) {
             result[index] = values.get(index);
-        }
-        return result;
-    }
-
-    private static List<Long> asLongList(long[] values) {
-        List<Long> result = new ArrayList<>(values.length);
-        for (long value : values) {
-            result.add(value);
         }
         return result;
     }
