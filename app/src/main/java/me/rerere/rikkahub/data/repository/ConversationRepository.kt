@@ -12,6 +12,7 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import androidx.core.net.toUri
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.dao.CompressionEventDAO
@@ -21,6 +22,7 @@ import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.ConversationRecord
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.getFileUrlsOfConversation
 import me.rerere.rikkahub.data.db.entity.CompressionEventEntity
 import me.rerere.rikkahub.data.db.entity.CompressionEventPayloadEntity
 import me.rerere.rikkahub.data.db.entity.ConversationCompressionPayloadEntity
@@ -273,24 +275,18 @@ class ConversationRepository(
     }
 
     suspend fun deleteConversation(conversation: Conversation) {
-        val fullConversation = if (conversation.messageNodes.isEmpty()) {
-            runCatching {
-                getConversationById(conversation.id)
-            }.onFailure { error ->
-                Log.w(TAG, "deleteConversation: failed to preload conversation ${conversation.id}, continuing", error)
-            }.getOrNull() ?: conversation
-        } else {
-            conversation
-        }
+        val conversationId = conversation.id.toString()
+        val attachmentUris = loadAttachmentUrisForConversation(conversationId)
         messageFtsManager.deleteConversation(conversation.id.toString())
         database.withTransaction {
-            messageNodeDAO.deleteByConversation(conversation.id.toString())
-            conversationDAO.deleteById(conversation.id.toString())
-            compressionEventDAO.deleteByConversation(conversation.id.toString())
+            favoriteDAO.deleteNodeFavoritesOfConversation(conversationId)
+            messageNodeDAO.deleteByConversation(conversationId)
+            conversationDAO.deleteById(conversationId)
+            compressionEventDAO.deleteByConversation(conversationId)
         }
-        indexMigrationManager.deleteConversationScopedData(conversation.id.toString())
-        filesManager.deleteChatFiles(fullConversation.files)
-        SandboxEngine.deleteSandbox(context, fullConversation.id.toString())
+        indexMigrationManager.deleteConversationScopedData(conversationId)
+        filesManager.deleteChatFiles(attachmentUris)
+        SandboxEngine.deleteSandbox(context, conversationId)
     }
 
     suspend fun searchMessages(keyword: String) = messageFtsManager.search(keyword)
@@ -646,6 +642,14 @@ class ConversationRepository(
             entity.toModel().withPayload(payloadsByEventId[entity.id]?.toModel())
         }
     }
+
+    private suspend fun loadAttachmentUrisForConversation(conversationId: String): List<android.net.Uri> = runCatching {
+        messageNodeDAO
+            .getFileUrlsOfConversation(conversationId)
+            .map { it.toUri() }
+    }.onFailure { error ->
+        Log.w(TAG, "loadAttachmentUrisForConversation: failed for conversation=$conversationId", error)
+    }.getOrDefault(emptyList())
 
     private suspend fun saveMessageNodes(conversationId: String, nodes: List<MessageNode>) {
         val entities = nodes.mapIndexed { index, node ->

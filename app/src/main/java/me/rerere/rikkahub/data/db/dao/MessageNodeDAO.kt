@@ -62,6 +62,9 @@ interface MessageNodeDAO {
 
     @RawQuery
     suspend fun getMessageCountPerDayRaw(query: SupportSQLiteQuery): List<MessageDayCount>
+
+    @RawQuery
+    suspend fun getFileUrlRowsRaw(query: SupportSQLiteQuery): List<MessageNodeFileUrlRow>
 }
 
 data class MessageTokenStats(
@@ -75,6 +78,10 @@ data class MessageNodeHeader(
     val id: String,
     val nodeIndex: Int,
     val selectIndex: Int,
+)
+
+data class MessageNodeFileUrlRow(
+    val fileUrl: String,
 )
 
 data class MessageDayCount(val day: String, val count: Int)
@@ -103,4 +110,17 @@ suspend fun MessageNodeDAO.getMessageCountPerDay(startDate: String): List<Messag
             arrayOf(startDate)
         )
     )
+
+suspend fun MessageNodeDAO.getFileUrlsOfConversation(conversationId: String): List<String> =
+    getFileUrlRowsRaw(
+        SimpleSQLiteQuery(
+            "SELECT DISTINCT jt.value AS fileUrl " +
+                "FROM message_node mn, json_tree(mn.messages) jt " +
+                "WHERE mn.conversation_id = ? " +
+                "AND jt.key = 'url' " +
+                "AND jt.type = 'text' " +
+                "AND jt.value LIKE 'file://%'",
+            arrayOf(conversationId)
+        )
+    ).map { it.fileUrl }
 

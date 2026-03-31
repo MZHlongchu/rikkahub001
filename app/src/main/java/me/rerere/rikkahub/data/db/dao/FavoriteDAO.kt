@@ -35,4 +35,7 @@ interface FavoriteDAO {
 
     @Query("DELETE FROM favorites WHERE id = :id")
     suspend fun deleteById(id: String): Int
+
+    @Query("DELETE FROM favorites WHERE ref_key LIKE 'node:' || :conversationId || ':%'")
+    suspend fun deleteNodeFavoritesOfConversation(conversationId: String): Int
 }
