@@ -921,22 +921,7 @@ fi
         containerPath: String,
     ): List<ContainerDirectoryEntry> {
         val normalizedPath = normalizeContainerPath(containerPath)
-        val mountedHostDir = SandboxEngine.resolveHostFileForContainerPath(context, sandboxId, normalizedPath)
-        if (mountedHostDir != null && mountedHostDir.exists() && mountedHostDir.isDirectory) {
-            return mountedHostDir.listFiles()
-                ?.map { file ->
-                    val childPath = buildContainerChildPath(normalizedPath, file.name)
-                    ContainerDirectoryEntry(
-                        name = file.name,
-                        path = childPath,
-                        isDirectory = file.isDirectory,
-                        size = if (file.isFile) file.length() else 0L,
-                        modified = file.lastModified(),
-                    )
-                }
-                ?.sortedWith(compareBy<ContainerDirectoryEntry>({ !it.isDirectory }, { it.name.lowercase() }))
-                ?: emptyList()
-        }
+        listHostVisibleContainerDirectory(sandboxId, normalizedPath)?.let { return it }
 
         if (_containerState.value != ContainerStateEnum.Running) return emptyList()
 
@@ -1012,15 +997,21 @@ fi
         return when {
             normalizedPath == "/root" -> File(containerDir, "upper/root")
             normalizedPath.startsWith("/root/") -> {
-                File(containerDir, "upper/root").resolve(normalizedPath.removePrefix("/root/"))
+                resolveChildPath(File(containerDir, "upper/root"), normalizedPath.removePrefix("/root/"))
             }
 
             normalizedPath == "/usr/local" -> File(containerDir, "upper/usr/local")
             normalizedPath.startsWith("/usr/local/") -> {
-                File(containerDir, "upper/usr/local").resolve(normalizedPath.removePrefix("/usr/local/"))
+                resolveChildPath(File(containerDir, "upper/usr/local"), normalizedPath.removePrefix("/usr/local/"))
             }
 
-            else -> null
+            normalizedPath == "/usr/lib" -> File(containerDir, "upper/usr/lib")
+            normalizedPath.startsWith("/usr/lib/") -> {
+                resolveChildPath(File(containerDir, "upper/usr/lib"), normalizedPath.removePrefix("/usr/lib/"))
+            }
+
+            normalizedPath == "/" -> rootfsDir
+            else -> resolveChildPath(rootfsDir, normalizedPath.removePrefix("/"))
         }
     }
 
@@ -2299,6 +2290,93 @@ fi
         if (path.isBlank()) return "/"
         val normalized = path.replace('\\', '/').replace(Regex("/+"), "/").trimEnd('/')
         return if (normalized.startsWith("/")) normalized.ifBlank { "/" } else "/$normalized"
+    }
+
+    private fun listHostVisibleContainerDirectory(
+        sandboxId: String,
+        normalizedPath: String,
+    ): List<ContainerDirectoryEntry>? {
+        return when (normalizedPath) {
+            "/" -> mergeDirectoryEntries(
+                baseDir = rootfsDir,
+                baseContainerPath = "/",
+                overrides = mapOf(
+                    "workspace" to SandboxEngine.getSandboxDir(context, sandboxId),
+                    "delivery" to SandboxEngine.getDeliveryDir(context, sandboxId),
+                    "skills" to File(context.filesDir, FileFolders.SKILLS),
+                    "root" to File(containerDir, "upper/root"),
+                ),
+            )
+
+            "/usr" -> mergeDirectoryEntries(
+                baseDir = File(rootfsDir, "usr"),
+                baseContainerPath = "/usr",
+                overrides = mapOf(
+                    "local" to File(containerDir, "upper/usr/local"),
+                    "lib" to File(containerDir, "upper/usr/lib"),
+                ),
+            )
+
+            else -> {
+                val hostDir = resolveHostFileForContainerPath(sandboxId, normalizedPath)
+                    ?.takeIf { it.exists() && it.isDirectory }
+                    ?: return null
+                hostDir.listFiles()
+                    ?.map { file ->
+                        val childPath = buildContainerChildPath(normalizedPath, file.name)
+                        ContainerDirectoryEntry(
+                            name = file.name,
+                            path = childPath,
+                            isDirectory = file.isDirectory,
+                            size = if (file.isFile) file.length() else 0L,
+                            modified = file.lastModified(),
+                        )
+                    }
+                    ?.sortedWith(compareBy<ContainerDirectoryEntry>({ !it.isDirectory }, { it.name.lowercase() }))
+                    ?: emptyList()
+            }
+        }
+    }
+
+    private fun mergeDirectoryEntries(
+        baseDir: File,
+        baseContainerPath: String,
+        overrides: Map<String, File> = emptyMap(),
+    ): List<ContainerDirectoryEntry>? {
+        if (!baseDir.exists() || !baseDir.isDirectory) return null
+
+        val entries = linkedMapOf<String, File>()
+        baseDir.listFiles()
+            ?.sortedBy { it.name.lowercase() }
+            ?.forEach { entries[it.name] = it }
+
+        overrides.forEach { (name, file) ->
+            if (file.exists()) {
+                entries[name] = file
+            }
+        }
+
+        return entries.entries
+            .map { (name, file) ->
+                ContainerDirectoryEntry(
+                    name = name,
+                    path = buildContainerChildPath(baseContainerPath, name),
+                    isDirectory = file.isDirectory,
+                    size = if (file.isFile) file.length() else 0L,
+                    modified = file.lastModified(),
+                )
+            }
+            .sortedWith(compareBy<ContainerDirectoryEntry>({ !it.isDirectory }, { it.name.lowercase() }))
+    }
+
+    private fun resolveChildPath(baseDir: File, relativePath: String): File? {
+        if (relativePath.isBlank()) return baseDir
+        val target = File(baseDir, relativePath)
+        val canonicalBase = runCatching { baseDir.canonicalFile }.getOrNull() ?: return null
+        val canonicalTarget = runCatching { target.canonicalFile }.getOrNull() ?: return null
+        return canonicalTarget.takeIf {
+            it.path == canonicalBase.path || it.path.startsWith("${canonicalBase.path}${File.separator}")
+        }
     }
 
     private fun buildContainerChildPath(parent: String, name: String): String {

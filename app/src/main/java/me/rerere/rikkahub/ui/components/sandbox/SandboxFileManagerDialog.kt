@@ -480,25 +480,6 @@ private suspend fun loadContainerItems(
     path: String,
 ): List<FileSystemItem> {
     val resolvedPath = if (path.isBlank()) "/" else path
-
-    val hostDir = SandboxEngine.resolveHostFileForContainerPath(context, sandboxId, resolvedPath)
-    if (hostDir != null && hostDir.exists() && hostDir.isDirectory) {
-        return hostDir.listFiles()
-            ?.map { file ->
-                val childPath = if (resolvedPath == "/") "/${file.name}" else "$resolvedPath/${file.name}"
-                FileSystemItem(
-                    name = file.name,
-                    path = childPath,
-                    isDirectory = file.isDirectory,
-                    size = if (file.isFile) file.length() else 0L,
-                    modifiedTime = file.lastModified(),
-                    hostFile = file,
-                )
-            }
-            ?.sortedWith(compareBy<FileSystemItem>({ !it.isDirectory }, { it.name.lowercase() }))
-            ?: emptyList()
-    }
-
     return prootManager.listContainerDirectory(sandboxId, resolvedPath).map { item ->
         FileSystemItem(
             name = item.name,
@@ -506,6 +487,7 @@ private suspend fun loadContainerItems(
             isDirectory = item.isDirectory,
             size = item.size,
             modifiedTime = item.modified,
+            hostFile = prootManager.resolveHostFileForContainerPath(sandboxId, item.path),
         )
     }
 }
