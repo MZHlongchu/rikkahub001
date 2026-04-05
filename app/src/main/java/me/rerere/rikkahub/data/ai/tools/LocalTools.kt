@@ -385,7 +385,6 @@ class LocalTools(
 【Skills】可写技能库挂载在 /skills；当前助手已启用的 skills 以只读镜像方式挂载在 /opt/rikkahub/skills。若用户要求创建或更新可复用 skill，应在 /skills/<directory>/ 下写入合规 skill 包，其中 SKILL.md frontmatter 至少包含 name 和 description。
 【交付】需要展示或交付给用户的最终文件请写入 /delivery。工具返回结果中的 delivery_items 会列出本轮新交付文件及其 render_url。
 【图片交付】如果 delivery_items 中出现图片文件，想让聊天界面显示图片时，必须在你的正文中使用 Markdown 图片语法引用对应 render_url，例如 ![chart](render_url)。不要只说“图片已生成”而不插入链接。
-【看图自检】如果你需要自己回看 /workspace、/delivery、/root、/usr/local 下生成的图片内容，请调用 container_view_image，而不是只读路径字符串。
 【非图片交付】zip、pdf、csv、json 等非图片文件会显示为本轮助手消息下方的附件，无需再手写下载说明。
 【重要】安装开发工具：使用 apk add 安装（如 apk add python3、apk add nodejs npm、apk add g++ 等）。所有开发工具都应通过 apk 包管理器安装，不要尝试解压 ZIP 包。
 【Node.js & npm】已自动修复 PRoot 兼容性，安装后可直接使用：
@@ -661,15 +660,14 @@ class LocalTools(
     fun createContainerViewImageTool(sandboxId: Uuid): Tool {
         return Tool(
             name = "container_view_image",
-            description = """读取容器或宿主可访问路径上的图片文件，并把真实图片内容返回给模型。
-优先用于查看 /workspace、/delivery、/skills、/root、/usr/local 下的图片。
-如果图片目前位于纯容器内部且不在这些可映射路径下，请先把它复制到 /workspace 或 /delivery，再调用此工具。""".trimIndent(),
+            description = """读取容器中的图片文件，并把真实图片内容返回给模型。
+支持任意容器可读路径；相对路径默认按 /workspace 解析。""".trimIndent(),
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
                         put("path", buildJsonObject {
                             put("type", "string")
-                            put("description", "图片路径。相对路径默认按 /workspace 解析；也可直接传 /workspace/foo.png 或 /delivery/bar.jpg 这样的绝对容器路径。")
+                            put("description", "图片路径。相对路径默认按 /workspace 解析；也可直接传绝对容器路径。")
                         })
                     },
                     required = listOf("path")
@@ -689,12 +687,14 @@ class LocalTools(
                     )
 
                 val resolvedPath = if (rawPath.startsWith("/")) rawPath else "/workspace/$rawPath"
-                val hostFile = prootManager.resolveHostFileForContainerPath(
-                    sandboxId = sandboxId.toString(),
-                    containerPath = resolvedPath,
-                )
+                val exportedFile = runBlocking {
+                    prootManager.exportContainerFileToCache(
+                        sandboxId = sandboxId.toString(),
+                        containerPath = resolvedPath,
+                    )
+                }
 
-                if (hostFile == null || !hostFile.exists() || !hostFile.isFile) {
+                if (exportedFile == null || !exportedFile.exists() || !exportedFile.isFile) {
                     return@Tool listOf(
                         UIMessagePart.Text(
                             buildJsonObject {
@@ -703,8 +703,7 @@ class LocalTools(
                                 put(
                                     "error",
                                     JsonPrimitive(
-                                        "Image file not found at a host-accessible path. " +
-                                            "For now, container_view_image only works reliably for files under /workspace, /delivery, /skills, /root, or /usr/local."
+                                        "Failed to load image from container path. Make sure the file exists, is readable in the container, and is not larger than 8 MB."
                                     )
                                 )
                             }.toString()
@@ -712,7 +711,7 @@ class LocalTools(
                     )
                 }
 
-                val extension = hostFile.extension.lowercase()
+                val extension = exportedFile.extension.lowercase()
                 val supportedExtensions = setOf("png", "jpg", "jpeg", "gif", "webp", "heic")
                 if (extension !in supportedExtensions) {
                     return@Tool listOf(
@@ -736,11 +735,11 @@ class LocalTools(
                         buildJsonObject {
                             put("success", JsonPrimitive(true))
                             put("path", JsonPrimitive(resolvedPath))
-                            put("hostPath", JsonPrimitive(hostFile.absolutePath))
-                            put("size", JsonPrimitive(hostFile.length()))
+                            put("hostPath", JsonPrimitive(exportedFile.absolutePath))
+                            put("size", JsonPrimitive(exportedFile.length()))
                         }.toString()
                     ),
-                    UIMessagePart.Image(url = Uri.fromFile(hostFile).toString())
+                    UIMessagePart.Image(url = Uri.fromFile(exportedFile).toString())
                 )
             }
         )

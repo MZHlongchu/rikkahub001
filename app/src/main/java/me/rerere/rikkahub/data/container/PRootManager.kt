@@ -1025,6 +1025,65 @@ fi
         }
     }
 
+    suspend fun exportContainerFileToCache(
+        sandboxId: String,
+        containerPath: String,
+        maxBytes: Int = 8 * 1024 * 1024,
+    ): File? = withContext(Dispatchers.IO) {
+        val normalizedPath = normalizeContainerPath(containerPath)
+        resolveHostFileForContainerPath(sandboxId, normalizedPath)
+            ?.takeIf { it.exists() && it.isFile }
+            ?.let { return@withContext it }
+
+        if (_containerState.value != ContainerStateEnum.Running) return@withContext null
+
+        val escaped = normalizedPath.replace("'", "'\"'\"'")
+        val sizeScript = """
+            target='$escaped'
+            if [ ! -f "${'$'}target" ]; then
+              exit 11
+            fi
+            wc -c < "${'$'}target" | tr -d '[:space:]'
+        """.trimIndent()
+        val sizeResult = execInContainer(
+            sandboxId = sandboxId,
+            command = listOf("sh", "-c", sizeScript),
+            env = getToolEnvironment(),
+        )
+        if (sizeResult.exitCode != 0) return@withContext null
+
+        val size = sizeResult.stdout.trim().toLongOrNull() ?: return@withContext null
+        if (size <= 0 || size > maxBytes) return@withContext null
+
+        val contentScript = """
+            target='$escaped'
+            if [ ! -f "${'$'}target" ]; then
+              exit 11
+            fi
+            base64 "${'$'}target" | tr -d '\n'
+        """.trimIndent()
+        val contentResult = execInContainer(
+            sandboxId = sandboxId,
+            command = listOf("sh", "-c", contentScript),
+            env = getToolEnvironment(),
+            timeoutMs = 120_000,
+        )
+        if (contentResult.exitCode != 0) return@withContext null
+
+        val bytes = runCatching { Base64.decode(contentResult.stdout.trim(), Base64.DEFAULT) }.getOrNull()
+            ?: return@withContext null
+        if (bytes.size.toLong() != size) return@withContext null
+
+        val extension = normalizedPath.substringAfterLast('.', "")
+            .lowercase()
+            .ifBlank { "bin" }
+        val exportDir = File(context.cacheDir, "container-image-preview/$sandboxId").apply { mkdirs() }
+        val fileName = "preview_${System.currentTimeMillis()}.$extension"
+        val output = exportDir.resolve(fileName)
+        output.writeBytes(bytes)
+        return@withContext output
+    }
+
     /**
      * 获取已安装的包列表（用于统计展示）
      */
