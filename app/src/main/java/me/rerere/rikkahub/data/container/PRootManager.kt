@@ -1003,6 +1003,28 @@ fi
         return if (result.exitCode == 0) result.stdout else null
     }
 
+    fun resolveHostFileForContainerPath(
+        sandboxId: String,
+        containerPath: String,
+    ): File? {
+        val normalizedPath = normalizeContainerPath(containerPath)
+        SandboxEngine.resolveHostFileForContainerPath(context, sandboxId, normalizedPath)?.let { return it }
+
+        return when {
+            normalizedPath == "/root" -> File(containerDir, "upper/root")
+            normalizedPath.startsWith("/root/") -> {
+                File(containerDir, "upper/root").resolve(normalizedPath.removePrefix("/root/"))
+            }
+
+            normalizedPath == "/usr/local" -> File(containerDir, "upper/usr/local")
+            normalizedPath.startsWith("/usr/local/") -> {
+                File(containerDir, "upper/usr/local").resolve(normalizedPath.removePrefix("/usr/local/"))
+            }
+
+            else -> null
+        }
+    }
+
     /**
      * 获取已安装的包列表（用于统计展示）
      */
