@@ -27,7 +27,6 @@ fun buildSkillsCatalogPrompt(
     return buildString {
         appendLine("Local skills are available inside the container.")
         appendLine("The writable skill library is mounted at /skills.")
-        appendLine("Enabled skills are mirrored read-only at /opt/rikkahub/skills.")
         appendLine("Only inspect a skill when it is relevant to the user's request. Do not read every SKILL.md preemptively.")
         appendLine("When a user wants you to create or update a reusable skill package, write it under /skills/<directory> with a SKILL.md frontmatter containing name and description.")
         if (selectedEntries.isEmpty()) {
@@ -39,7 +38,7 @@ fun buildSkillsCatalogPrompt(
                 appendLine("- directory: ${skill.directoryName}")
                 appendLine("  name: ${skill.name}")
                 appendLine("  description: ${skill.description}")
-                appendLine("  path: /opt/rikkahub/skills/${skill.directoryName}")
+                appendLine("  path: /skills/${skill.directoryName}")
             }
         }
     }.trim()

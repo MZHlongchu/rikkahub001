@@ -207,7 +207,7 @@ object SubAgentTemplates {
 - container_shell: 完整 GNU/Linux 容器命令执行入口
   - 支持 apk 安装工具、git 工作流、Python、Node.js 等
   - 默认应在 /workspace 中工作
-  - 已启用的 skills 位于 /opt/rikkahub/skills
+  - 可复用的本地 skills 位于 /skills
   - 需要交付给用户的最终产物应写入 /delivery
 - container_shell_bg: 用于长时间运行的后台命令
 

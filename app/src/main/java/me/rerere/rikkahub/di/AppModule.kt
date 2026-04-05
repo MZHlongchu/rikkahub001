@@ -108,7 +108,6 @@ val appModule = module {
             prootManager = get(),
             backgroundProcessManager = get(),
             eventBus = get(),
-            skillManager = get(),
             subAgentExecutor = get()
         )
     }

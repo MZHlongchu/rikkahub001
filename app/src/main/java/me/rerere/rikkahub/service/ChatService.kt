@@ -466,7 +466,6 @@ class ChatService(
                     localTools.getTools(
                         options = assistantForGeneration.localTools,
                         sandboxId = sandboxId,
-                        enabledSkills = assistantForGeneration.enabledSkills,
                         settings = effectiveSettings,
                         parentModel = model,
                         subAgents = me.rerere.rikkahub.data.model.SubAgentTemplates.All,
@@ -1069,7 +1068,6 @@ class ChatService(
                         localTools.getTools(
                             options = assistantForGeneration.localTools,
                             sandboxId = conversationId,
-                            enabledSkills = assistantForGeneration.enabledSkills,
                             workflowStateProvider = {
                                 getConversationFlow(conversationId).value.workflowState
                             },

@@ -43,10 +43,6 @@ object SandboxEngine {
         return File(getSandboxDir(context, assistantId), DELIVERY_DIR).apply { mkdirs() }
     }
 
-    fun getRuntimeSkillsDir(context: Context, assistantId: String): File {
-        return File(getSandboxDir(context, assistantId), "$RUNTIME_DIR/$RUNTIME_SKILLS_DIR").apply { mkdirs() }
-    }
-
     fun getShareCacheDir(context: Context, assistantId: String): File {
         return File(getSandboxDir(context, assistantId), SHARE_CACHE_DIR).apply { mkdirs() }
     }
@@ -500,12 +496,6 @@ object SandboxEngine {
             normalized.startsWith("/delivery/") -> resolveSandboxPath(
                 getDeliveryDir(context, assistantId),
                 normalized.removePrefix("/delivery/")
-            )
-
-            normalized == "/opt/rikkahub/skills" -> getRuntimeSkillsDir(context, assistantId)
-            normalized.startsWith("/opt/rikkahub/skills/") -> resolveSandboxPath(
-                getRuntimeSkillsDir(context, assistantId),
-                normalized.removePrefix("/opt/rikkahub/skills/")
             )
 
             normalized == "/skills" -> getSkillLibraryDir(context)

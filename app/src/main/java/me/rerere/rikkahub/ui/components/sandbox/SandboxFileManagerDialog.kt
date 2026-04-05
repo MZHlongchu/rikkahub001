@@ -88,21 +88,6 @@ private data class FileSystemItem(
     val canDelete: Boolean = false,
 )
 
-private data class ContainerRootShortcut(
-    val path: String,
-    val description: String,
-)
-
-private val containerRootShortcuts = listOf(
-    ContainerRootShortcut("/workspace", "默认工作区，项目文件和中间产物优先放这里"),
-    ContainerRootShortcut("/delivery", "本轮交付目录，最终交付文件应写到这里"),
-    ContainerRootShortcut("/skills", "真实技能库，可创建和编辑可复用 skills"),
-    ContainerRootShortcut("/opt/rikkahub/skills", "当前助手已启用 skills 的只读运行时镜像"),
-    ContainerRootShortcut("/root", "容器用户目录，可查看环境级配置"),
-    ContainerRootShortcut("/usr/local", "容器持久化工具目录"),
-    ContainerRootShortcut("/", "完整容器根目录"),
-)
-
 @Composable
 fun SandboxFileManagerDialog(
     sandboxId: String,
@@ -113,7 +98,7 @@ fun SandboxFileManagerDialog(
     val scope = rememberCoroutineScope()
     val prootManager: PRootManager = koinInject()
 
-    var browserMode by remember { mutableStateOf(BrowserMode.Workspace) }
+    var browserMode by remember { mutableStateOf(BrowserMode.Container) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
@@ -122,15 +107,18 @@ fun SandboxFileManagerDialog(
     var previewTitle by remember { mutableStateOf<String?>(null) }
     var previewContent by remember { mutableStateOf<String?>(null) }
     var selectedFile by remember { mutableStateOf<FileSystemItem?>(null) }
-    var currentPath by remember { mutableStateOf("") }
-    var pathHistory by remember { mutableStateOf(listOf("")) }
+    var currentPath by remember { mutableStateOf("/") }
+    var pathHistory by remember { mutableStateOf(listOf("/")) }
     var currentItems by remember { mutableStateOf<List<FileSystemItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
     fun resetNavigation(mode: BrowserMode) {
         browserMode = mode
-        currentPath = ""
-        pathHistory = listOf("")
+        currentPath = when (mode) {
+            BrowserMode.Workspace -> ""
+            BrowserMode.Container -> "/"
+        }
+        pathHistory = listOf(currentPath)
     }
 
     fun loadDirectory(path: String = currentPath, mode: BrowserMode = browserMode) {
@@ -266,15 +254,6 @@ fun SandboxFileManagerDialog(
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-                if (browserMode == BrowserMode.Container && currentPath.isEmpty()) {
-                    Text(
-                        text = "容器目录视图可直接浏览模型能工作的主要目录。工作区文件编辑请切到“工作区文件”。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                }
 
                 when {
                     isLoading -> {
@@ -500,24 +479,13 @@ private suspend fun loadContainerItems(
     prootManager: PRootManager,
     path: String,
 ): List<FileSystemItem> {
-    if (path.isBlank()) {
-        return containerRootShortcuts.map { shortcut ->
-            FileSystemItem(
-                name = shortcut.path,
-                path = shortcut.path,
-                isDirectory = true,
-                size = 0L,
-                modifiedTime = 0L,
-                subtitle = shortcut.description,
-            )
-        }
-    }
+    val resolvedPath = if (path.isBlank()) "/" else path
 
-    val hostDir = SandboxEngine.resolveHostFileForContainerPath(context, sandboxId, path)
+    val hostDir = SandboxEngine.resolveHostFileForContainerPath(context, sandboxId, resolvedPath)
     if (hostDir != null && hostDir.exists() && hostDir.isDirectory) {
         return hostDir.listFiles()
             ?.map { file ->
-                val childPath = if (path == "/") "/${file.name}" else "$path/${file.name}"
+                val childPath = if (resolvedPath == "/") "/${file.name}" else "$resolvedPath/${file.name}"
                 FileSystemItem(
                     name = file.name,
                     path = childPath,
@@ -531,7 +499,7 @@ private suspend fun loadContainerItems(
             ?: emptyList()
     }
 
-    return prootManager.listContainerDirectory(sandboxId, path).map { item ->
+    return prootManager.listContainerDirectory(sandboxId, resolvedPath).map { item ->
         FileSystemItem(
             name = item.name,
             path = item.path,
@@ -721,7 +689,7 @@ private fun BreadcrumbNavigation(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        val rootLabel = if (browserMode == BrowserMode.Workspace) "工作区" else "容器入口"
+        val rootLabel = if (browserMode == BrowserMode.Workspace) "工作区" else "/"
         if (pathHistory.size == 1 && pathHistory[0].isEmpty()) {
             Text(
                 text = rootLabel,
@@ -796,7 +764,7 @@ private fun FileManagerToolbar(
             Text(
                 text = when {
                     currentPath.isEmpty() && browserMode == BrowserMode.Workspace -> "工作区根目录"
-                    currentPath.isEmpty() -> "容器入口"
+                    currentPath == "/" -> "/"
                     else -> currentPath.substringAfterLast('/').ifBlank { currentPath }
                 },
                 style = MaterialTheme.typography.titleSmall,

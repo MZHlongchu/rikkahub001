@@ -10,7 +10,6 @@ import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.sandbox.SandboxEngine
 
 class SkillManager(
     private val context: Context,
@@ -71,31 +70,6 @@ class SkillManager(
         extractedDir.copyRecursively(finalDir, overwrite = true)
         extractedDir.deleteRecursively()
         parseSkillFile(finalDir.resolve(SKILL_MARKDOWN), finalDir)
-    }
-
-    suspend fun syncSkillsToRuntime(assistantId: String, enabledSkills: Set<String>) = withContext(Dispatchers.IO) {
-        if (enabledSkills.isEmpty()) {
-            val runtimeRoot = SandboxEngine.getRuntimeSkillsDir(context, assistantId)
-            if (runtimeRoot.exists()) {
-                runtimeRoot.deleteRecursively()
-                runtimeRoot.parentFile?.takeIf { it.isDirectory && it.listFiles().isNullOrEmpty() }?.delete()
-            }
-            return@withContext
-        }
-        val runtimeRoot = SandboxEngine.getRuntimeSkillsDir(context, assistantId)
-        runtimeRoot.mkdirs()
-
-        runtimeRoot.listFiles()
-            ?.filter { it.isDirectory && it.name !in enabledSkills }
-            ?.forEach { it.deleteRecursively() }
-
-        enabledSkills.forEach { skillName ->
-            val sourceDir = resolveSkillDir(skillName) ?: return@forEach
-            if (!sourceDir.exists()) return@forEach
-            val targetDir = runtimeRoot.resolve(skillName)
-            if (targetDir.exists()) targetDir.deleteRecursively()
-            sourceDir.copyRecursively(targetDir, overwrite = true)
-        }
     }
 
     suspend fun deleteSkill(name: String): Boolean = withContext(Dispatchers.IO) {

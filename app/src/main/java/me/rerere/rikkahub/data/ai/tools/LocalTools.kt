@@ -19,7 +19,6 @@ import me.rerere.rikkahub.data.ai.subagent.SubAgentProgressManager
 import me.rerere.rikkahub.data.ai.subagent.SubAgentResult
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
-import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.sandbox.SandboxEngine
 import me.rerere.rikkahub.data.model.TodoStatus
 import me.rerere.rikkahub.data.model.TodoItem
@@ -91,7 +90,6 @@ class LocalTools(
     private val prootManager: me.rerere.rikkahub.data.container.PRootManager,
     private val backgroundProcessManager: me.rerere.rikkahub.data.container.BackgroundProcessManager,
     private val eventBus: AppEventBus,
-    private val skillManager: SkillManager,
     val subAgentExecutor: me.rerere.rikkahub.data.ai.subagent.SubAgentExecutor? = null,
 ) {
     val javascriptTool by lazy {
@@ -377,12 +375,12 @@ class LocalTools(
      * 容器运行时 Shell 执行工具（PRoot）
      * 仅当容器运行时启用且就绪时暴露
      */
-    fun createContainerShellTool(sandboxId: Uuid, enabledSkills: Set<String> = emptySet()): Tool {
+    fun createContainerShellTool(sandboxId: Uuid): Tool {
         return Tool(
             name = "container_shell",
             description = """完整 Linux Shell（Alpine），支持 apk、git、wget、Python3、Node.js。超时 5 分钟。
 【工作目录】默认在 /workspace 下工作。/workspace 映射到当前对话的沙箱目录，用户在文件管理器中可见；后续命令应尽量在 /workspace 内操作，创建、修改、下载、解压出的用户文件也应优先放在这里。除非有明确理由，不要把项目文件放到 /root、/tmp、/usr/local 或其他 /workspace 之外的位置。
-【Skills】可写技能库挂载在 /skills；当前助手已启用的 skills 以只读镜像方式挂载在 /opt/rikkahub/skills。若用户要求创建或更新可复用 skill，应在 /skills/<directory>/ 下写入合规 skill 包，其中 SKILL.md frontmatter 至少包含 name 和 description。
+【Skills】本地技能库挂载在 /skills。若用户要求创建或更新可复用 skill，应在 /skills/<directory>/ 下写入合规 skill 包，其中 SKILL.md frontmatter 至少包含 name 和 description。
 【交付】需要展示或交付给用户的最终文件请写入 /delivery。工具返回结果中的 delivery_items 会列出本轮新交付文件及其 render_url。
 【图片交付】如果 delivery_items 中出现图片文件，想让聊天界面显示图片时，必须在你的正文中使用 Markdown 图片语法引用对应 render_url，例如 ![chart](render_url)。不要只说“图片已生成”而不插入链接。
 【非图片交付】zip、pdf、csv、json 等非图片文件会显示为本轮助手消息下方的附件，无需再手写下载说明。
@@ -426,10 +424,6 @@ class LocalTools(
                     }.toString()))
                 }
 
-                // 调用 PRootManager 执行（全局单例，无需创建容器）
-                runBlocking {
-                    skillManager.syncSkillsToRuntime(sandboxId.toString(), enabledSkills)
-                }
                 val beforeDelivery = snapshotDeliveryFiles(sandboxId)
                 val result = prootManager.executeShell(
                     sandboxId = sandboxId.toString(),
@@ -470,7 +464,7 @@ class LocalTools(
      * 容器后台执行工具（非阻塞）
      * 适用于启动长期运行的服务（如 uvicorn、nginx、数据库等）
      */
-    fun createContainerShellBgTool(sandboxId: Uuid, enabledSkills: Set<String> = emptySet()): Tool {
+    fun createContainerShellBgTool(sandboxId: Uuid): Tool {
         return Tool(
             name = "container_shell_bg",
             description = """在容器后台执行Shell命令并立即返回，不等待命令完成。
@@ -519,10 +513,6 @@ class LocalTools(
 
                 val tag = args.jsonObject["tag"]?.jsonPrimitive?.contentOrNull
 
-                // 调用 BackgroundProcessManager
-                runBlocking {
-                    skillManager.syncSkillsToRuntime(sandboxId.toString(), enabledSkills)
-                }
                 val result = backgroundProcessManager.startBackgroundProcess(
                     sandboxId = sandboxId.toString(),
                     command = command,
@@ -969,7 +959,6 @@ class LocalTools(
       fun getTools(
           options: List<LocalToolOption>,
           sandboxId: Uuid? = null,
-          enabledSkills: Set<String> = emptySet(),
           workflowStateProvider: (() -> me.rerere.rikkahub.data.model.WorkflowState?)? = null,
           onWorkflowStateUpdate: ((me.rerere.rikkahub.data.model.WorkflowState) -> Unit)? = null,
           todoStateProvider: (() -> me.rerere.rikkahub.data.model.TodoState?)? = null,
@@ -999,8 +988,8 @@ class LocalTools(
             (options.contains(LocalToolOption.Container) || options.contains(LocalToolOption.ChaquoPy)) &&
             prootManager.isRunning
         ) {
-            tools.add(createContainerShellTool(sandboxId, enabledSkills))
-            tools.add(createContainerShellBgTool(sandboxId, enabledSkills))
+            tools.add(createContainerShellTool(sandboxId))
+            tools.add(createContainerShellBgTool(sandboxId))
             tools.add(createContainerProcessTool(sandboxId))
             tools.add(createContainerViewImageTool(sandboxId))
         }

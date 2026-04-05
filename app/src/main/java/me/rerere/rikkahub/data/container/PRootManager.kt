@@ -792,7 +792,6 @@ fi
             // 确保沙箱目录存在
             val sandboxDir = File(context.filesDir, "sandboxes/$sandboxId")
             val deliveryDir = SandboxEngine.getDeliveryDir(context, sandboxId)
-            val runtimeSkillsDir = SandboxEngine.getRuntimeSkillsDir(context, sandboxId)
             sandboxDir.mkdirs()
             
             // 安装依赖
@@ -1239,7 +1238,6 @@ fi
             val prootBinary = File(prootDir, "proot").absolutePath
             val sandboxDir = File(context.filesDir, "sandboxes/$sandboxId")
             val deliveryDir = SandboxEngine.getDeliveryDir(context, sandboxId)
-            val runtimeSkillsDir = SandboxEngine.getRuntimeSkillsDir(context, sandboxId)
             val skillLibraryDir = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() }
 
             // 确保沙箱目录存在
@@ -1268,8 +1266,6 @@ fi
                 add("${deliveryDir.absolutePath}:/delivery")
                 add("-b")
                 add("${skillLibraryDir.absolutePath}:/skills")
-                add("-b")
-                add("${runtimeSkillsDir.absolutePath}:/opt/rikkahub/skills")
 
                 // 绑定挂载容器的 upper 层到 /usr/local（pip 安装位置）
                 add("-b")
@@ -2243,7 +2239,6 @@ fi
         val prootBinary = File(prootDir, "proot").absolutePath
         val sandboxDir = File(context.filesDir, "sandboxes/$sandboxId")
         val deliveryDir = SandboxEngine.getDeliveryDir(context, sandboxId)
-        val runtimeSkillsDir = SandboxEngine.getRuntimeSkillsDir(context, sandboxId)
         val skillLibraryDir = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() }
 
         return buildList {
@@ -2264,8 +2259,6 @@ fi
             add("${deliveryDir.absolutePath}:/delivery")
             add("-b")
             add("${skillLibraryDir.absolutePath}:/skills")
-            add("-b")
-            add("${runtimeSkillsDir.absolutePath}:/opt/rikkahub/skills")
 
             // 绑定挂载容器的 upper 层到 /usr/local（pip 安装位置）
             add("-b")
