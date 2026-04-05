@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.container.PRootManager
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.ConversationArtifactService
+import me.rerere.rikkahub.service.ConversationDerivedWorkService
 import me.rerere.rikkahub.service.ConversationPersistenceService
 import me.rerere.rikkahub.service.ConversationRuntimeService
 import me.rerere.rikkahub.service.KnowledgeBaseService
@@ -138,6 +139,18 @@ val appModule = module {
     }
 
     single {
+        ConversationDerivedWorkService(
+            context = get(),
+            settingsStore = get(),
+            providerManager = get(),
+            conversationRepo = get(),
+            runtimeService = get(),
+            persistenceService = get(),
+            artifactService = get(),
+        )
+    }
+
+    single {
         ChatService(
             context = get(),
             appScope = get(),
@@ -160,6 +173,7 @@ val appModule = module {
             runtimeService = get(),
             persistenceService = get(),
             artifactService = get(),
+            derivedWorkService = get(),
         )
     }
 

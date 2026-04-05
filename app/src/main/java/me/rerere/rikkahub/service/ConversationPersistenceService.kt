@@ -42,4 +42,20 @@ class ConversationPersistenceService(
         }
         return normalizedConversation
     }
+
+    suspend fun saveConversationMetadata(conversationId: Uuid, conversation: Conversation): Conversation {
+        val normalizedConversation = normalizeCompressionState(conversation.copy())
+        val exists = conversationRepo.existsConversationById(normalizedConversation.id)
+        if (!exists && normalizedConversation.title.isBlank() && normalizedConversation.messageNodes.isEmpty()) {
+            return normalizedConversation
+        }
+
+        runtimeService.updateConversation(conversationId, normalizedConversation)
+        if (!exists) {
+            conversationRepo.insertConversation(normalizedConversation)
+        } else {
+            conversationRepo.updateConversationMetadata(normalizedConversation)
+        }
+        return normalizedConversation
+    }
 }

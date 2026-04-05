@@ -254,6 +254,7 @@ class ChatService(
     private val runtimeService: ConversationRuntimeService,
     private val persistenceService: ConversationPersistenceService,
     private val artifactService: ConversationArtifactService,
+    private val derivedWorkService: ConversationDerivedWorkService,
 ) {
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -1104,12 +1105,18 @@ class ChatService(
                 actualPromptTokens = finalConversation.currentMessages.lastOrNull()?.usage?.promptTokens ?: 0
             )
 
-            launchWithConversationReference(conversationId) {
-                generateTitle(conversationId, finalConversation)
-            }
-            launchWithConversationReference(conversationId) {
-                generateSuggestion(conversationId, finalConversation)
-            }
+            derivedWorkService.trackTitleJob(
+                conversationId,
+                launchWithConversationReference(conversationId) {
+                    generateTitle(conversationId, finalConversation)
+                },
+            )
+            derivedWorkService.trackSuggestionJob(
+                conversationId,
+                launchWithConversationReference(conversationId) {
+                    generateSuggestion(conversationId, finalConversation)
+                },
+            )
         }
     }
 
@@ -1191,47 +1198,11 @@ class ChatService(
         conversation: Conversation,
         force: Boolean = false
     ) {
-        val shouldGenerate = when {
-            force -> true
-            conversation.title.isBlank() -> true
-            else -> false
-        }
-        if (!shouldGenerate) return
-
         runCatching {
-            val settings = settingsStore.settingsFlow.first()
-            val model = settings.findModelById(settings.titleModelId) ?: return
-            val provider = model.findProvider(settings.providers) ?: return
-
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        prompt = settings.titlePrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(4).joinToString("\n\n") { it.summaryAsText() })
-                    ),
-                ),
-                params = TextGenerationParams(
-                    model = model,
-                    thinkingBudget = 0,
-                ),
-            )
-
-            // 生成完，conversation可能不是最新了，因此需要重新获取
-            val sessionConversation = runtimeService.getCurrentConversationOrNull(conversationId)
-            conversationRepo.getConversationById(conversation.id)?.let {
-                saveConversation(
-                    conversationId,
-                    mergeMissingCompressionArtifacts(it, sessionConversation ?: it)
-                        .copy(title = result.choices[0].message?.toText()?.trim() ?: "")
-                )
-            }
+            derivedWorkService.generateTitle(conversationId, conversation, force)
         }.onFailure {
             it.printStackTrace()
-            addError(it, conversationId, title = context.getString(R.string.error_title_generate_title))
+            addError(it, conversationId, title = derivedWorkService.titleErrorTitle())
         }
     }
 
@@ -1239,50 +1210,7 @@ class ChatService(
 
     suspend fun generateSuggestion(conversationId: Uuid, conversation: Conversation) {
         runCatching {
-            val settings = settingsStore.settingsFlow.first()
-            val model = settings.findModelById(settings.suggestionModelId) ?: return
-            val provider = model.findProvider(settings.providers) ?: return
-
-            runtimeService.getCurrentConversationOrNull(conversationId)?.let { sessionConversation ->
-                updateConversation(
-                    conversationId,
-                    sessionConversation.copy(chatSuggestions = emptyList())
-                )
-            }
-
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        settings.suggestionPrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(8).joinToString("\n\n") { it.summaryAsText() }),
-                    )
-                ),
-                params = TextGenerationParams(
-                    model = model,
-                    thinkingBudget = 0,
-                ),
-            )
-            val suggestions =
-                result.choices[0].message?.toText()?.split("\n")?.map { it.trim() }
-                    ?.filter { it.isNotBlank() } ?: emptyList()
-
-            val sessionConversation = runtimeService.getCurrentConversationOrNull(conversationId)
-            val latestConversation = conversationRepo.getConversationById(conversationId)
-                ?.let { mergeMissingCompressionArtifacts(it, sessionConversation ?: it) }
-                ?: sessionConversation
-                ?: conversation
-            saveConversation(
-                conversationId,
-                latestConversation.copy(
-                    chatSuggestions = suggestions.take(
-                        10
-                    )
-                )
-            )
+            derivedWorkService.generateSuggestion(conversationId, conversation)
         }.onFailure {
             it.printStackTrace()
         }
