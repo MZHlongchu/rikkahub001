@@ -20,11 +20,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.ui.context.LocalToaster
+import android.widget.Toast
 import me.rerere.rikkahub.utils.writeClipboardText
 import org.koin.compose.koinInject
 
@@ -33,8 +33,7 @@ fun PerformanceDiagnosticsOverlay(
     onOpenDebugPage: () -> Unit,
 ) {
     val controller: PerformanceDiagnosticsController = koinInject()
-    val state by controller.uiState.collectAsStateWithLifecycle()
-    val toaster = LocalToaster.current
+    val state by controller.uiState.collectAsState()
     val context = LocalContext.current
     val report = when (state.activeMode) {
         DetectionMode.Snapshot -> state.lastSnapshotReport
@@ -107,8 +106,8 @@ fun PerformanceDiagnosticsOverlay(
                     FilledTonalButton(
                         onClick = {
                             report?.text?.let {
-                                toaster.show("诊断结果已复制")
                                 context.writeClipboardText(it)
+                                Toast.makeText(context, "诊断结果已复制", Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier.weight(1f),

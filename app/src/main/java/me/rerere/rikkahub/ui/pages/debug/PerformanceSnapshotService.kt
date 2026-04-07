@@ -241,9 +241,8 @@ class PerformanceSnapshotService(
 
     private fun readCpuSnapshot(processPids: List<Int>): CpuSample {
         return CpuSample(
-            totalTicks = readTotalCpuTicks(),
-            appTicks = readProcessCpuTicks(Process.myPid()),
-            processTicks = processPids.associateWith { readProcessCpuTicks(it) },
+            appCpuTimeMs = Process.getElapsedCpuTime(),
+            processCpuTimesMs = processPids.associateWith { readProcessCpuTimeMs(it) },
         )
     }
 
@@ -252,14 +251,13 @@ class PerformanceSnapshotService(
         end: CpuSample,
         durationMs: Long,
     ): CpuComputationResult {
-        val totalDelta = (end.totalTicks - start.totalTicks).coerceAtLeast(1L)
-        val cpuCores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        val appDelta = ((end.appTicks ?: 0L) - (start.appTicks ?: 0L)).coerceAtLeast(0L)
-        val appCpu = (appDelta.toDouble() / totalDelta.toDouble()) * 100.0 * cpuCores
-        val perProcess = end.processTicks.mapValues { (pid, endTicks) ->
-            val startTicks = start.processTicks[pid] ?: 0L
+        val windowMs = durationMs.coerceAtLeast(1L).toDouble()
+        val appDelta = (end.appCpuTimeMs - start.appCpuTimeMs).coerceAtLeast(0L)
+        val appCpu = (appDelta.toDouble() / windowMs) * 100.0
+        val perProcess = end.processCpuTimesMs.mapValues { (pid, endTicks) ->
+            val startTicks = start.processCpuTimesMs[pid] ?: 0L
             ((endTicks ?: 0L) - startTicks).coerceAtLeast(0L).let { delta ->
-                (delta.toDouble() / totalDelta.toDouble()) * 100.0 * cpuCores
+                (delta.toDouble() / windowMs) * 100.0
             }
         }
         return CpuComputationResult(
@@ -270,19 +268,16 @@ class PerformanceSnapshotService(
         )
     }
 
-    private fun readTotalCpuTicks(): Long {
-        val line = File("/proc/stat").useLines { lines -> lines.firstOrNull() }.orEmpty()
-        val fields = line.split(Regex("\\s+")).drop(1)
-        return fields.sumOf { it.toLongOrNull() ?: 0L }
-    }
-
-    private fun readProcessCpuTicks(pid: Int): Long? {
-        val content = runCatching { File("/proc/$pid/stat").readText() }.getOrNull() ?: return null
-        val processSuffix = content.substringAfterLast(") ")
-        val fields = processSuffix.split(' ')
-        val utime = fields.getOrNull(11)?.toLongOrNull() ?: return null
-        val stime = fields.getOrNull(12)?.toLongOrNull() ?: return null
-        return utime + stime
+    private fun readProcessCpuTimeMs(pid: Int): Long? {
+        return runCatching {
+            val content = File("/proc/$pid/stat").readText()
+            val processSuffix = content.substringAfterLast(") ")
+            val fields = processSuffix.split(' ')
+            val utime = fields.getOrNull(11)?.toLongOrNull() ?: return@runCatching null
+            val stime = fields.getOrNull(12)?.toLongOrNull() ?: return@runCatching null
+            // proc stat units are clock ticks. Use a conservative 10ms per tick fallback.
+            ((utime + stime) * 10L)
+        }.getOrNull()
     }
 
     private fun readProcessRssKb(pid: Int): Long? {
@@ -299,9 +294,8 @@ class PerformanceSnapshotService(
     )
 
     private data class CpuSample(
-        val totalTicks: Long,
-        val appTicks: Long?,
-        val processTicks: Map<Int, Long?>,
+        val appCpuTimeMs: Long,
+        val processCpuTimesMs: Map<Int, Long?>,
     )
 
     private data class CpuComputationResult(

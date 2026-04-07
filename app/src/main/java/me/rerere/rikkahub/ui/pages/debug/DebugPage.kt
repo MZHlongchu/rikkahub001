@@ -149,25 +149,12 @@ private fun MainPage(vm: DebugVM) {
             ) {
                 Text(if (diagnosticsState.overlayVisible) "关闭悬浮窗" else "开启悬浮窗")
             }
-            Button(
-                onClick = { vm.runDetection(DetectionMode.Snapshot) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("快照检测")
-            }
-            Button(
-                onClick = { vm.runDetection(DetectionMode.Deep) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("深度检测")
-            }
         }
-        diagnosticsState.currentReport?.let {
-            Text(
-                text = "${it.title} ${it.capturedAtLabel}",
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
+        Text(
+            text = "检测按钮只在小悬浮窗点开后的面板里提供。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         diagnosticsState.lastError?.let {
             Text(
                 text = "诊断错误: $it",
