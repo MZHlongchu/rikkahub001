@@ -32,6 +32,8 @@ import kotlinx.serialization.json.JsonObject
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.ai.TOOL_IMAGE_SOURCE_MCP_TOOL
+import me.rerere.rikkahub.data.ai.buildToolImageMetadata
 import me.rerere.rikkahub.data.ai.mcp.transport.SseClientTransport
 import me.rerere.rikkahub.data.ai.mcp.transport.StreamableHttpClientTransport
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -158,11 +160,15 @@ class McpManager(
             ),
             options = RequestOptions(timeout = 120.seconds),
         )
-        return result.content.map {
-            when(it) {
-                is TextContent -> UIMessagePart.Text(it.text)
-                is ImageContent -> convertImageContentToFilePart(it)
-                else -> UIMessagePart.Text(JsonInstant.encodeToString(it))
+        return result.content.mapIndexed { index, content ->
+            when(content) {
+                is TextContent -> UIMessagePart.Text(content.text)
+                is ImageContent -> convertImageContentToFilePart(
+                    image = content,
+                    toolName = tool.name,
+                    imageIndex = index + 1,
+                )
+                else -> UIMessagePart.Text(JsonInstant.encodeToString(content))
             }
         }
     }
@@ -187,16 +193,24 @@ class McpManager(
             ),
             options = RequestOptions(timeout = 120.seconds),
         )
-        return result.content.map {
-            when (it) {
-                is TextContent -> UIMessagePart.Text(it.text)
-                is ImageContent -> convertImageContentToFilePart(it)
-                else -> UIMessagePart.Text(JsonInstant.encodeToString(it))
+        return result.content.mapIndexed { index, content ->
+            when (content) {
+                is TextContent -> UIMessagePart.Text(content.text)
+                is ImageContent -> convertImageContentToFilePart(
+                    image = content,
+                    toolName = tool.name,
+                    imageIndex = index + 1,
+                )
+                else -> UIMessagePart.Text(JsonInstant.encodeToString(content))
             }
         }
     }
 
-    private suspend fun convertImageContentToFilePart(image: ImageContent): UIMessagePart.Image {
+    private suspend fun convertImageContentToFilePart(
+        image: ImageContent,
+        toolName: String,
+        imageIndex: Int,
+    ): UIMessagePart.Image {
         val bytes = Base64.decode(image.data)
         val ext = android.webkit.MimeTypeMap.getSingleton()
             .getExtensionFromMimeType(image.mimeType) ?: "bin"
@@ -207,7 +221,14 @@ class McpManager(
         )
         val uri = filesManager.getFile(entity).toUri()
         Log.i(TAG, "convertImageContentToFilePart: saved mcp image to $uri")
-        return UIMessagePart.Image(url = uri.toString())
+        return UIMessagePart.Image(
+            url = uri.toString(),
+            metadata = buildToolImageMetadata(
+                imageSource = TOOL_IMAGE_SOURCE_MCP_TOOL,
+                toolName = toolName,
+                imageIndex = imageIndex,
+            )
+        )
     }
 
     private fun getTransport(config: McpServerConfig): AbstractTransport = when (config) {

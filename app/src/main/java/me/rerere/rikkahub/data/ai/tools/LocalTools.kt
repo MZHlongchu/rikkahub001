@@ -15,6 +15,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.TOOL_IMAGE_SOURCE_CONTAINER_TOOL
+import me.rerere.rikkahub.data.ai.buildToolImageMetadata
 import me.rerere.rikkahub.data.ai.subagent.SubAgentProgressManager
 import me.rerere.rikkahub.data.ai.subagent.SubAgentResult
 import me.rerere.rikkahub.data.event.AppEvent
@@ -382,7 +384,8 @@ class LocalTools(
 【工作目录】默认在 /workspace 下工作。/workspace 映射到当前对话的沙箱目录，用户在文件管理器中可见；后续命令应尽量在 /workspace 内操作，创建、修改、下载、解压出的用户文件也应优先放在这里。除非有明确理由，不要把项目文件放到 /root、/tmp、/usr/local 或其他 /workspace 之外的位置。
 【Skills】本地技能库挂载在 /skills。若用户要求创建或更新可复用 skill，应在 /skills/<directory>/ 下写入合规 skill 包，其中 SKILL.md frontmatter 至少包含 name 和 description。
 【交付】需要展示或交付给用户的最终文件请写入 /delivery。工具返回结果中的 delivery_items 会列出本轮新交付文件及其 render_url。
-【图片交付】如果 delivery_items 中出现图片文件，想让聊天界面显示图片时，必须在你的正文中使用 Markdown 图片语法引用对应 render_url，例如 ![chart](render_url)。不要只说“图片已生成”而不插入链接。
+【图片展示】凡是工具结果里提供了可展示图片 URL（例如 delivery_items[*].render_url 或 container_view_image 返回的 render_url），想让聊天界面直接显示图片时，必须在你的正文中使用 Markdown 图片语法引用该 URL，例如 ![chart](url)。不要只说“图片已生成”而不插入链接。
+【看图自检】如果你需要自己回看 /workspace、/delivery、/root、/usr/local 下生成的图片内容，请调用 container_view_image，而不是只返回路径字符串。
 【非图片交付】zip、pdf、csv、json 等非图片文件会显示为本轮助手消息下方的附件，无需再手写下载说明。
 【重要】安装开发工具：使用 apk add 安装（如 apk add python3、apk add nodejs npm、apk add g++ 等）。所有开发工具都应通过 apk 包管理器安装，不要尝试解压 ZIP 包。
 【Node.js & npm】已自动修复 PRoot 兼容性，安装后可直接使用：
@@ -650,8 +653,9 @@ class LocalTools(
     fun createContainerViewImageTool(sandboxId: Uuid): Tool {
         return Tool(
             name = "container_view_image",
-            description = """读取容器中的图片文件，并把真实图片内容返回给模型。
-支持任意容器可读路径；相对路径默认按 /workspace 解析。""".trimIndent(),
+            description = """读取容器中的图片文件，把真实图片内容返回给模型，并返回一个可展示给用户的 render_url。
+支持任意容器可读路径；相对路径默认按 /workspace 解析。
+如果工具结果里有 render_url，想让聊天界面直接显示这张图片，请在正文中用 Markdown 图片语法引用它，例如 ![preview](render_url)。""".trimIndent(),
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -720,16 +724,25 @@ class LocalTools(
                     )
                 }
 
+                val renderUrl = Uri.fromFile(exportedFile).toString()
                 listOf(
                     UIMessagePart.Text(
                         buildJsonObject {
                             put("success", JsonPrimitive(true))
                             put("path", JsonPrimitive(resolvedPath))
                             put("hostPath", JsonPrimitive(exportedFile.absolutePath))
+                            put("render_url", JsonPrimitive(renderUrl))
                             put("size", JsonPrimitive(exportedFile.length()))
                         }.toString()
                     ),
-                    UIMessagePart.Image(url = Uri.fromFile(exportedFile).toString())
+                    UIMessagePart.Image(
+                        url = renderUrl,
+                        metadata = buildToolImageMetadata(
+                            imageSource = TOOL_IMAGE_SOURCE_CONTAINER_TOOL,
+                            toolName = "container_view_image",
+                            imageIndex = 1,
+                        )
+                    )
                 )
             }
         )
