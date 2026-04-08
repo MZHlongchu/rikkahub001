@@ -1550,16 +1550,32 @@ fi
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
         env: Map<String, String> = emptyMap()
     ): ExecutionResult = withContext(Dispatchers.IO) {
-        try {
-            val container = globalContainer
-                ?: return@withContext ExecutionResult(
-                    exitCode = -1,
-                    stdout = "",
-                    stderr = "Global container not created"
+        val container = globalContainer
+            ?: return@withContext ExecutionResult(
+                exitCode = -1,
+                stdout = "",
+                stderr = "Global container not created"
+            )
+        val processEnvSnapshot = linkedMapOf<String, String>().apply {
+            putAll(env)
+        }
+        val prootCmd = try {
+            buildProotCommand(sandboxId, command, env, container)
+        } catch (e: Exception) {
+            return@withContext ExecutionResult(
+                exitCode = -1,
+                stdout = "",
+                stderr = withExecutionDiagnostics(
+                    stderr = formatContainerError(e),
+                    sandboxId = sandboxId,
+                    command = command,
+                    prootCmd = command,
+                    processEnv = processEnvSnapshot,
+                    container = container
                 )
-
-            val prootCmd = buildProotCommand(sandboxId, command, env, container)
-
+            )
+        }
+        try {
             // 执行命令
             val processBuilder = ProcessBuilder(prootCmd)
             processBuilder.redirectErrorStream(false) // 分离 stdout 和 stderr
@@ -1567,6 +1583,8 @@ fi
             // 设置环境变量
             val processEnv = processBuilder.environment()
             setupProcessEnvironment(processEnv, env)
+            processEnvSnapshot.clear()
+            processEnvSnapshot.putAll(processEnv)
 
             Log.d(TAG, "[ExecInContainer] ========== Executing command ==========")
             Log.d(TAG, "[ExecInContainer] Command: $command")
@@ -1630,10 +1648,18 @@ fi
                         currentProcess = null
                     }
                 }
+                val timeoutStderr = stderrBuilder.toString() + "\nExecution timed out after ${timeoutMs}ms"
                 return@withContext ExecutionResult(
                     exitCode = -1,
                     stdout = stdoutBuilder.toString(),
-                    stderr = stderrBuilder.toString() + "\nExecution timed out after ${timeoutMs}ms"
+                    stderr = withExecutionDiagnostics(
+                        stderr = timeoutStderr,
+                        sandboxId = sandboxId,
+                        command = command,
+                        prootCmd = prootCmd,
+                        processEnv = processEnv,
+                        container = container
+                    )
                 )
             }
 
@@ -1646,10 +1672,22 @@ fi
                 }
             }
 
+            val rawStderr = stderrBuilder.toString().trim()
             val result = ExecutionResult(
                 exitCode = exitCode,
                 stdout = stdoutBuilder.toString().trim(),
-                stderr = stderrBuilder.toString().trim()
+                stderr = if (exitCode == 0) {
+                    rawStderr
+                } else {
+                    withExecutionDiagnostics(
+                        stderr = rawStderr,
+                        sandboxId = sandboxId,
+                        command = command,
+                        prootCmd = prootCmd,
+                        processEnv = processEnv,
+                        container = container
+                    )
+                }
             )
 
             Log.d(TAG, "[ExecInContainer] ========== Execution completed ==========")
@@ -1666,7 +1704,14 @@ fi
             ExecutionResult(
                 exitCode = -1,
                 stdout = "",
-                stderr = "Execution error: ${e.message}"
+                stderr = withExecutionDiagnostics(
+                    stderr = formatContainerError(e),
+                    sandboxId = sandboxId,
+                    command = command,
+                    prootCmd = prootCmd,
+                    processEnv = processEnvSnapshot,
+                    container = container
+                )
             )
         }
     }
@@ -2091,6 +2136,111 @@ fi
             .filter { it.isFile }
             .map { it.length() }
             .sum()
+    }
+
+    private fun buildExecutionDiagnostics(
+        sandboxId: String,
+        command: List<String>,
+        prootCmd: List<String>,
+        processEnv: Map<String, String>,
+        container: ContainerState,
+    ): String {
+        val diagnostics = buildString {
+            appendLine()
+            appendLine("=== Container Execution Diagnostics ===")
+            appendLine("sandboxId=$sandboxId")
+            appendLine("command=${command.joinToString(" ")}")
+            appendLine("prootCmd=${prootCmd.joinToString(" ")}")
+            appendLine("containerSystemDir=${container.systemDir}")
+            appendLine("rootfsDir=${rootfsDir.absolutePath}")
+            appendLine("systemLayerDir=${systemLayerDir.absolutePath}")
+            appendLine("rootfsNeedsUpdate=${checkRootfsNeedsUpdate()}")
+            appendLine("env.HOME=${processEnv["HOME"] ?: "<missing>"}")
+            appendLine("env.TMPDIR=${processEnv["TMPDIR"] ?: "<missing>"}")
+            appendLine("env.PROOT_TMP_DIR=${processEnv["PROOT_TMP_DIR"] ?: "<missing>"}")
+            appendLine("env.PREFIX=${processEnv["PREFIX"] ?: "<missing>"}")
+            appendLine("env.PATH=${processEnv["PATH"] ?: "<missing>"}")
+            appendLine("env.LD_PRELOAD=${processEnv["LD_PRELOAD"] ?: "<unset>"}")
+            appendLine(describeHostPath("prootBinary", File(prootDir, "proot")))
+            appendLine(describeHostPath("prootTmpDir", File(processEnv["PROOT_TMP_DIR"] ?: "")))
+            appendLine(describeHostPath("rootfs/bin/sh", File(rootfsDir, "bin/sh")))
+            appendLine(describeHostPath("rootfs/bin/busybox", File(rootfsDir, "bin/busybox")))
+            appendLine(describeHostPath("rootfs/lib/ld-musl-aarch64.so.1", File(rootfsDir, "lib/ld-musl-aarch64.so.1")))
+            appendLine(describeHostPath("system/bin/sh", File(container.systemDir, "bin/sh")))
+            appendLine(describeHostPath("system/bin/busybox", File(container.systemDir, "bin/busybox")))
+            appendLine(describeHostPath("system/lib/ld-musl-aarch64.so.1", File(container.systemDir, "lib/ld-musl-aarch64.so.1")))
+            appendLine(describeHostPath("workspace", File(context.filesDir, "sandboxes/$sandboxId")))
+            appendLine(describeHostPath("delivery", SandboxEngine.getDeliveryDir(context, sandboxId)))
+        }
+        return diagnostics.trimEnd()
+    }
+
+    private fun describeHostPath(label: String, file: File): String {
+        if (file.path.isBlank()) {
+            return "$label=<blank>"
+        }
+
+        val path = file.toPath().toAbsolutePath().normalize()
+        val exists = Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+        if (!exists) {
+            return "$label path=$path exists=false"
+        }
+
+        val isSymlink = Files.isSymbolicLink(path)
+        val symlinkTarget = if (isSymlink) {
+            runCatching { Files.readSymbolicLink(path).toString() }.getOrElse { "<read-failed:${it.javaClass.simpleName}>" }
+        } else {
+            null
+        }
+
+        return buildString {
+            append(label)
+            append(" path=")
+            append(path)
+            append(" exists=true")
+            append(" dir=")
+            append(file.isDirectory)
+            append(" file=")
+            append(file.isFile)
+            append(" size=")
+            append(if (file.isFile) file.length() else 0L)
+            append(" canRead=")
+            append(file.canRead())
+            append(" canWrite=")
+            append(file.canWrite())
+            append(" canExecute=")
+            append(file.canExecute())
+            append(" symlink=")
+            append(isSymlink)
+            if (symlinkTarget != null) {
+                append(" target=")
+                append(symlinkTarget)
+            }
+        }
+    }
+
+    private fun withExecutionDiagnostics(
+        stderr: String,
+        sandboxId: String,
+        command: List<String>,
+        prootCmd: List<String>,
+        processEnv: Map<String, String>,
+        container: ContainerState,
+    ): String {
+        val diagnostics = buildExecutionDiagnostics(
+            sandboxId = sandboxId,
+            command = command,
+            prootCmd = prootCmd,
+            processEnv = processEnv,
+            container = container
+        )
+
+        return buildString {
+            append(stderr.trimEnd())
+            appendLine()
+            appendLine()
+            append(diagnostics)
+        }.trim()
     }
 
     // ==================== Auto Management ====================
