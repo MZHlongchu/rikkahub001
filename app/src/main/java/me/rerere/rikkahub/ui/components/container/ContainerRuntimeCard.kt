@@ -24,6 +24,8 @@ fun ContainerRuntimeCard(
             Pair("运行中", MaterialTheme.colorScheme.primary)
         is ContainerStateEnum.Stopped ->
             Pair("已停止", MaterialTheme.colorScheme.onSurfaceVariant)
+        is ContainerStateEnum.NeedsRebuild ->
+            Pair("需重建", MaterialTheme.colorScheme.error)
         is ContainerStateEnum.Error ->
             Pair("错误", MaterialTheme.colorScheme.error)
     }

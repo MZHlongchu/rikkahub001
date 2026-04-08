@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import me.rerere.rikkahub.data.container.ContainerInventorySnapshot
 import me.rerere.rikkahub.data.container.ContainerStateEnum
 import me.rerere.rikkahub.data.container.PRootManager
 
@@ -48,23 +49,27 @@ fun ContainerManagerSheet(
     val containerState by prootManager.containerState.collectAsStateWithLifecycle()
 
     // 统计信息（仅 Running/Stopped 状态显示）
-    var installedPackages by remember { mutableStateOf<List<String>>(emptyList()) }
-    var containerSize by remember { mutableStateOf(0L) }
+    var inventory by remember { mutableStateOf(ContainerInventorySnapshot()) }
 
     // 销毁确认弹窗
     var showDestroyConfirm by remember { mutableStateOf(false) }
 
     // 加载统计信息
     LaunchedEffect(containerState) {
-        if (containerState is ContainerStateEnum.Running || containerState is ContainerStateEnum.Stopped) {
+        if (
+            containerState is ContainerStateEnum.Running ||
+            containerState is ContainerStateEnum.Stopped ||
+            containerState is ContainerStateEnum.NeedsRebuild
+        ) {
             try {
-                installedPackages = prootManager.getInstalledPackages()
-                containerSize = prootManager.getContainerSize()
+                inventory = prootManager.getInstalledPackages()
             } catch (e: Exception) {
-                // 统计信息加载失败，使用默认值
-                installedPackages = emptyList()
-                containerSize = 0L
+                inventory = ContainerInventorySnapshot(
+                    containerSizeBytes = prootManager.getContainerSize()
+                )
             }
+        } else {
+            inventory = ContainerInventorySnapshot()
         }
     }
 
@@ -150,6 +155,20 @@ fun ContainerManagerSheet(
                             }
                         )
                     }
+                    is ContainerStateEnum.NeedsRebuild -> {
+                        val reason = (containerState as ContainerStateEnum.NeedsRebuild).reason
+                        NeedsRebuildCard(
+                            reason = reason,
+                            onRebuild = {
+                                scope.launch {
+                                    prootManager.rebuildPreservingWorkspaces()
+                                }
+                            },
+                            onDestroy = {
+                                showDestroyConfirm = true
+                            }
+                        )
+                    }
                     is ContainerStateEnum.Error -> {
                         val message = (containerState as ContainerStateEnum.Error).message
                         ErrorCard(
@@ -164,11 +183,14 @@ fun ContainerManagerSheet(
                 }
 
                 // 统计信息（Running/Stopped 状态）
-                if (containerState is ContainerStateEnum.Running || containerState is ContainerStateEnum.Stopped) {
+                if (
+                    containerState is ContainerStateEnum.Running ||
+                    containerState is ContainerStateEnum.Stopped ||
+                    containerState is ContainerStateEnum.NeedsRebuild
+                ) {
                     Spacer(modifier = Modifier.height(24.dp))
                     StatsSection(
-                        packages = installedPackages,
-                        size = containerSize
+                        inventory = inventory
                     )
                 }
 
@@ -178,8 +200,9 @@ fun ContainerManagerSheet(
                     text = when (containerState) {
                         is ContainerStateEnum.NotInitialized -> "容器环境提供完整的 Linux 运行环境，支持 pip 安装任意 Python 包"
                         is ContainerStateEnum.Initializing -> "正在准备环境，请稍候..."
-                        is ContainerStateEnum.Running -> "容器运行中，AI 可以使用 container_python/container_shell 工具"
-                        is ContainerStateEnum.Stopped -> "容器已停止，依赖保留，可快速重启"
+                        is ContainerStateEnum.Running -> "容器运行中，AI 可以使用 container_python/container_shell 工具，系统层改动会持久保留"
+                        is ContainerStateEnum.Stopped -> "容器已停止，工作区与系统层都会保留，可快速重启"
+                        is ContainerStateEnum.NeedsRebuild -> "检测到旧版或残缺系统层，需要重建后才能继续可靠使用 apk add 与工具安装"
                         is ContainerStateEnum.Error -> "初始化失败，请检查网络连接后重试"
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -209,7 +232,7 @@ fun ContainerManagerSheet(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• npm 在容器环境中不可用（上游 bug，截至 2026 年未修复）\n• 推荐使用：Python/pip、Go/mod、Rust/cargo、Java/Maven",
+                            text = "• npm 在容器环境中仍不稳定，不作为主推荐路径\n• 重建或销毁仅清空容器系统层，保留 workspace、delivery、skills",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -228,9 +251,9 @@ fun ContainerManagerSheet(
             title = { Text("销毁容器环境？") },
             text = {
                 Text(
-                    "这将删除所有已安装的 Python 依赖包（numpy、pandas 等）\n\n" +
-                    "基础系统文件会保留，下次使用需要重新准备环境。\n\n" +
-                    "注意：其他开发工具可通过 apk 安装（如 go、rust、openjdk），但 npm 不可用。"
+                    "这将删除容器系统层与已安装工具，包括 apk 包、pip 包和 /root 下的运行时内容。\n\n" +
+                    "会保留 workspace、delivery 和全局 skills。\n\n" +
+                    "重建后如需开发工具，需要重新安装。"
                 )
             },
             confirmButton = {
@@ -265,9 +288,11 @@ private fun StatusDisplay(state: ContainerStateEnum) {
         is ContainerStateEnum.Initializing ->
             Quadruple("⏳", "准备中", "正在下载环境...", MaterialTheme.colorScheme.tertiary)
         is ContainerStateEnum.Running ->
-            Quadruple("🐧", "运行中", "Alpine Linux • Python 3.11", MaterialTheme.colorScheme.primary)
+            Quadruple("🐧", "运行中", "Alpine Linux • 可写系统层", MaterialTheme.colorScheme.primary)
         is ContainerStateEnum.Stopped ->
-            Quadruple("⚫", "已停止", "依赖保留，可快速重启", MaterialTheme.colorScheme.onSurfaceVariant)
+            Quadruple("⚫", "已停止", "系统层保留，可快速重启", MaterialTheme.colorScheme.onSurfaceVariant)
+        is ContainerStateEnum.NeedsRebuild ->
+            Quadruple("🧱", "需要重建", "旧布局或系统层不兼容", MaterialTheme.colorScheme.error)
         is ContainerStateEnum.Error ->
             Quadruple("⚠️", "错误", "初始化失败", MaterialTheme.colorScheme.error)
     }
@@ -511,6 +536,73 @@ private fun StoppedCard(
 }
 
 @Composable
+private fun NeedsRebuildCard(
+    reason: String,
+    onRebuild: () -> Unit,
+    onDestroy: () -> Unit,
+) {
+    Column {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onRebuild),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "重建容器系统层",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onDestroy),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "🗑️",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = "改为销毁容器系统层",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ErrorCard(message: String, onRetry: () -> Unit) {
     Card(
         modifier = Modifier
@@ -543,7 +635,7 @@ private fun ErrorCard(message: String, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun StatsSection(packages: List<String>, size: Long) {
+private fun StatsSection(inventory: ContainerInventorySnapshot) {
     Column {
         Text(
             text = "统计信息",
@@ -555,18 +647,26 @@ private fun StatsSection(packages: List<String>, size: Long) {
         // 容器大小
         StatItem(
             label = "容器大小",
-            value = formatSize(size)
+            value = formatSize(inventory.containerSizeBytes)
         )
 
-        // 已安装包
-        if (packages.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            StatItem(
-                label = "已安装依赖",
-                value = packages.take(5).joinToString(", ") +
-                    if (packages.size > 5) " 等 ${packages.size} 个" else ""
-            )
-        }
+        Spacer(modifier = Modifier.height(8.dp))
+        StatItem(
+            label = "布局版本",
+            value = inventory.layoutVersion?.toString() ?: "unknown"
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        StatItem(
+            label = "apk 包",
+            value = summarizePackages(inventory.apkPackages)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        StatItem(
+            label = "Python 包",
+            value = summarizePackages(inventory.pythonPackages)
+        )
     }
 }
 
@@ -599,4 +699,10 @@ private fun formatSize(size: Long): String {
         size < 1024 * 1024 * 1024 -> String.format("%.2f MB", size / (1024.0 * 1024.0))
         else -> String.format("%.2f GB", size / (1024.0 * 1024.0 * 1024.0))
     }
+}
+
+private fun summarizePackages(packages: List<String>): String {
+    if (packages.isEmpty()) return "none"
+    return packages.take(5).joinToString(", ") +
+        if (packages.size > 5) " 等 ${packages.size} 个" else ""
 }

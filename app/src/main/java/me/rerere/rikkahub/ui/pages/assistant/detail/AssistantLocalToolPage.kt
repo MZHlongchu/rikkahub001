@@ -1770,6 +1770,18 @@ private fun ContainerStatusCard() {
                         }
                     }
                 }
+                is me.rerere.rikkahub.data.container.ContainerStateEnum.NeedsRebuild -> {
+                    Text("需要重建: ${state.reason}", color = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { scope.launch { prootManager.rebuildPreservingWorkspaces() } }) {
+                            Text("重建")
+                        }
+                        TextButton(onClick = { scope.launch { prootManager.destroy() } }) {
+                            Text("销毁", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
                 is me.rerere.rikkahub.data.container.ContainerStateEnum.Error -> {
                     Text("初始化失败: ${state.message}", color = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.height(8.dp))

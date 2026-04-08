@@ -20,6 +20,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Singleton
 import me.rerere.rikkahub.data.files.FileFolders
@@ -58,14 +62,23 @@ class PRootManager(
         private const val DEFAULT_MAX_MEMORY_MB = 6144  // 6GB for compilation tasks
 
         // Rootfs 版本控制 - 每次更新 alpine rootfs 时递增此版本号
-        private const val ROOTFS_VERSION = 1
+        private const val ROOTFS_VERSION = 2
         private const val ROOTFS_VERSION_FILE = "rootfs_version.txt"
+        private const val ALPINE_ROOTFS_VERSION = "3.23.3"
+        private const val ALPINE_ROOTFS_ASSET = "rootfs/alpine-minirootfs-$ALPINE_ROOTFS_VERSION-aarch64.tar.gz"
+        private const val LAYOUT_VERSION = 2
+        private const val LAYOUT_VERSION_FILE = "layout_version.txt"
     }
 
     // 目录
     private val prootDir: File by lazy { File(context.filesDir, "proot") }
     private val rootfsDir: File by lazy { File(context.filesDir, "rootfs") }
     private val containerDir: File by lazy { File(context.filesDir, "container") }
+    private val systemLayerDir: File by lazy { File(containerDir, "system-v$LAYOUT_VERSION") }
+    private val legacyUpperDir: File by lazy { File(containerDir, "upper") }
+    private val legacyWorkDir: File by lazy { File(containerDir, "work") }
+    private val containerConfigDir: File by lazy { File(containerDir, "config") }
+    private val layoutVersionFile: File by lazy { File(containerDir, LAYOUT_VERSION_FILE) }
 
     // 全局容器状态
     private var globalContainer: ContainerState? = null
@@ -89,11 +102,10 @@ class PRootManager(
      */
     fun getUpperDir(): String? {
         // 优先使用 globalContainer 的路径（如果已创建）
-        globalContainer?.upperDir?.let { return it }
+        globalContainer?.systemDir?.let { return it }
 
-        // App 重启后 globalContainer 为 null，直接检查目录
-        val upperDir = File(containerDir, "upper")
-        return if (upperDir.exists()) upperDir.absolutePath else null
+        // App 重启后 globalContainer 为 null，直接检查当前布局目录
+        return if (systemLayerDir.exists()) systemLayerDir.absolutePath else null
     }
 
     // 自动管理标志
@@ -128,14 +140,86 @@ class PRootManager(
         return prootBinary.exists() && rootfsValid
     }
 
+    private fun requiredSystemPaths(): List<String> = listOf(
+        "bin",
+        "sbin",
+        "etc",
+        "lib",
+        "root",
+        "tmp",
+        "usr",
+        "usr/bin",
+        "usr/lib",
+        "usr/local",
+        "var",
+        "var/cache",
+        "var/cache/apk",
+        "var/lib",
+        "lib/apk",
+        "lib/apk/db",
+        "etc/apk",
+    )
+
+    private fun inspectLayoutStatus(): ContainerLayoutStatus {
+        val version = layoutVersionFile.takeIf { it.exists() }
+            ?.readText()
+            ?.trim()
+            ?.toIntOrNull()
+        val hasCurrentLayout = systemLayerDir.exists()
+        val hasLegacyLayout = legacyUpperDir.exists() || legacyWorkDir.exists()
+        val hasRuntimeArtifacts = containerConfigDir.exists() || hasCurrentLayout || hasLegacyLayout || version != null
+        val compatible = version == LAYOUT_VERSION &&
+            hasCurrentLayout &&
+            requiredSystemPaths().all { relative -> File(systemLayerDir, relative).exists() }
+
+        return when {
+            compatible -> ContainerLayoutStatus(
+                version = version,
+                compatible = true,
+                hasLegacyLayout = hasLegacyLayout,
+                hasCurrentLayout = true,
+            )
+
+            hasLegacyLayout -> ContainerLayoutStatus(
+                version = version,
+                needsRebuild = true,
+                reason = "Detected legacy container layout. Rebuild is required.",
+                hasLegacyLayout = true,
+                hasCurrentLayout = hasCurrentLayout,
+            )
+
+            hasRuntimeArtifacts -> ContainerLayoutStatus(
+                version = version,
+                needsRebuild = true,
+                reason = "Detected incomplete or incompatible container system layer.",
+                hasLegacyLayout = false,
+                hasCurrentLayout = hasCurrentLayout,
+            )
+
+            else -> ContainerLayoutStatus(
+                version = version,
+                compatible = false,
+                needsRebuild = false,
+            )
+        }
+    }
+
+    private fun writeLayoutVersion() {
+        layoutVersionFile.parentFile?.mkdirs()
+        layoutVersionFile.writeText(LAYOUT_VERSION.toString())
+    }
+
     /**
      * 初始化 PRoot 环境（下载/解压资源）
      * 从 NotInitialized → Initializing → Running
      */
     suspend fun initialize(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            if (_containerState.value != ContainerStateEnum.NotInitialized) {
-                return@withContext Result.failure(IllegalStateException("Already initialized or initializing"))
+            if (_containerState.value is ContainerStateEnum.Initializing) {
+                return@withContext Result.failure(IllegalStateException("Already initializing"))
+            }
+            if (_containerState.value == ContainerStateEnum.Running) {
+                return@withContext Result.success(Unit)
             }
             
             Log.d(TAG, "Starting container initialization...")
@@ -162,6 +246,10 @@ class PRootManager(
             Log.d(TAG, "Alpine rootfs extracted successfully")
             
             _containerState.value = ContainerStateEnum.Initializing(0.8f)
+
+            // 旧布局或残缺布局必须先清理，避免假恢复后继续污染新系统层
+            clearContainerRuntimeLayers(preserveRootfs = true)
+            seedSystemLayer()
             
             // 创建全局容器
             Log.d(TAG, "Creating global container...")
@@ -592,7 +680,7 @@ if (target) {
 """.trimStart()
 
                 // 在 host 层写入 npm/npx 包装脚本（heredoc 方式，不经过 execve 参数）
-                val upperLocalBin = File(containerDir, "upper/usr/local/bin")
+                val upperLocalBin = File(systemLayerDir, "usr/local/bin")
                 upperLocalBin.mkdirs()
 
                 File(upperLocalBin, "npm").apply {
@@ -649,6 +737,7 @@ fi
                 Log.w(TAG, "Failed to repair node/npm paths", e)
             }
 
+            writeLayoutVersion()
             _containerState.value = ContainerStateEnum.Running
             Log.d(TAG, "Container initialization completed successfully!")
             Result.success(Unit)
@@ -677,18 +766,26 @@ fi
                     return@withContext initialize()
                 }
                 is ContainerStateEnum.Stopped -> {
+                    val layoutStatus = inspectLayoutStatus()
+                    if (!layoutStatus.compatible) {
+                        _containerState.value = ContainerStateEnum.NeedsRebuild(
+                            layoutStatus.reason ?: "Container layout is incompatible. Rebuild is required."
+                        )
+                        return@withContext Result.failure(IllegalStateException("Container layout requires rebuild"))
+                    }
                     // 从停止状态恢复
                     if (globalContainer == null) {
                         createGlobalContainer()
                     } else {
-                        // 确保子目录存在（以防万一目录被删除）
-                        val upperDir = File(containerDir, "upper")
-                        File(upperDir, "usr/local").apply { mkdirs() }
-                        File(upperDir, "usr/lib").apply { mkdirs() }
-                        File(upperDir, "root").apply { mkdirs() }
+                        requiredSystemPaths().forEach { relative ->
+                            File(systemLayerDir, relative).mkdirs()
+                        }
                     }
                     _containerState.value = ContainerStateEnum.Running
                     return@withContext Result.success(Unit)
+                }
+                is ContainerStateEnum.NeedsRebuild -> {
+                    return@withContext Result.failure(IllegalStateException("Container rebuild required"))
                 }
                 is ContainerStateEnum.Error -> {
                     // 错误后重试，需要重新初始化
@@ -716,6 +813,7 @@ fi
                 currentProcess?.destroyForcibly()
                 currentProcess = null
             }
+            killTrackedBackgroundProcesses()
 
             _containerState.value = ContainerStateEnum.Stopped
             Result.success(Unit)
@@ -726,7 +824,7 @@ fi
 
     /**
      * 销毁容器（任意状态 → NotInitialized）
-     * 删除 upper 层和 rootfs，需要重新初始化
+     * 删除容器系统层与运行时层，但保留 workspace / delivery / skills。
      */
     suspend fun destroy(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -735,35 +833,29 @@ fi
                 currentProcess?.destroyForcibly()
                 currentProcess = null
             }
-
-            // 删除 upper 层（可写层）
-            val upperDir = File(containerDir, "upper")
-            if (upperDir.exists()) {
-                upperDir.deleteRecursively()
-            }
-
-            // 删除 work 目录（OverlayFS 工作目录）
-            val workDir = File(containerDir, "work")
-            if (workDir.exists()) {
-                workDir.deleteRecursively()
-            }
-
-            // 删除 rootfs（只读层）- 彻底重置，防止污染
-            if (rootfsDir.exists()) {
-                rootfsDir.deleteRecursively()
-                Log.d(TAG, "Rootfs deleted for complete reset")
-            }
-
-            // 清理可能残留的开发工具配置文件
-            val configDir = File(context.filesDir, "container/config")
-            if (configDir.exists()) {
-                configDir.deleteRecursively()
-            }
+            killTrackedBackgroundProcesses()
+            clearContainerRuntimeLayers(preserveRootfs = true)
 
             globalContainer = null
             _containerState.value = ContainerStateEnum.NotInitialized
-            Log.d(TAG, "Container destroyed completely")
+            Log.d(TAG, "Container runtime destroyed, workspaces and skills preserved")
             Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rebuildPreservingWorkspaces(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            processMutex.withLock {
+                currentProcess?.destroyForcibly()
+                currentProcess = null
+            }
+            killTrackedBackgroundProcesses()
+            clearContainerRuntimeLayers(preserveRootfs = true)
+            globalContainer = null
+            _containerState.value = ContainerStateEnum.NotInitialized
+            initialize()
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -995,22 +1087,57 @@ fi
         SandboxEngine.resolveHostFileForContainerPath(context, sandboxId, normalizedPath)?.let { return it }
 
         return when {
-            normalizedPath == "/root" -> File(containerDir, "upper/root")
+            normalizedPath == "/bin" -> File(systemLayerDir, "bin")
+            normalizedPath.startsWith("/bin/") -> {
+                resolveChildPath(File(systemLayerDir, "bin"), normalizedPath.removePrefix("/bin/"))
+            }
+
+            normalizedPath == "/sbin" -> File(systemLayerDir, "sbin")
+            normalizedPath.startsWith("/sbin/") -> {
+                resolveChildPath(File(systemLayerDir, "sbin"), normalizedPath.removePrefix("/sbin/"))
+            }
+
+            normalizedPath == "/root" -> File(systemLayerDir, "root")
             normalizedPath.startsWith("/root/") -> {
-                resolveChildPath(File(containerDir, "upper/root"), normalizedPath.removePrefix("/root/"))
+                resolveChildPath(File(systemLayerDir, "root"), normalizedPath.removePrefix("/root/"))
             }
 
-            normalizedPath == "/usr/local" -> File(containerDir, "upper/usr/local")
+            normalizedPath == "/tmp" -> File(systemLayerDir, "tmp")
+            normalizedPath.startsWith("/tmp/") -> {
+                resolveChildPath(File(systemLayerDir, "tmp"), normalizedPath.removePrefix("/tmp/"))
+            }
+
+            normalizedPath == "/usr" -> File(systemLayerDir, "usr")
+            normalizedPath.startsWith("/usr/") -> {
+                resolveChildPath(File(systemLayerDir, "usr"), normalizedPath.removePrefix("/usr/"))
+            }
+
+            normalizedPath == "/usr/local" -> File(systemLayerDir, "usr/local")
             normalizedPath.startsWith("/usr/local/") -> {
-                resolveChildPath(File(containerDir, "upper/usr/local"), normalizedPath.removePrefix("/usr/local/"))
+                resolveChildPath(File(systemLayerDir, "usr/local"), normalizedPath.removePrefix("/usr/local/"))
             }
 
-            normalizedPath == "/usr/lib" -> File(containerDir, "upper/usr/lib")
+            normalizedPath == "/usr/lib" -> File(systemLayerDir, "usr/lib")
             normalizedPath.startsWith("/usr/lib/") -> {
-                resolveChildPath(File(containerDir, "upper/usr/lib"), normalizedPath.removePrefix("/usr/lib/"))
+                resolveChildPath(File(systemLayerDir, "usr/lib"), normalizedPath.removePrefix("/usr/lib/"))
             }
 
-            normalizedPath == "/" -> rootfsDir
+            normalizedPath == "/etc" -> File(systemLayerDir, "etc")
+            normalizedPath.startsWith("/etc/") -> {
+                resolveChildPath(File(systemLayerDir, "etc"), normalizedPath.removePrefix("/etc/"))
+            }
+
+            normalizedPath == "/lib" -> File(systemLayerDir, "lib")
+            normalizedPath.startsWith("/lib/") -> {
+                resolveChildPath(File(systemLayerDir, "lib"), normalizedPath.removePrefix("/lib/"))
+            }
+
+            normalizedPath == "/var" -> File(systemLayerDir, "var")
+            normalizedPath.startsWith("/var/") -> {
+                resolveChildPath(File(systemLayerDir, "var"), normalizedPath.removePrefix("/var/"))
+            }
+
+            normalizedPath == "/" -> systemLayerDir
             else -> resolveChildPath(rootfsDir, normalizedPath.removePrefix("/"))
         }
     }
@@ -1074,32 +1201,51 @@ fi
         return@withContext output
     }
 
-    /**
-     * 获取已安装的包列表（用于统计展示）
-     */
-    suspend fun getInstalledPackages(): List<String> = withContext(Dispatchers.IO) {
-        try {
-            val upperDir = File(containerDir, "upper/usr/local")
-            if (!upperDir.exists()) return@withContext emptyList()
-            
-            // 读取 pip 列表
+    suspend fun getInstalledPackages(): ContainerInventorySnapshot = withContext(Dispatchers.IO) {
+        if (_containerState.value !is ContainerStateEnum.Running &&
+            _containerState.value !is ContainerStateEnum.Stopped
+        ) {
+            return@withContext ContainerInventorySnapshot(
+                containerSizeBytes = getContainerSize(),
+                layoutVersion = inspectLayoutStatus().version
+            )
+        }
+
+        val apkPackages = runCatching {
             val result = execInContainer(
                 sandboxId = "system",
-                command = listOf("pip", "list", "--format=freeze"),
-                timeoutMs = 30_000
+                command = listOf("sh", "-c", "apk info 2>/dev/null | sort -u"),
+                timeoutMs = 30_000,
             )
-            
             if (result.exitCode == 0) {
-                result.stdout.lines()
-                    .mapNotNull { line ->
-                        line.substringBefore("==").takeIf { it.isNotBlank() }
-                    }
+                result.stdout.lines().mapNotNull { it.trim().takeIf(String::isNotBlank) }
             } else {
                 emptyList()
             }
-        } catch (e: Exception) {
-            emptyList()
-        }
+        }.getOrDefault(emptyList())
+
+        val pythonPackages = runCatching {
+            val result = execInContainer(
+                sandboxId = "system",
+                command = listOf("pip", "list", "--format=freeze"),
+                timeoutMs = 30_000,
+                env = getToolEnvironment(),
+            )
+            if (result.exitCode == 0) {
+                result.stdout.lines().mapNotNull { line ->
+                    line.substringBefore("==").trim().takeIf(String::isNotBlank)
+                }
+            } else {
+                emptyList()
+            }
+        }.getOrDefault(emptyList())
+
+        ContainerInventorySnapshot(
+            apkPackages = apkPackages,
+            pythonPackages = pythonPackages,
+            containerSizeBytes = getContainerSize(),
+            layoutVersion = inspectLayoutStatus().version,
+        )
     }
 
     /**
@@ -1121,7 +1267,7 @@ fi
     private fun getToolEnvironment(): Map<String, String> {
         val env = mutableMapOf<String, String>()
         val toolPaths = mutableListOf<String>()
-        val upperLocalDir = File(containerDir, "upper/usr/local")
+        val upperLocalDir = File(systemLayerDir, "usr/local")
 
         Log.d(TAG, "[ToolEnv] Checking tools in: ${upperLocalDir.absolutePath}")
         Log.d(TAG, "[ToolEnv] Directory exists: ${upperLocalDir.exists()}")
@@ -1197,18 +1343,101 @@ fi
 
     private suspend fun createGlobalContainer() = withContext(Dispatchers.IO) {
         val workDir = File(containerDir, "work").apply { mkdirs() }
-        val upperDir = File(containerDir, "upper").apply { mkdirs() }
-        
-        // 创建 bind mount 所需的子目录
-        File(upperDir, "usr/local").apply { mkdirs() }
-        File(upperDir, "usr/lib").apply { mkdirs() }
-        File(upperDir, "root").apply { mkdirs() }
+        requiredSystemPaths().forEach { relative ->
+            File(systemLayerDir, relative).mkdirs()
+        }
 
         globalContainer = ContainerState(
             id = "global",
             workDir = workDir.absolutePath,
-            upperDir = upperDir.absolutePath
+            systemDir = systemLayerDir.absolutePath
         )
+    }
+
+    private fun clearContainerRuntimeLayers(preserveRootfs: Boolean) {
+        if (systemLayerDir.exists()) {
+            systemLayerDir.deleteRecursively()
+        }
+        if (legacyUpperDir.exists()) {
+            legacyUpperDir.deleteRecursively()
+        }
+        if (legacyWorkDir.exists()) {
+            legacyWorkDir.deleteRecursively()
+        }
+        val workDir = File(containerDir, "work")
+        if (workDir.exists()) {
+            workDir.deleteRecursively()
+        }
+        if (containerConfigDir.exists()) {
+            containerConfigDir.deleteRecursively()
+        }
+        layoutVersionFile.delete()
+        if (!preserveRootfs && rootfsDir.exists()) {
+            rootfsDir.deleteRecursively()
+        }
+    }
+
+    private fun seedSystemLayer() {
+        requiredSystemPaths().forEach { relative ->
+            File(systemLayerDir, relative).mkdirs()
+        }
+        seedSystemPath("bin")
+        seedSystemPath("sbin")
+        seedSystemPath("etc")
+        seedSystemPath("lib")
+        seedSystemPath("root")
+        seedSystemPath("tmp")
+        seedSystemPath("usr")
+        seedSystemPath("var")
+    }
+
+    private fun seedSystemPath(relativePath: String) {
+        val source = File(rootfsDir, relativePath)
+        val target = File(systemLayerDir, relativePath)
+        if (!source.exists() || target.listFiles()?.isNotEmpty() == true) {
+            return
+        }
+        copyPathPreservingLinks(source.toPath(), target.toPath())
+    }
+
+    private fun copyPathPreservingLinks(source: Path, target: Path) {
+        if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) return
+        when {
+            Files.isSymbolicLink(source) -> {
+                val linkTarget = Files.readSymbolicLink(source)
+                target.parent?.let { Files.createDirectories(it) }
+                runCatching { Files.deleteIfExists(target) }
+                Files.createSymbolicLink(target, linkTarget)
+            }
+
+            Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS) -> {
+                Files.createDirectories(target)
+                Files.list(source).use { stream ->
+                    stream.forEach { child ->
+                        copyPathPreservingLinks(child, target.resolve(child.fileName.toString()))
+                    }
+                }
+            }
+
+            else -> {
+                target.parent?.let { Files.createDirectories(it) }
+                Files.copy(
+                    source,
+                    target,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES
+                )
+            }
+        }
+    }
+
+    private fun killTrackedBackgroundProcesses() {
+        backgroundProcesses.values.forEach { record ->
+            runCatching { record.process?.destroyForcibly() }
+            runCatching { record.stdoutJob?.cancel() }
+            runCatching { record.stderrJob?.cancel() }
+        }
+        backgroundProcesses.clear()
     }
 
     private suspend fun execInContainer(
@@ -1225,73 +1454,7 @@ fi
                     stderr = "Global container not created"
                 )
 
-            // 构建 PRoot 命令
-            val prootBinary = File(prootDir, "proot").absolutePath
-            val sandboxDir = File(context.filesDir, "sandboxes/$sandboxId")
-            val deliveryDir = SandboxEngine.getDeliveryDir(context, sandboxId)
-            val skillLibraryDir = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() }
-
-            // 确保沙箱目录存在
-            sandboxDir.mkdirs()
-
-            // 检查 termux-exec 是否可用
-            val nativeLibDir = context.applicationInfo.nativeLibraryDir
-            val termuxExecLib = File(nativeLibDir, "libtermux-exec.so")
-            val hasTermuxExec = termuxExecLib.exists()
-
-            val prootCmd = buildList {
-                add(prootBinary)
-
-                // 绑定挂载系统目录（必要）
-                add("-b")
-                add("/dev")
-                add("-b")
-                add("/proc")
-                add("-b")
-                add("/sys")
-
-                // 绑定挂载对话的沙箱目录到 /workspace
-                add("-b")
-                add("${sandboxDir.absolutePath}:/workspace")
-                add("-b")
-                add("${deliveryDir.absolutePath}:/delivery")
-                add("-b")
-                add("${skillLibraryDir.absolutePath}:/skills")
-
-                // 绑定挂载容器的 upper 层到 /usr/local（pip 安装位置）
-                add("-b")
-                add("${container.upperDir}/usr/local:/usr/local")
-
-                // 绑定挂载 upper 层到 /root（用户级 pip 配置）
-                add("-b")
-                add("${container.upperDir}/root:/root")
-
-                // 额外绑定挂载 usr/lib 以确保库文件可访问
-                // 使用 ! 后缀表示不追踪符号链接，确保覆盖 rootfs 中的同名目录
-                add("-b")
-                add("${container.upperDir}/usr/lib:/usr/lib!")
-
-                // [修复 npm] 如果 node_modules 已安装，额外挂载到 /usr/local/lib（不带 !）
-                val nodeModulesDir = File(container.upperDir, "usr/lib/node_modules")
-                if (nodeModulesDir.exists()) {
-                    add("-b")
-                    add("${nodeModulesDir.absolutePath}:/usr/local/lib/node_modules")
-                }
-
-                // 根目录使用基础 rootfs（只读）- 必须在 -b 之后
-                add("-R")
-                add(rootfsDir.absolutePath)
-
-                // 设置工作目录
-                add("-w")
-                add("/workspace")
-
-                // 启用符号链接修复
-                add("--link2symlink")
-
-                // 执行的命令
-                addAll(command)
-            }
+            val prootCmd = buildProotCommand(sandboxId, command, env, container)
 
             // 执行命令
             val processBuilder = ProcessBuilder(prootCmd)
@@ -1299,20 +1462,7 @@ fi
 
             // 设置环境变量
             val processEnv = processBuilder.environment()
-            processEnv["HOME"] = "/root"
-            processEnv["TMPDIR"] = "/tmp"
-            processEnv["PROOT_TMP_DIR"] = context.cacheDir.absolutePath
-            processEnv["PREFIX"] = "/usr"
-            processEnv["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
-            // 如果 termux-exec 可用，设置 LD_PRELOAD
-            if (hasTermuxExec) {
-                processEnv["LD_PRELOAD"] = termuxExecLib.absolutePath
-                Log.d(TAG, "Using termux-exec: ${termuxExecLib.absolutePath}")
-            }
-
-            // 合并用户传入的环境变量
-            processEnv.putAll(env)
+            setupProcessEnvironment(processEnv, env)
 
             Log.d(TAG, "[ExecInContainer] ========== Executing command ==========")
             Log.d(TAG, "[ExecInContainer] Command: $command")
@@ -1427,12 +1577,11 @@ fi
     }
 
     /**
-     * 清理 upper 层的临时文件，但保留已安装的开发工具
-     * 用于释放空间而不影响开发环境
+     * 清理系统层临时文件，但保留已安装的工具与用户工作区。
      */
     suspend fun cleanupUpperLayer(): Result<CleanupResult> = withContext(Dispatchers.IO) {
         try {
-            val upperDir = File(containerDir, "upper")
+            val upperDir = systemLayerDir
             if (!upperDir.exists()) {
                 return@withContext Result.success(CleanupResult(0, 0, emptyList()))
             }
@@ -1479,22 +1628,6 @@ fi
                 totalFreedBytes += size
                 totalFilesCleaned++
                 cleanedPaths.add("/root/.npm")
-            }
-
-            // 5. 清理 /workspace 中的临时构建文件（但保留源代码）
-            val workspaceDir = File(upperDir, "workspace")
-            if (workspaceDir.exists()) {
-                val buildPatterns = listOf("build", "dist", "target", "node_modules", ".gradle", "__pycache__", "*.pyc", ".pytest_cache")
-                workspaceDir.walkTopDown()
-                    .filter { it.isDirectory }
-                    .filter { dir -> buildPatterns.any { pattern -> dir.name == pattern || dir.name.endsWith(pattern.removePrefix("*.")) } }
-                    .forEach { dirToClean ->
-                        val size = calculateDirectorySize(dirToClean)
-                        dirToClean.deleteRecursively()
-                        totalFreedBytes += size
-                        totalFilesCleaned++
-                        cleanedPaths.add("/workspace/${dirToClean.relativeTo(workspaceDir).path}")
-                    }
             }
 
             Log.d(TAG, "[CleanupUpperLayer] Freed ${totalFreedBytes / 1024 / 1024}MB in $totalFilesCleaned directories")
@@ -1573,40 +1706,14 @@ fi
 
             Log.d(TAG, "Extracting Alpine rootfs to $rootfsDir")
             try {
-                // 根据架构选择正确的 rootfs 文件
                 val arch = getDeviceArchitecture()
-                val rootfsAssetName = when (arch) {
-                    "aarch64" -> "rootfs/alpine-minirootfs-3.19.0-aarch64.tar.gz"
-                    "armv7a" -> "rootfs/alpine-minirootfs-3.19.0-armhf.tar.gz"
-                    "x86_64" -> "rootfs/alpine-minirootfs-3.19.0-x86_64.tar.gz"
-                    "i686" -> "rootfs/alpine-minirootfs-3.19.0-x86.tar.gz"
-                    else -> "rootfs/alpine-minirootfs-3.19.0-aarch64.tar.gz"
+                if (arch != "aarch64") {
+                    throw IllegalStateException("Only arm64 rootfs is bundled. Detected architecture: $arch")
                 }
+                val rootfsAssetName = ALPINE_ROOTFS_ASSET
 
                 Log.d(TAG, "Loading rootfs from assets: $rootfsAssetName for architecture: $arch")
-
-                val inputStream = try {
-                    context.assets.open(rootfsAssetName)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to open rootfs asset: $rootfsAssetName", e)
-                    // 回退：尝试不带 .gz 后缀的文件名
-                    val tarName = rootfsAssetName.replace(".tar.gz", ".tar")
-                    try {
-                        Log.d(TAG, "Trying: $tarName")
-                        context.assets.open(tarName)
-                    } catch (e2: Exception) {
-                        // 再回退到通用文件名
-                        try {
-                            Log.d(TAG, "Trying fallback: alpine/alpine-rootfs.tar")
-                            context.assets.open("alpine/alpine-rootfs.tar")
-                        } catch (e3: Exception) {
-                            Log.d(TAG, "Trying fallback: rootfs/alpine-rootfs.tar.gz")
-                            context.assets.open("rootfs/alpine-rootfs.tar.gz")
-                        }
-                    }
-                }
-
-                inputStream.use { input ->
+                context.assets.open(rootfsAssetName).use { input ->
                     extractTarGz(input, rootfsDir)
                 }
 
@@ -1834,46 +1941,43 @@ fi
      */
     suspend fun restoreState(): Boolean = withContext(Dispatchers.IO) {
         try {
-            // 检查 rootfs 是否已初始化
             if (!checkInitializationStatus()) {
                 Log.d(TAG, "[RestoreState] Rootfs not initialized, cannot restore state")
                 return@withContext false
             }
 
-            // 检查 upper 目录是否存在（表示之前有容器被创建过）
-            val upperDir = File(containerDir, "upper")
-            val workDir = File(containerDir, "work")
+            val layoutStatus = inspectLayoutStatus()
+            val workDir = File(containerDir, "work").apply { mkdirs() }
 
-            if (upperDir.exists()) {
-                Log.d(TAG, "[RestoreState] Found existing upper directory, restoring container state")
-
-                // 确保子目录存在（兼容旧版本升级或部分目录被删除的情况）
-                File(upperDir, "usr/local").apply { mkdirs() }
-                File(upperDir, "usr/lib").apply { mkdirs() }
-                File(upperDir, "root").apply { mkdirs() }
-
-                // 创建 globalContainer（不启动进程）
-                if (globalContainer == null) {
-                    globalContainer = ContainerState(
-                        id = "global",
-                        workDir = workDir.absolutePath,
-                        upperDir = upperDir.absolutePath
-                    )
-                    Log.d(TAG, "[RestoreState] Global container recreated")
+            when {
+                layoutStatus.compatible -> {
+                    if (globalContainer == null) {
+                        globalContainer = ContainerState(
+                            id = "global",
+                            workDir = workDir.absolutePath,
+                            systemDir = systemLayerDir.absolutePath
+                        )
+                    }
+                    _containerState.value = ContainerStateEnum.Stopped
+                    Log.d(TAG, "[RestoreState] Restored compatible container layout to Stopped")
+                    true
                 }
 
-                // 设置状态为 Stopped（表示容器数据存在但未运行）
-                _containerState.value = ContainerStateEnum.Stopped
-                Log.d(TAG, "[RestoreState] Container state restored to Stopped")
-                true
-            } else {
-                // rootfs 已初始化但 upper 目录不存在，说明是首次初始化
-                // 创建 upper 目录并设置为 Running（兼容旧逻辑）
-                Log.d(TAG, "[RestoreState] Rootfs initialized but no upper dir, creating fresh container")
-                createGlobalContainer()
-                _containerState.value = ContainerStateEnum.Running
-                Log.d(TAG, "[RestoreState] Fresh container created and set to Running")
-                true
+                layoutStatus.needsRebuild -> {
+                    globalContainer = null
+                    _containerState.value = ContainerStateEnum.NeedsRebuild(
+                        layoutStatus.reason ?: "Container rebuild required"
+                    )
+                    Log.w(TAG, "[RestoreState] Container layout requires rebuild: ${layoutStatus.reason}")
+                    true
+                }
+
+                else -> {
+                    globalContainer = null
+                    _containerState.value = ContainerStateEnum.NotInitialized
+                    Log.d(TAG, "[RestoreState] No existing runtime layer to restore")
+                    false
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "[RestoreState] Failed to restore container state", e)
@@ -2230,10 +2334,11 @@ fi
         val prootBinary = File(prootDir, "proot").absolutePath
         val sandboxDir = File(context.filesDir, "sandboxes/$sandboxId")
         val deliveryDir = SandboxEngine.getDeliveryDir(context, sandboxId)
-        val skillLibraryDir = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() }
+        val skillLibraryDir = SandboxEngine.getSkillLibraryDir(context)
 
         return buildList {
             add(prootBinary)
+            add("-0")
 
             // 绑定挂载系统目录（必要）
             add("-b")
@@ -2251,24 +2356,23 @@ fi
             add("-b")
             add("${skillLibraryDir.absolutePath}:/skills")
 
-            // 绑定挂载容器的 upper 层到 /usr/local（pip 安装位置）
+            // 覆盖系统可写层，确保 apk/pip/manual installs 都落在持久化系统层。
             add("-b")
-            add("${container.upperDir}/usr/local:/usr/local")
-
-            // 绑定挂载 upper 层到 /root（用户级 pip 配置）
+            add("${container.systemDir}/bin:/bin")
             add("-b")
-            add("${container.upperDir}/root:/root")
-
-            // 额外绑定挂载 usr/lib 以确保库文件可访问
+            add("${container.systemDir}/etc:/etc")
             add("-b")
-            add("${container.upperDir}/usr/lib:/usr/lib!")
-
-            // [修复 npm] 如果 node_modules 已安装，额外挂载到 /usr/local/lib（不带 !）
-            val nodeModulesDir = File(container.upperDir, "usr/lib/node_modules")
-            if (nodeModulesDir.exists()) {
-                add("-b")
-                add("${nodeModulesDir.absolutePath}:/usr/local/lib/node_modules")
-            }
+            add("${container.systemDir}/lib:/lib")
+            add("-b")
+            add("${container.systemDir}/root:/root")
+            add("-b")
+            add("${container.systemDir}/sbin:/sbin")
+            add("-b")
+            add("${container.systemDir}/tmp:/tmp")
+            add("-b")
+            add("${container.systemDir}/usr:/usr")
+            add("-b")
+            add("${container.systemDir}/var:/var")
 
             // 根目录使用基础 rootfs（只读）- 必须在 -b 之后
             add("-R")
@@ -2301,20 +2405,23 @@ fi
                 baseDir = rootfsDir,
                 baseContainerPath = "/",
                 overrides = mapOf(
+                    "bin" to File(systemLayerDir, "bin"),
+                    "etc" to File(systemLayerDir, "etc"),
+                    "lib" to File(systemLayerDir, "lib"),
+                    "sbin" to File(systemLayerDir, "sbin"),
+                    "tmp" to File(systemLayerDir, "tmp"),
+                    "usr" to File(systemLayerDir, "usr"),
+                    "var" to File(systemLayerDir, "var"),
                     "workspace" to SandboxEngine.getSandboxDir(context, sandboxId),
                     "delivery" to SandboxEngine.getDeliveryDir(context, sandboxId),
                     "skills" to File(context.filesDir, FileFolders.SKILLS),
-                    "root" to File(containerDir, "upper/root"),
+                    "root" to File(systemLayerDir, "root"),
                 ),
             )
 
             "/usr" -> mergeDirectoryEntries(
-                baseDir = File(rootfsDir, "usr"),
+                baseDir = File(systemLayerDir, "usr"),
                 baseContainerPath = "/usr",
-                overrides = mapOf(
-                    "local" to File(containerDir, "upper/usr/local"),
-                    "lib" to File(containerDir, "upper/usr/lib"),
-                ),
             )
 
             else -> {
@@ -2393,7 +2500,7 @@ fi
 data class ContainerState(
     val id: String,
     val workDir: String,
-    val upperDir: String
+    val systemDir: String
 )
 
 data class ExecutionResult(
@@ -2410,6 +2517,7 @@ sealed class ContainerStateEnum {
     data class Initializing(val progress: Float) : ContainerStateEnum()
     object Running : ContainerStateEnum()
     object Stopped : ContainerStateEnum()
+    data class NeedsRebuild(val reason: String) : ContainerStateEnum()
     data class Error(val message: String) : ContainerStateEnum()
 }
 
