@@ -2080,6 +2080,9 @@ fi
         val prootBinary = File(prootDir, "proot")
         if (!prootBinary.exists()) {
             val arch = getDeviceArchitecture()
+            if (arch != "aarch64") {
+                throw IllegalStateException("Only arm64 proot runtime is bundled. Detected architecture: $arch")
+            }
             val assetPath = "proot/proot-$arch"
             Log.d(TAG, "Extracting PRoot binary for architecture: $arch from $assetPath")
             
@@ -2389,9 +2392,6 @@ fi
     private fun getDeviceArchitecture(): String {
         return when (android.system.Os.uname().machine) {
             "aarch64" -> "aarch64"
-            "armv7l", "armv8l" -> "armv7a"
-            "x86_64" -> "x86_64"
-            "i686", "i386" -> "i686"
             else -> "aarch64"
         }
     }
