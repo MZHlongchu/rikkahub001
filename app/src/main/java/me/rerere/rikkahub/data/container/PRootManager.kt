@@ -259,6 +259,32 @@ class PRootManager(
         "etc/apk",
     )
 
+    private fun systemSeedRoots(): List<String> = listOf(
+        "bin",
+        "sbin",
+        "etc",
+        "lib",
+        "root",
+        "tmp",
+        "usr",
+        "var",
+    )
+
+    private fun criticalSystemPaths(): List<String> = listOf(
+        "bin/busybox",
+        "bin/sh",
+        "sbin/apk",
+        "lib/ld-musl-aarch64.so.1",
+        "lib/libc.musl-aarch64.so.1",
+        "etc/apk/repositories",
+    )
+
+    private fun missingSystemPaths(): List<String> {
+        return (requiredSystemPaths() + criticalSystemPaths())
+            .distinct()
+            .filter { relative -> !File(systemLayerDir, relative).exists() }
+    }
+
     private fun inspectLayoutStatus(): ContainerLayoutStatus {
         val version = layoutVersionFile.takeIf { it.exists() }
             ?.readText()
@@ -269,7 +295,7 @@ class PRootManager(
         val hasRuntimeArtifacts = containerConfigDir.exists() || hasCurrentLayout || hasLegacyLayout || version != null
         val compatible = version == LAYOUT_VERSION &&
             hasCurrentLayout &&
-            requiredSystemPaths().all { relative -> File(systemLayerDir, relative).exists() }
+            missingSystemPaths().isEmpty()
 
         return when {
             compatible -> ContainerLayoutStatus(
@@ -870,6 +896,7 @@ fi
                         _containerState.value = ContainerStateEnum.NotInitialized
                         return@withContext initialize()
                     }
+                    ensureSystemLayerReady()
                     val layoutStatus = inspectLayoutStatus()
                     if (!layoutStatus.compatible) {
                         _containerState.value = ContainerStateEnum.NeedsRebuild(
@@ -1485,23 +1512,37 @@ fi
         requiredSystemPaths().forEach { relative ->
             File(systemLayerDir, relative).mkdirs()
         }
-        seedSystemPath("bin")
-        seedSystemPath("sbin")
-        seedSystemPath("etc")
-        seedSystemPath("lib")
-        seedSystemPath("root")
-        seedSystemPath("tmp")
-        seedSystemPath("usr")
-        seedSystemPath("var")
+        systemSeedRoots().forEach(::seedSystemPath)
     }
 
     private fun seedSystemPath(relativePath: String) {
         val source = File(rootfsDir, relativePath)
         val target = File(systemLayerDir, relativePath)
-        if (!source.exists() || target.listFiles()?.isNotEmpty() == true) {
+        if (!source.exists()) {
             return
         }
-        copyPathPreservingLinks(source.toPath(), target.toPath())
+        mergeMissingPathPreservingLinks(source.toPath(), target.toPath())
+    }
+
+    private fun ensureSystemLayerReady() {
+        requiredSystemPaths().forEach { relative ->
+            File(systemLayerDir, relative).mkdirs()
+        }
+
+        val missingBeforeRepair = missingSystemPaths()
+        if (missingBeforeRepair.isEmpty()) {
+            return
+        }
+
+        Log.w(TAG, "Container system layer is incomplete, attempting repair: ${missingBeforeRepair.joinToString()}")
+        systemSeedRoots().forEach(::seedSystemPath)
+
+        val missingAfterRepair = missingSystemPaths()
+        if (missingAfterRepair.isNotEmpty()) {
+            throw IllegalStateException(
+                "Container system layer is incomplete after repair: ${missingAfterRepair.joinToString()}"
+            )
+        }
     }
 
     private fun copyPathPreservingLinks(source: Path, target: Path) {
@@ -1535,6 +1576,46 @@ fi
         }
     }
 
+    private fun mergeMissingPathPreservingLinks(source: Path, target: Path) {
+        if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) return
+
+        when {
+            Files.isSymbolicLink(source) -> {
+                if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                    return
+                }
+                val linkTarget = Files.readSymbolicLink(source)
+                target.parent?.let { Files.createDirectories(it) }
+                Files.createSymbolicLink(target, linkTarget)
+            }
+
+            Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS) -> {
+                if (Files.exists(target, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
+                    return
+                }
+                Files.createDirectories(target)
+                Files.list(source).use { stream ->
+                    stream.forEach { child ->
+                        mergeMissingPathPreservingLinks(child, target.resolve(child.fileName.toString()))
+                    }
+                }
+            }
+
+            else -> {
+                if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                    return
+                }
+                target.parent?.let { Files.createDirectories(it) }
+                Files.copy(
+                    source,
+                    target,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES
+                )
+            }
+        }
+    }
+
     private fun killTrackedBackgroundProcesses() {
         backgroundProcesses.values.forEach { record ->
             runCatching { record.process?.destroyForcibly() }
@@ -1550,6 +1631,7 @@ fi
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
         env: Map<String, String> = emptyMap()
     ): ExecutionResult = withContext(Dispatchers.IO) {
+        ensureSystemLayerReady()
         val container = globalContainer
             ?: return@withContext ExecutionResult(
                 exitCode = -1,
@@ -2266,6 +2348,7 @@ fi
                 return@withContext false
             }
 
+            ensureSystemLayerReady()
             val layoutStatus = inspectLayoutStatus()
             val workDir = File(containerDir, "work").apply { mkdirs() }
 
@@ -2399,6 +2482,7 @@ fi
         env: Map<String, String> = emptyMap()
     ): ExecutionResult = withContext(Dispatchers.IO) {
         try {
+            ensureSystemLayerReady()
             val container = globalContainer ?: return@withContext ExecutionResult(
                 exitCode = -1,
                 stdout = "",
