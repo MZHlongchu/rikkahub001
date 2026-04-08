@@ -64,6 +64,16 @@ class PRootManager(
         val linkTarget: String,
     )
 
+    private data class PackageManagerRuntimeContext(
+        val hostResolvConf: File?,
+        val systemResolvConf: File,
+    )
+
+    private enum class ContainerExecutionProfile {
+        DEFAULT,
+        PACKAGE_MANAGER,
+    }
+
     companion object {
         private const val TAG = "PRootManager"
         private const val DEFAULT_TIMEOUT_MS = 300_000L // 5分钟
@@ -278,6 +288,49 @@ class PRootManager(
         "lib/libc.musl-aarch64.so.1",
         "etc/apk/repositories",
     )
+
+    private fun packageManagerRuntimeDirectories(): List<String> = listOf(
+        "run",
+        "run/shm",
+        "tmp",
+        "var/cache/apk",
+        "lib/apk/db",
+        "etc/apk",
+    )
+
+    private fun isPackageManagerCommand(command: List<String>): Boolean {
+        if (command.isEmpty()) return false
+        return when (command.first()) {
+            "apk" -> true
+            "sh", "/bin/sh", "ash", "/bin/ash" -> {
+                if (command.size < 3) return false
+                val shellFlag = command[1]
+                val shellScript = command[2].trimStart()
+                (shellFlag == "-c" || shellFlag == "-lc") && (
+                    shellScript == "apk" ||
+                        shellScript.startsWith("apk ") ||
+                        shellScript.startsWith("apk\t") ||
+                        shellScript.startsWith("apk\n")
+                    )
+            }
+
+            else -> false
+        }
+    }
+
+    private fun resolveExecutionProfile(
+        command: List<String>,
+        requestedProfile: ContainerExecutionProfile,
+    ): ContainerExecutionProfile {
+        if (requestedProfile != ContainerExecutionProfile.DEFAULT) {
+            return requestedProfile
+        }
+        return if (isPackageManagerCommand(command)) {
+            ContainerExecutionProfile.PACKAGE_MANAGER
+        } else {
+            ContainerExecutionProfile.DEFAULT
+        }
+    }
 
     private fun missingSystemPaths(): List<String> {
         return (requiredSystemPaths() + criticalSystemPaths())
@@ -1140,7 +1193,7 @@ fi
                 put("error", "Shell execution error: ${e.message}")
                 put("exitCode", -1)
                 put("stdout", "")
-                put("stderr", "")
+                put("stderr", formatContainerError(e))
             }
         }
     }
@@ -1353,6 +1406,7 @@ fi
                 sandboxId = "system",
                 command = listOf("sh", "-c", "apk info 2>/dev/null | sort -u"),
                 timeoutMs = 30_000,
+                profile = ContainerExecutionProfile.PACKAGE_MANAGER,
             )
             if (result.exitCode == 0) {
                 result.stdout.lines().mapNotNull { it.trim().takeIf(String::isNotBlank) }
@@ -1551,6 +1605,58 @@ fi
         }
     }
 
+    private fun preparePackageManagerRuntime(): PackageManagerRuntimeContext {
+        packageManagerRuntimeDirectories().forEach { relative ->
+            ensureWritableContainerDirectory(File(systemLayerDir, relative))
+        }
+
+        val hostResolvConf = resolveHostResolvConf()
+        val systemResolvConf = ensurePackageManagerResolvConf(hostResolvConf)
+
+        return PackageManagerRuntimeContext(
+            hostResolvConf = hostResolvConf,
+            systemResolvConf = systemResolvConf
+        )
+    }
+
+    private fun ensureWritableContainerDirectory(dir: File) {
+        val path = dir.toPath()
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            dir.deleteRecursively()
+        }
+        dir.mkdirs()
+        dir.setReadable(true, false)
+        dir.setWritable(true, false)
+        dir.setExecutable(true, false)
+    }
+
+    private fun resolveHostResolvConf(): File? {
+        val candidates = listOf(
+            File("/etc/resolv.conf"),
+            File("/system/etc/resolv.conf"),
+        )
+        return candidates.firstOrNull { it.exists() && it.isFile && it.canRead() && it.length() > 0 }
+    }
+
+    private fun ensurePackageManagerResolvConf(hostResolvConf: File?): File {
+        val systemResolvConf = File(systemLayerDir, "etc/resolv.conf")
+        systemResolvConf.parentFile?.mkdirs()
+        val content = runCatching {
+            hostResolvConf?.takeIf { it.exists() && it.isFile && it.canRead() }
+                ?.readText()
+                ?.trim()
+        }.getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: """
+                nameserver 1.1.1.1
+                nameserver 8.8.8.8
+            """.trimIndent()
+        systemResolvConf.writeText("$content\n")
+        systemResolvConf.setReadable(true, false)
+        systemResolvConf.setWritable(true, false)
+        return systemResolvConf
+    }
+
     private fun copyPathPreservingLinks(source: Path, target: Path) {
         if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) return
         when {
@@ -1635,35 +1741,35 @@ fi
         sandboxId: String,
         command: List<String>,
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
-        env: Map<String, String> = emptyMap()
+        env: Map<String, String> = emptyMap(),
+        profile: ContainerExecutionProfile = ContainerExecutionProfile.DEFAULT,
     ): ExecutionResult = withContext(Dispatchers.IO) {
-        ensureSystemLayerReady()
         val container = globalContainer
             ?: return@withContext ExecutionResult(
                 exitCode = -1,
                 stdout = "",
                 stderr = "Global container not created"
             )
+        val resolvedProfile = resolveExecutionProfile(command, profile)
         val processEnvSnapshot = linkedMapOf<String, String>().apply {
             putAll(env)
         }
-        val prootCmd = try {
-            buildProotCommand(sandboxId, command, env, container)
-        } catch (e: Exception) {
-            return@withContext ExecutionResult(
-                exitCode = -1,
-                stdout = "",
-                stderr = withExecutionDiagnostics(
-                    stderr = formatContainerError(e),
-                    sandboxId = sandboxId,
-                    command = command,
-                    prootCmd = command,
-                    processEnv = processEnvSnapshot,
-                    container = container
-                )
-            )
-        }
+        var runtimeContext: PackageManagerRuntimeContext? = null
+        var prootCmd: List<String> = command
         try {
+            ensureSystemLayerReady()
+            if (resolvedProfile == ContainerExecutionProfile.PACKAGE_MANAGER) {
+                runtimeContext = preparePackageManagerRuntime()
+            }
+            prootCmd = buildProotCommand(
+                sandboxId = sandboxId,
+                command = command,
+                env = env,
+                container = container,
+                profile = resolvedProfile,
+                packageManagerRuntime = runtimeContext
+            )
+
             // 执行命令
             val processBuilder = ProcessBuilder(prootCmd)
             processBuilder.redirectErrorStream(false) // 分离 stdout 和 stderr
@@ -1746,7 +1852,9 @@ fi
                         command = command,
                         prootCmd = prootCmd,
                         processEnv = processEnv,
-                        container = container
+                        container = container,
+                        profile = resolvedProfile,
+                        packageManagerRuntime = runtimeContext
                     )
                 )
             }
@@ -1773,7 +1881,9 @@ fi
                         command = command,
                         prootCmd = prootCmd,
                         processEnv = processEnv,
-                        container = container
+                        container = container,
+                        profile = resolvedProfile,
+                        packageManagerRuntime = runtimeContext
                     )
                 }
             )
@@ -1798,7 +1908,9 @@ fi
                     command = command,
                     prootCmd = prootCmd,
                     processEnv = processEnvSnapshot,
-                    container = container
+                    container = container,
+                    profile = resolvedProfile,
+                    packageManagerRuntime = runtimeContext
                 )
             )
         }
@@ -2232,12 +2344,15 @@ fi
         prootCmd: List<String>,
         processEnv: Map<String, String>,
         container: ContainerState,
+        profile: ContainerExecutionProfile,
+        packageManagerRuntime: PackageManagerRuntimeContext?,
     ): String {
         val diagnostics = buildString {
             appendLine()
             appendLine("=== Container Execution Diagnostics ===")
             appendLine("sandboxId=$sandboxId")
             appendLine("command=${command.joinToString(" ")}")
+            appendLine("executionProfile=$profile")
             appendLine("prootCmd=${prootCmd.joinToString(" ")}")
             appendLine("containerSystemDir=${container.systemDir}")
             appendLine("rootfsDir=${rootfsDir.absolutePath}")
@@ -2259,6 +2374,21 @@ fi
             appendLine(describeHostPath("system/lib/ld-musl-aarch64.so.1", File(container.systemDir, "lib/ld-musl-aarch64.so.1")))
             appendLine(describeHostPath("workspace", File(context.filesDir, "sandboxes/$sandboxId")))
             appendLine(describeHostPath("delivery", SandboxEngine.getDeliveryDir(context, sandboxId)))
+            if (profile == ContainerExecutionProfile.PACKAGE_MANAGER) {
+                appendLine(describeHostPath("system/run", File(container.systemDir, "run")))
+                appendLine(describeHostPath("system/run/shm", File(container.systemDir, "run/shm")))
+                appendLine(describeHostPath("system/tmp", File(container.systemDir, "tmp")))
+                appendLine(describeHostPath("system/var/cache/apk", File(container.systemDir, "var/cache/apk")))
+                appendLine(describeHostPath("system/lib/apk/db", File(container.systemDir, "lib/apk/db")))
+                appendLine(describeHostPath("system/etc/apk", File(container.systemDir, "etc/apk")))
+                appendLine(describeHostPath("system/etc/resolv.conf", File(container.systemDir, "etc/resolv.conf")))
+                appendLine(
+                    describeHostPath(
+                        "hostResolvConf",
+                        packageManagerRuntime?.hostResolvConf ?: resolveHostResolvConf() ?: File("")
+                    )
+                )
+            }
         }
         return diagnostics.trimEnd()
     }
@@ -2314,13 +2444,17 @@ fi
         prootCmd: List<String>,
         processEnv: Map<String, String>,
         container: ContainerState,
+        profile: ContainerExecutionProfile,
+        packageManagerRuntime: PackageManagerRuntimeContext?,
     ): String {
         val diagnostics = buildExecutionDiagnostics(
             sandboxId = sandboxId,
             command = command,
             prootCmd = prootCmd,
             processEnv = processEnv,
-            container = container
+            container = container,
+            profile = profile,
+            packageManagerRuntime = packageManagerRuntime
         )
 
         return buildString {
@@ -2494,9 +2628,22 @@ fi
                 stdout = "",
                 stderr = "Global container not created"
             )
+            val resolvedProfile = resolveExecutionProfile(command, ContainerExecutionProfile.DEFAULT)
+            val runtimeContext = if (resolvedProfile == ContainerExecutionProfile.PACKAGE_MANAGER) {
+                preparePackageManagerRuntime()
+            } else {
+                null
+            }
 
             // 构建 PRoot 命令
-            val prootCmd = buildProotCommand(sandboxId, command, env, container)
+            val prootCmd = buildProotCommand(
+                sandboxId = sandboxId,
+                command = command,
+                env = env,
+                container = container,
+                profile = resolvedProfile,
+                packageManagerRuntime = runtimeContext
+            )
 
             Log.d(TAG, "[ExecInBackground] Starting process: $processId")
             Log.d(TAG, "[ExecInBackground] Command: ${command.joinToString(" ")}")
@@ -2737,7 +2884,9 @@ fi
         sandboxId: String,
         command: List<String>,
         env: Map<String, String>,
-        container: ContainerState
+        container: ContainerState,
+        profile: ContainerExecutionProfile = ContainerExecutionProfile.DEFAULT,
+        packageManagerRuntime: PackageManagerRuntimeContext? = null,
     ): List<String> {
         val prootBinary = File(prootDir, "proot").absolutePath
         val sandboxDir = File(context.filesDir, "sandboxes/$sandboxId")
@@ -2748,43 +2897,60 @@ fi
             add(prootBinary)
             add("-0")
 
-            // 绑定挂载系统目录（必要）
-            add("-b")
-            add("/dev")
-            add("-b")
-            add("/proc")
-            add("-b")
-            add("/sys")
+            when (profile) {
+                ContainerExecutionProfile.DEFAULT -> {
+                    // 绑定挂载系统目录（必要）
+                    add("-b")
+                    add("/dev")
+                    add("-b")
+                    add("/proc")
+                    add("-b")
+                    add("/sys")
 
-            // 绑定挂载对话的沙箱目录到 /workspace
-            add("-b")
-            add("${sandboxDir.absolutePath}:/workspace")
-            add("-b")
-            add("${deliveryDir.absolutePath}:/delivery")
-            add("-b")
-            add("${skillLibraryDir.absolutePath}:/skills")
+                    // 绑定挂载对话的沙箱目录到 /workspace
+                    add("-b")
+                    add("${sandboxDir.absolutePath}:/workspace")
+                    add("-b")
+                    add("${deliveryDir.absolutePath}:/delivery")
+                    add("-b")
+                    add("${skillLibraryDir.absolutePath}:/skills")
 
-            // 覆盖系统可写层，确保 apk/pip/manual installs 都落在持久化系统层。
-            add("-b")
-            add("${container.systemDir}/bin:/bin")
-            add("-b")
-            add("${container.systemDir}/etc:/etc")
-            add("-b")
-            add("${container.systemDir}/lib:/lib")
-            add("-b")
-            add("${container.systemDir}/root:/root")
-            add("-b")
-            add("${container.systemDir}/sbin:/sbin")
-            add("-b")
-            add("${container.systemDir}/tmp:/tmp")
-            add("-b")
-            add("${container.systemDir}/usr:/usr")
-            add("-b")
-            add("${container.systemDir}/var:/var")
+                    addAll(buildWritableSystemBindArgs(container))
 
-            // 根目录使用基础 rootfs（只读）- 必须在 -b 之后
-            add("-R")
-            add(rootfsDir.absolutePath)
+                    // 根目录使用基础 rootfs（只读）- 必须在 -b 之后
+                    add("-R")
+                    add(rootfsDir.absolutePath)
+                }
+
+                ContainerExecutionProfile.PACKAGE_MANAGER -> {
+                    // 更接近 `proot -S` 的收窄 profile：使用最小 host bind，再叠加可写系统层。
+                    add("-r")
+                    add(rootfsDir.absolutePath)
+                    add("-b")
+                    add("/dev")
+                    add("-b")
+                    add("/proc")
+                    add("-b")
+                    add("/sys")
+                    add("-b")
+                    add("${sandboxDir.absolutePath}:/workspace")
+                    add("-b")
+                    add("${deliveryDir.absolutePath}:/delivery")
+                    add("-b")
+                    add("${skillLibraryDir.absolutePath}:/skills")
+
+                    addAll(buildWritableSystemBindArgs(container))
+
+                    add("-b")
+                    add("${container.systemDir}/run:/run")
+
+                    val hostResolvConf = packageManagerRuntime?.hostResolvConf
+                    if (hostResolvConf != null) {
+                        add("-b")
+                        add("${hostResolvConf.absolutePath}:/etc/resolv.conf")
+                    }
+                }
+            }
 
             // 设置工作目录
             add("-w")
@@ -2797,6 +2963,17 @@ fi
             addAll(command)
         }
     }
+
+    private fun buildWritableSystemBindArgs(container: ContainerState): List<String> = listOf(
+        "-b", "${container.systemDir}/bin:/bin",
+        "-b", "${container.systemDir}/etc:/etc",
+        "-b", "${container.systemDir}/lib:/lib",
+        "-b", "${container.systemDir}/root:/root",
+        "-b", "${container.systemDir}/sbin:/sbin",
+        "-b", "${container.systemDir}/tmp:/tmp",
+        "-b", "${container.systemDir}/usr:/usr",
+        "-b", "${container.systemDir}/var:/var",
+    )
 
     private fun normalizeContainerPath(path: String): String {
         if (path.isBlank()) return "/"
