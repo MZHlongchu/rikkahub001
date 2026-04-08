@@ -137,6 +137,7 @@ fun ChatList(
     conversation: Conversation,
     state: LazyListState,
     loading: Boolean,
+    streamingUiTick: Long = 0L,
     previewMode: Boolean,
     settings: Settings,
     hazeState: HazeState,
@@ -157,6 +158,7 @@ fun ChatList(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
+    onAutoScrollCheck: (String) -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -180,6 +182,7 @@ fun ChatList(
                 conversation = conversation,
                 state = state,
                 loading = loading,
+                streamingUiTick = streamingUiTick,
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
@@ -199,6 +202,7 @@ fun ChatList(
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
+                onAutoScrollCheck = onAutoScrollCheck,
             )
         }
     }
@@ -210,6 +214,7 @@ private fun ChatListNormal(
     conversation: Conversation,
     state: LazyListState,
     loading: Boolean,
+    streamingUiTick: Long,
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
@@ -229,6 +234,7 @@ private fun ChatListNormal(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
+    onAutoScrollCheck: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
@@ -273,7 +279,18 @@ private fun ChatListNormal(
     ImeLazyListAutoScroller(lazyListState = state)
 
     // 瀵硅瘽澶у皬璀﹀憡瀵硅瘽妗?
-    val sizeInfo = rememberConversationSizeInfo(conversation)
+    val lastAssistantInputTokens = remember(conversation.messageNodes) {
+        conversation.messageNodes.asReversed()
+            .map { it.currentMessage }
+            .firstOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+            ?.usage
+            ?.promptTokens
+            ?: 0
+    }
+    val sizeInfo = rememberConversationSizeInfo(
+        nodeCount = conversation.messageNodes.size,
+        lastAssistantInputTokens = lastAssistantInputTokens,
+    )
     var showSizeWarningDialog by rememberSaveable(conversation.id) { mutableStateOf(true) }
     if (sizeInfo.showWarning && showSizeWarningDialog) {
         ConversationSizeWarningDialog(
@@ -377,15 +394,15 @@ private fun ChatListNormal(
     ) {
         // 鑷姩婊氬姩鍒板簳閮?
         if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                            // Log.i(TAG, "ChatList: scroll to ${conversationUpdated.messageNodes.lastIndex}")
-                        }
-                    }
+            LaunchedEffect(streamingUiTick, loadingState) {
+                if (!loadingState || streamingUiTick <= 0L) return@LaunchedEffect
+                val visibleItemsInfo = state.layoutInfo.visibleItemsInfo
+                val atBottom = visibleItemsInfo.isAtBottom()
+                onAutoScrollCheck(
+                    "tick=$streamingUiTick loading=$loadingState atBottom=$atBottom scrolling=${state.isScrollInProgress}"
+                )
+                if (!state.isScrollInProgress && atBottom) {
+                    state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
                 }
             }
         }

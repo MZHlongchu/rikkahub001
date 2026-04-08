@@ -144,6 +144,7 @@ import kotlin.math.max
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
+private const val STREAMING_COALESCE_WINDOW_MS = 24L
 internal const val DIALOGUE_SUMMARY_MAX_OUTPUT_TOKENS = 65_536
 private const val ROLLING_SUMMARY_MIN_OUTPUT_TOKENS = 1_200
 private const val ROLLING_SUMMARY_TARGET_OUTPUT_TOKENS = 2_500
@@ -228,6 +229,13 @@ private val inputTransformers by lazy {
     )
 }
 
+private data class PendingStreamingUpdate(
+    val conversation: Conversation,
+    val source: String,
+    val detail: String,
+    val sizeHint: String,
+)
+
 private val outputTransformers by lazy {
     listOf(
         ThinkTagTransformer,
@@ -269,6 +277,8 @@ class ChatService(
     private val _ledgerGenerationUiStates = MutableStateFlow<Map<Uuid, LedgerGenerationUiState>>(emptyMap())
     private val _compressionWorkerJobs = MutableStateFlow<Map<Uuid, Job?>>(emptyMap())
     private val _compressionScrollEvents = MutableSharedFlow<Pair<Uuid, Long>>(extraBufferCapacity = 8)
+    private val pendingStreamingUpdates = ConcurrentHashMap<Uuid, PendingStreamingUpdate>()
+    private val streamingFlushJobs = ConcurrentHashMap<Uuid, Job>()
     val compressionScrollEvents: SharedFlow<Pair<Uuid, Long>> = _compressionScrollEvents.asSharedFlow()
 
     fun addError(error: Throwable, conversationId: Uuid? = null, title: String? = null) {
@@ -581,6 +591,22 @@ class ChatService(
         return runtimeService.getConversationFlow(conversationId)
     }
 
+    fun getConversationStableFlow(conversationId: Uuid): StateFlow<Conversation> {
+        return runtimeService.getConversationStableFlow(conversationId)
+    }
+
+    fun getMessageNodesFlow(conversationId: Uuid): StateFlow<List<me.rerere.rikkahub.data.model.MessageNode>> {
+        return runtimeService.getMessageNodesFlow(conversationId)
+    }
+
+    fun getStreamingTailFlow(conversationId: Uuid): StateFlow<StreamingTailState?> {
+        return runtimeService.getStreamingTailFlow(conversationId)
+    }
+
+    fun getStreamingUiTickFlow(conversationId: Uuid): StateFlow<Long> {
+        return runtimeService.getStreamingUiTickFlow(conversationId)
+    }
+
     fun getGenerationJobStateFlow(conversationId: Uuid): Flow<Job?> {
         return runtimeService.getGenerationJobStateFlow(conversationId)
     }
@@ -601,6 +627,85 @@ class ChatService(
 
     fun getCurrentConversationSnapshotOrNull(conversationId: Uuid): Conversation? =
         runtimeService.getCurrentConversationOrNull(conversationId)
+
+    fun recordUiDiagnostic(
+        category: String,
+        conversationId: Uuid,
+        detail: String,
+        phase: String? = null,
+    ) {
+        diagnosticsRecorder.record(
+            category = category,
+            conversationId = conversationId,
+            detail = detail,
+            phase = phase,
+        )
+    }
+
+    private fun getPendingOrCurrentConversation(conversationId: Uuid): Conversation {
+        return pendingStreamingUpdates[conversationId]?.conversation ?: getConversationFlow(conversationId).value
+    }
+
+    private fun enqueueStreamingConversationUpdate(
+        conversationId: Uuid,
+        conversation: Conversation,
+        source: String,
+        detail: String,
+        sizeHint: String,
+    ) {
+        pendingStreamingUpdates[conversationId] = PendingStreamingUpdate(
+            conversation = conversation,
+            source = source,
+            detail = detail,
+            sizeHint = sizeHint,
+        )
+        val existingJob = streamingFlushJobs[conversationId]
+        if (existingJob?.isActive == true) return
+
+        streamingFlushJobs[conversationId] = appScope.launch {
+            kotlinx.coroutines.delay(STREAMING_COALESCE_WINDOW_MS)
+            flushPendingStreamingConversation(conversationId)
+        }
+    }
+
+    private suspend fun flushPendingStreamingConversation(conversationId: Uuid) {
+        val pending = pendingStreamingUpdates.remove(conversationId) ?: run {
+            streamingFlushJobs.remove(conversationId)
+            return
+        }
+        streamingFlushJobs.remove(conversationId)
+
+        val uiVersion = traceDiagnostic(
+            category = "streaming-coalesce-flush",
+            detail = pending.detail,
+            conversationId = conversationId,
+            phase = pending.source,
+            sizeHint = pending.sizeHint,
+        ) {
+            runtimeService.updateStreamingConversation(
+                conversationId = conversationId,
+                conversation = pending.conversation,
+                source = pending.source,
+            )
+        }
+        diagnosticsRecorder.record(
+            category = "ui-tail-version",
+            detail = "version=$uiVersion source=${pending.source}",
+            conversationId = conversationId,
+            phase = "tailVersion",
+            sizeHint = pending.sizeHint,
+        )
+    }
+
+    private suspend fun flushPendingStreamingConversationNow(conversationId: Uuid) {
+        streamingFlushJobs.remove(conversationId)?.cancel()
+        flushPendingStreamingConversation(conversationId)
+    }
+
+    private fun clearPendingStreamingConversation(conversationId: Uuid) {
+        streamingFlushJobs.remove(conversationId)?.cancel()
+        pendingStreamingUpdates.remove(conversationId)
+    }
 
     // ---- 初始化对话 ----
 
@@ -1076,6 +1181,7 @@ class ChatService(
             ).onCompletion {
                 // 取消 Live Update 通知
                 cancelLiveUpdateNotification(conversationId)
+                flushPendingStreamingConversationNow(conversationId)
 
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = getConversationFlow(conversationId).value.copy(
@@ -1105,7 +1211,7 @@ class ChatService(
                             phase = "received",
                             sizeHint = chunkSizeHint,
                         )
-                        val currentConversation = getConversationFlow(conversationId).value
+                        val currentConversation = getPendingOrCurrentConversation(conversationId)
                         val updatedConversation = traceDiagnostic(
                             category = "chunk-updateCurrentMessages",
                             detail = chunkDetail,
@@ -1125,7 +1231,13 @@ class ChatService(
                             phase = "runtimeUpdate",
                             sizeHint = chunkSizeHint,
                         ) {
-                            updateConversation(conversationId, updatedConversation)
+                            enqueueStreamingConversationUpdate(
+                                conversationId = conversationId,
+                                conversation = updatedConversation,
+                                source = "chunk",
+                                detail = "messageNodes=${updatedConversation.messageNodes.size}",
+                                sizeHint = chunkSizeHint,
+                            )
                         }
                         diagnosticsRecorder.record(
                             category = "chunk",
@@ -1153,12 +1265,14 @@ class ChatService(
         }.onFailure {
             // 取消 Live Update 通知
             cancelLiveUpdateNotification(conversationId)
+            clearPendingStreamingConversation(conversationId)
 
             it.printStackTrace()
             addError(it, conversationId, title = context.getString(R.string.error_title_generation))
             Logging.log(TAG, "handleMessageComplete: $it")
             Logging.log(TAG, it.stackTraceToString())
         }.onSuccess {
+            clearPendingStreamingConversation(conversationId)
             val finalConversation = getConversationFlow(conversationId).value
             traceDiagnostic(
                 category = "generation-finish-save",

@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -65,8 +66,10 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.CompressionRegenerationTarget
+import me.rerere.rikkahub.service.StreamingTailState
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.LedgerGenerationDialog
 import me.rerere.rikkahub.ui.components.sandbox.SandboxFileManagerDialog
@@ -97,7 +100,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val scope = rememberCoroutineScope()
 
     val setting by vm.settings.collectAsStateWithLifecycle()
-    val conversation by vm.conversation.collectAsStateWithLifecycle()
+    val conversation by vm.stableConversation.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
@@ -281,6 +284,84 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 }
 
 @Composable
+private fun TTSAutoPlayConversationBridge(
+    vm: ChatVM,
+    setting: Settings,
+) {
+    val conversation by vm.conversation.collectAsStateWithLifecycle()
+    TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
+}
+
+@Composable
+private fun StreamingChatList(
+    vm: ChatVM,
+    innerPadding: androidx.compose.foundation.layout.PaddingValues,
+    stableConversation: Conversation,
+    state: LazyListState,
+    loading: Boolean,
+    previewMode: Boolean,
+    settings: Settings,
+    hazeState: dev.chrisbanes.haze.HazeState,
+    errors: List<ChatError>,
+    onDismissError: (Uuid) -> Unit,
+    onClearAllErrors: () -> Unit,
+    onRegenerateLatestCompression: (CompressionRegenerationTarget) -> Unit,
+    onEditLatestDialogueSummary: (String) -> Unit,
+    onRegenerate: (me.rerere.ai.ui.UIMessage) -> Unit,
+    onEdit: (me.rerere.ai.ui.UIMessage) -> Unit,
+    onForkMessage: (me.rerere.ai.ui.UIMessage) -> Unit,
+    onDelete: (me.rerere.ai.ui.UIMessage) -> Unit,
+    onUpdateMessage: (MessageNode) -> Unit,
+    onClickSuggestion: (String) -> Unit,
+    onTranslate: ((me.rerere.ai.ui.UIMessage, java.util.Locale) -> Unit)?,
+    onClearTranslation: (me.rerere.ai.ui.UIMessage) -> Unit,
+    onJumpToMessage: (Int) -> Unit,
+    onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)?,
+    onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
+    onToggleFavorite: ((MessageNode) -> Unit)?,
+    onAutoScrollCheck: (String) -> Unit,
+) {
+    val stableNodes by vm.stableMessageNodes.collectAsStateWithLifecycle()
+    val streamingTail by vm.streamingTail.collectAsStateWithLifecycle()
+    val streamingUiTick by vm.streamingUiTick.collectAsStateWithLifecycle()
+    val displayedConversation = remember(stableConversation, stableNodes, streamingTail) {
+        stableConversation.withDisplayedNodes(
+            stableNodes = stableNodes,
+            streamingTail = streamingTail,
+        )
+    }
+
+    ChatList(
+        innerPadding = innerPadding,
+        conversation = displayedConversation,
+        state = state,
+        loading = loading,
+        streamingUiTick = streamingUiTick,
+        previewMode = previewMode,
+        settings = settings,
+        hazeState = hazeState,
+        errors = errors,
+        onDismissError = onDismissError,
+        onClearAllErrors = onClearAllErrors,
+        onRegenerateLatestCompression = onRegenerateLatestCompression,
+        onEditLatestDialogueSummary = onEditLatestDialogueSummary,
+        onRegenerate = onRegenerate,
+        onEdit = onEdit,
+        onForkMessage = onForkMessage,
+        onDelete = onDelete,
+        onUpdateMessage = onUpdateMessage,
+        onClickSuggestion = onClickSuggestion,
+        onTranslate = onTranslate,
+        onClearTranslation = onClearTranslation,
+        onJumpToMessage = onJumpToMessage,
+        onToolApproval = onToolApproval,
+        onToolAnswer = onToolAnswer,
+        onToggleFavorite = onToggleFavorite,
+        onAutoScrollCheck = onAutoScrollCheck,
+    )
+}
+
+@Composable
 private fun ChatPageContent(
     inputState: ChatInputState,
     loadingJob: Job?,
@@ -304,7 +385,7 @@ private fun ChatPageContent(
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
 
-    TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
+    TTSAutoPlayConversationBridge(vm = vm, setting = setting)
     val assistant = setting.assistants.find { it.id == conversation.assistantId }
         ?: setting.getCurrentAssistant()
     val workflowEnabled = assistant.localTools.contains(LocalToolOption.WorkflowControl)
@@ -442,9 +523,10 @@ private fun ChatPageContent(
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
-            ChatList(
+            StreamingChatList(
+                vm = vm,
                 innerPadding = innerPadding,
-                conversation = conversation,
+                stableConversation = conversation,
                 state = chatListState,
                 loading = loadingJob != null,
                 previewMode = previewMode,
@@ -512,6 +594,13 @@ private fun ChatPageContent(
                 },
                 onToggleFavorite = { node ->
                     vm.toggleMessageFavorite(node)
+                },
+                onAutoScrollCheck = { detail ->
+                    vm.recordUiDiagnostic(
+                        category = "auto-scroll-check",
+                        detail = detail,
+                        phase = "tailTick",
+                    )
                 },
             )
         }
@@ -694,5 +783,21 @@ private fun Conversation.findCompressionScrollIndex(eventId: Long): Int? {
         }
     }
     return null
+}
+
+private fun Conversation.withDisplayedNodes(
+    stableNodes: List<MessageNode>,
+    streamingTail: StreamingTailState?,
+): Conversation {
+    if (streamingTail == null) {
+        return copy(messageNodes = stableNodes)
+    }
+
+    val displayedNodes = stableNodes.toMutableList()
+    when {
+        streamingTail.index < displayedNodes.size -> displayedNodes[streamingTail.index] = streamingTail.node
+        else -> displayedNodes.add(streamingTail.node)
+    }
+    return copy(messageNodes = displayedNodes)
 }
 

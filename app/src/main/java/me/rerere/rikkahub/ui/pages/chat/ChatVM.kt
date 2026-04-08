@@ -46,6 +46,7 @@ import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.CompressionRegenerationTarget
 import me.rerere.rikkahub.service.CompressionUiState
 import me.rerere.rikkahub.service.LedgerGenerationUiState
+import me.rerere.rikkahub.service.StreamingTailState
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.utils.UiState
@@ -70,6 +71,10 @@ class ChatVM(
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val stableConversation: StateFlow<Conversation> = chatService.getConversationStableFlow(_conversationId)
+    val stableMessageNodes: StateFlow<List<MessageNode>> = chatService.getMessageNodesFlow(_conversationId)
+    val streamingTail: StateFlow<StreamingTailState?> = chatService.getStreamingTailFlow(_conversationId)
+    val streamingUiTick: StateFlow<Long> = chatService.getStreamingUiTickFlow(_conversationId)
     var chatListInitialized by mutableStateOf(false) // 鑱婂ぉ鍒楄〃鏄惁宸茬粡婊氬姩鍒板簳閮?
 
     // 鑱婂ぉ杈撳叆鐘舵€?- 淇濆瓨鍦?ViewModel 涓伩鍏?TransactionTooLargeException
@@ -197,6 +202,15 @@ class ChatVM(
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
     fun clearAllErrors() = chatService.clearAllErrors()
+
+    fun recordUiDiagnostic(category: String, detail: String, phase: String? = null) {
+        chatService.recordUiDiagnostic(
+            category = category,
+            conversationId = _conversationId,
+            detail = detail,
+            phase = phase,
+        )
+    }
 
     // 鐢熸垚瀹屾垚
     val generationDoneFlow: SharedFlow<Uuid> = chatService.generationDoneFlow

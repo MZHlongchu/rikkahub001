@@ -9,11 +9,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
 
 private const val TAG = "ConversationSession"
 private const val IDLE_TIMEOUT_MS = 5_000L
+
+data class StreamingTailState(
+    val node: MessageNode,
+    val index: Int,
+    val source: String,
+    val version: Long,
+)
 
 class ConversationSession(
     val id: Uuid,
@@ -21,8 +29,18 @@ class ConversationSession(
     private val scope: CoroutineScope,
     private val onIdle: (Uuid) -> Unit,
 ) {
+    private var currentConversation: Conversation = initial
+
     // 会话状态
     val state = MutableStateFlow(initial)
+    private val _stableConversationState = MutableStateFlow(initial)
+    val stableConversationState: StateFlow<Conversation> = _stableConversationState.asStateFlow()
+    private val _messageNodesState = MutableStateFlow(initial.messageNodes)
+    val messageNodesState: StateFlow<List<MessageNode>> = _messageNodesState.asStateFlow()
+    private val _streamingTailState = MutableStateFlow<StreamingTailState?>(null)
+    val streamingTailState: StateFlow<StreamingTailState?> = _streamingTailState.asStateFlow()
+    private val _streamingUiTickState = MutableStateFlow(0L)
+    val streamingUiTickState: StateFlow<Long> = _streamingUiTickState.asStateFlow()
 
     // 原子引用计数
     private val refCount = AtomicInteger(0)
@@ -79,6 +97,44 @@ class ConversationSession(
 
     fun getJob(): Job? = _generationJob.value
 
+    fun getCurrentConversation(): Conversation = currentConversation
+
+    fun replaceConversation(conversation: Conversation) {
+        currentConversation = conversation
+        _stableConversationState.value = conversation
+        _messageNodesState.value = conversation.messageNodes
+        _streamingTailState.value = null
+        state.value = conversation
+    }
+
+    fun updateConversation(update: (Conversation) -> Conversation) {
+        replaceConversation(update(currentConversation))
+    }
+
+    fun applyStreamingConversation(conversation: Conversation, source: String): Long {
+        currentConversation = conversation
+        val nodes = conversation.messageNodes
+        if (nodes.isEmpty()) {
+            replaceConversation(conversation)
+            return _streamingUiTickState.value
+        }
+
+        val committedNodes = nodes.dropLast(1)
+        _stableConversationState.value = conversation.copy(messageNodes = committedNodes)
+        _messageNodesState.value = committedNodes
+
+        val nextVersion = _streamingUiTickState.value + 1L
+        _streamingTailState.value = StreamingTailState(
+            node = nodes.last(),
+            index = committedNodes.size,
+            source = source,
+            version = nextVersion,
+        )
+        _streamingUiTickState.value = nextVersion
+        state.value = conversation
+        return nextVersion
+    }
+
     private fun scheduleIdleCheck() {
         idleCheckJob?.cancel()
         idleCheckJob = scope.launch {
@@ -99,5 +155,6 @@ class ConversationSession(
         _generationJob.value = null
         idleCheckJob?.cancel()
         idleCheckJob = null
+        _streamingTailState.value = null
     }
 }

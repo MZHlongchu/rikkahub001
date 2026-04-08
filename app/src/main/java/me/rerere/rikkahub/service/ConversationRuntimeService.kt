@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
@@ -38,12 +39,28 @@ class ConversationRuntimeService(
         return getOrCreateSession(conversationId).state
     }
 
+    fun getConversationStableFlow(conversationId: Uuid): StateFlow<Conversation> {
+        return getOrCreateSession(conversationId).stableConversationState
+    }
+
+    fun getMessageNodesFlow(conversationId: Uuid): StateFlow<List<MessageNode>> {
+        return getOrCreateSession(conversationId).messageNodesState
+    }
+
+    fun getStreamingTailFlow(conversationId: Uuid): StateFlow<StreamingTailState?> {
+        return getOrCreateSession(conversationId).streamingTailState
+    }
+
+    fun getStreamingUiTickFlow(conversationId: Uuid): StateFlow<Long> {
+        return getOrCreateSession(conversationId).streamingUiTickState
+    }
+
     fun getCurrentConversation(conversationId: Uuid): Conversation {
-        return getConversationFlow(conversationId).value
+        return getOrCreateSession(conversationId).getCurrentConversation()
     }
 
     fun getCurrentConversationOrNull(conversationId: Uuid): Conversation? {
-        return sessions[conversationId]?.state?.value
+        return sessions[conversationId]?.getCurrentConversation()
     }
 
     fun getGenerationJobStateFlow(conversationId: Uuid): Flow<Job?> {
@@ -107,12 +124,25 @@ class ConversationRuntimeService(
     fun updateConversation(conversationId: Uuid, conversation: Conversation) {
         if (conversation.id != conversationId) return
         val session = getOrCreateSession(conversationId)
-        checkFilesDelete(newConversation = conversation, oldConversation = session.state.value)
-        session.state.value = conversation
+        checkFilesDelete(newConversation = conversation, oldConversation = session.getCurrentConversation())
+        session.replaceConversation(conversation)
     }
 
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {
-        updateConversation(conversationId, update(getConversationFlow(conversationId).value))
+        val session = getOrCreateSession(conversationId)
+        val updatedConversation = update(session.getCurrentConversation())
+        updateConversation(conversationId, updatedConversation)
+    }
+
+    fun updateStreamingConversation(
+        conversationId: Uuid,
+        conversation: Conversation,
+        source: String,
+    ): Long {
+        if (conversation.id != conversationId) return getOrCreateSession(conversationId).streamingUiTickState.value
+        val session = getOrCreateSession(conversationId)
+        checkFilesDelete(newConversation = conversation, oldConversation = session.getCurrentConversation())
+        return session.applyStreamingConversation(conversation, source)
     }
 
     private fun getOrCreateSession(conversationId: Uuid): ConversationSession {

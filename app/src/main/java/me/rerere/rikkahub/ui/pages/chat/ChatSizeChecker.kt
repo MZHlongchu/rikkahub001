@@ -36,14 +36,24 @@ private val DefaultSizeInfo = ConversationSizeInfo(
 
 @Composable
 fun rememberConversationSizeInfo(conversation: Conversation): ConversationSizeInfo {
-    return remember(conversation.messageNodes) {
-        val nodeCount = conversation.messageNodes.size
-        val lastAssistantInputTokens = conversation.messageNodes.asReversed()
-            .map { it.currentMessage }
-            .firstOrNull { it.role == MessageRole.ASSISTANT }
-            ?.usage
-            ?.promptTokens
-            ?: 0
+    val lastAssistantInputTokens = conversation.messageNodes.asReversed()
+        .map { it.currentMessage }
+        .firstOrNull { it.role == MessageRole.ASSISTANT }
+        ?.usage
+        ?.promptTokens
+        ?: 0
+    return rememberConversationSizeInfo(
+        nodeCount = conversation.messageNodes.size,
+        lastAssistantInputTokens = lastAssistantInputTokens,
+    )
+}
+
+@Composable
+fun rememberConversationSizeInfo(
+    nodeCount: Int,
+    lastAssistantInputTokens: Int,
+): ConversationSizeInfo {
+    return remember(nodeCount, lastAssistantInputTokens) {
         val exceedNodeCountThreshold = nodeCount > MESSAGE_NODE_WARNING_THRESHOLD
         val exceedInputTokenThreshold = lastAssistantInputTokens > LAST_ASSISTANT_INPUT_TOKEN_WARNING_THRESHOLD
         ConversationSizeInfo(
