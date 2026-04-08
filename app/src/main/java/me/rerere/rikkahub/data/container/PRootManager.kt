@@ -20,10 +20,13 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
+import java.io.FileNotFoundException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Singleton
 import me.rerere.rikkahub.data.files.FileFolders
@@ -120,9 +123,94 @@ class PRootManager(
     private var currentEnableContainerRuntime = false
 
     private fun formatContainerError(throwable: Throwable): String {
-        return throwable.stackTraceToString().ifBlank {
+        val builder = StringBuilder()
+        val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
+        appendThrowableDetails(
+            builder = builder,
+            throwable = throwable,
+            label = null,
+            indent = "",
+            seen = seen
+        )
+        return builder.toString().ifBlank {
             throwable.message ?: "Unknown error: ${throwable.javaClass.name}"
         }
+    }
+
+    private fun appendThrowableDetails(
+        builder: StringBuilder,
+        throwable: Throwable,
+        label: String?,
+        indent: String,
+        seen: MutableSet<Throwable>,
+    ) {
+        if (!seen.add(throwable)) {
+            builder.append(indent)
+            if (label != null) {
+                builder.append(label).append(": ")
+            }
+            builder.append("[CIRCULAR REFERENCE: ").append(throwable.javaClass.name).append(']').appendLine()
+            return
+        }
+
+        builder.append(indent)
+        if (label != null) {
+            builder.append(label).append(": ")
+        }
+        builder.append(throwable.javaClass.name)
+        throwable.message
+            ?.takeIf { it.isNotBlank() }
+            ?.let { builder.append(": ").append(it) }
+        builder.appendLine()
+
+        throwable.stackTrace.forEach { frame ->
+            builder.append(indent).append("\tat ").append(frame).appendLine()
+        }
+
+        throwable.suppressed.forEach { suppressed ->
+            appendThrowableDetails(
+                builder = builder,
+                throwable = suppressed,
+                label = "Suppressed",
+                indent = "$indent\t",
+                seen = seen
+            )
+        }
+
+        throwable.cause?.let { cause ->
+            appendThrowableDetails(
+                builder = builder,
+                throwable = cause,
+                label = "Caused by",
+                indent = indent,
+                seen = seen
+            )
+        }
+    }
+
+    private fun resolveRootfsAssetPath(): String {
+        val candidates = listOf(
+            ALPINE_ROOTFS_ASSET,
+            ALPINE_ROOTFS_ASSET.removeSuffix(".gz")
+        ).distinct()
+        val availableAssets = context.assets.list("rootfs")?.toSet().orEmpty()
+
+        candidates.firstOrNull { candidate ->
+            availableAssets.contains(candidate.substringAfterLast('/'))
+        }?.let { return it }
+
+        candidates.forEach { candidate ->
+            try {
+                context.assets.open(candidate).close()
+                return candidate
+            } catch (_: FileNotFoundException) {
+                // Try next candidate.
+            }
+        }
+
+        throw FileNotFoundException(
+            "Missing rootfs asset. Tried=${candidates.joinToString()} available=${availableAssets.joinToString()}"
+        )
     }
 
     /**
@@ -1716,7 +1804,7 @@ fi
                 if (arch != "aarch64") {
                     throw IllegalStateException("Only arm64 rootfs is bundled. Detected architecture: $arch")
                 }
-                val rootfsAssetName = ALPINE_ROOTFS_ASSET
+                val rootfsAssetName = resolveRootfsAssetPath()
 
                 Log.d(TAG, "Loading rootfs from assets: $rootfsAssetName for architecture: $arch")
                 context.assets.open(rootfsAssetName).use { input ->
