@@ -59,13 +59,18 @@ class PRootManager(
         val modified: Long,
     )
 
+    private data class DeferredSymlink(
+        val linkFile: File,
+        val linkTarget: String,
+    )
+
     companion object {
         private const val TAG = "PRootManager"
         private const val DEFAULT_TIMEOUT_MS = 300_000L // 5分钟
         private const val DEFAULT_MAX_MEMORY_MB = 6144  // 6GB for compilation tasks
 
         // Rootfs 版本控制 - 每次更新 alpine rootfs 时递增此版本号
-        private const val ROOTFS_VERSION = 2
+        private const val ROOTFS_VERSION = 3
         private const val ROOTFS_VERSION_FILE = "rootfs_version.txt"
         private const val ALPINE_ROOTFS_VERSION = "3.23.3"
         private const val ALPINE_ROOTFS_ASSET = "rootfs/alpine-minirootfs-$ALPINE_ROOTFS_VERSION-aarch64.tar.gz"
@@ -860,6 +865,11 @@ fi
                     return@withContext initialize()
                 }
                 is ContainerStateEnum.Stopped -> {
+                    if (checkRootfsNeedsUpdate()) {
+                        Log.i(TAG, "Rootfs update detected while starting stopped container, reinitializing runtime")
+                        _containerState.value = ContainerStateEnum.NotInitialized
+                        return@withContext initialize()
+                    }
                     val layoutStatus = inspectLayoutStatus()
                     if (!layoutStatus.compatible) {
                         _containerState.value = ContainerStateEnum.NeedsRebuild(
@@ -1894,6 +1904,7 @@ fi
      */
     private fun extractTar(input: java.io.InputStream, targetDir: File) {
         val buffer = ByteArray(8192)
+        val deferredSymlinks = mutableListOf<DeferredSymlink>()
 
         while (true) {
             // 读取 tar 头部（512 字节）
@@ -1974,13 +1985,16 @@ fi
                             android.system.Os.symlink(linkName, file.absolutePath)
                             Log.d(TAG, "Created symlink: ${file.absolutePath} -> $linkName")
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to create symlink: ${file.absolutePath} -> $linkName, falling back to empty file", e)
-                            file.createNewFile()
+                            Log.w(
+                                TAG,
+                                "Failed to create symlink: ${file.absolutePath} -> $linkName, deferring materialization",
+                                e
+                            )
+                            deferredSymlinks += DeferredSymlink(
+                                linkFile = file,
+                                linkTarget = linkName
+                            )
                         }
-                    } else {
-                        // 如果链接名为空，创建空文件占位
-                        file.parentFile?.mkdirs()
-                        file.createNewFile()
                     }
                 }
                 else -> {
@@ -2004,6 +2018,61 @@ fi
                 remainingPadding -= skipped.toInt()
             }
         }
+
+        materializeDeferredSymlinks(targetDir, deferredSymlinks)
+    }
+
+    private fun materializeDeferredSymlinks(targetDir: File, deferredSymlinks: List<DeferredSymlink>) {
+        deferredSymlinks.forEach { deferred ->
+            val resolvedTarget = resolveDeferredSymlinkTarget(targetDir, deferred.linkFile, deferred.linkTarget)
+            if (resolvedTarget == null || !resolvedTarget.exists()) {
+                Log.e(
+                    TAG,
+                    "Failed to materialize deferred symlink: ${deferred.linkFile.absolutePath} -> ${deferred.linkTarget}"
+                )
+                return@forEach
+            }
+
+            runCatching { deferred.linkFile.deleteRecursively() }
+
+            if (resolvedTarget.isDirectory) {
+                copyPathPreservingLinks(resolvedTarget.toPath(), deferred.linkFile.toPath())
+            } else {
+                deferred.linkFile.parentFile?.mkdirs()
+                Files.copy(
+                    resolvedTarget.toPath(),
+                    deferred.linkFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES
+                )
+            }
+
+            if (resolvedTarget.canExecute()) {
+                deferred.linkFile.setExecutable(true, false)
+            }
+
+            Log.i(
+                TAG,
+                "Materialized deferred symlink as real path: ${deferred.linkFile.absolutePath} <- ${resolvedTarget.absolutePath}"
+            )
+        }
+    }
+
+    private fun resolveDeferredSymlinkTarget(targetDir: File, linkFile: File, linkTarget: String): File? {
+        val targetRoot = targetDir.toPath().toAbsolutePath().normalize()
+        val resolved = if (linkTarget.startsWith("/")) {
+            targetRoot.resolve(linkTarget.removePrefix("/")).normalize()
+        } else {
+            val parent = linkFile.parentFile ?: return null
+            parent.toPath().toAbsolutePath().normalize().resolve(linkTarget).normalize()
+        }
+
+        if (!resolved.startsWith(targetRoot)) {
+            Log.w(TAG, "Deferred symlink target escapes rootfs: $linkTarget")
+            return null
+        }
+
+        return resolved.toFile()
     }
 
     private fun getDeviceArchitecture(): String {
@@ -2035,6 +2104,13 @@ fi
      */
     suspend fun restoreState(): Boolean = withContext(Dispatchers.IO) {
         try {
+            if (checkRootfsNeedsUpdate()) {
+                globalContainer = null
+                _containerState.value = ContainerStateEnum.NotInitialized
+                Log.i(TAG, "[RestoreState] Rootfs update required, forcing reinitialization")
+                return@withContext false
+            }
+
             if (!checkInitializationStatus()) {
                 Log.d(TAG, "[RestoreState] Rootfs not initialized, cannot restore state")
                 return@withContext false
