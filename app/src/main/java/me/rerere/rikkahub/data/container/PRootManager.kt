@@ -282,7 +282,13 @@ class PRootManager(
     private fun missingSystemPaths(): List<String> {
         return (requiredSystemPaths() + criticalSystemPaths())
             .distinct()
-            .filter { relative -> !File(systemLayerDir, relative).exists() }
+            .filter { relative -> !hostPathExistsNoFollow(File(systemLayerDir, relative)) }
+    }
+
+    private fun hostPathExistsNoFollow(file: File): Boolean {
+        return runCatching {
+            Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)
+        }.getOrDefault(false)
     }
 
     private fun inspectLayoutStatus(): ContainerLayoutStatus {
