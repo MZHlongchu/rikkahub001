@@ -1712,9 +1712,7 @@ private fun ContainerStatusCard() {
     // Try restoring persisted container state when opening this card.
     LaunchedEffect(prootManager) {
         runCatching {
-            if (prootManager.checkInitializationStatus()) {
-                prootManager.restoreState()
-            }
+            prootManager.restoreState()
         }
     }
 

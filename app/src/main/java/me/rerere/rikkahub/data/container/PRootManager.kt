@@ -71,6 +71,15 @@ class PRootManager(
         val systemResolvConf: File,
     )
 
+    private data class BaseRuntimeStatus(
+        val prootReady: Boolean,
+        val rootfsReady: Boolean,
+        val issues: List<String>,
+    ) {
+        val ready: Boolean
+            get() = prootReady && rootfsReady
+    }
+
     private enum class ContainerExecutionProfile {
         DEFAULT,
         PACKAGE_MANAGER,
@@ -245,24 +254,103 @@ class PRootManager(
     }
 
     /**
-     * 检查是否需要初始化（资源文件是否存在且有效）
+     * 检查基础运行时是否可用（不包含 system-v2 等系统层）
      */
     fun checkInitializationStatus(): Boolean {
-        val prootBinary = File(prootDir, "proot")
-        val rootfsValid = rootfsDir.exists()
-                && rootfsDir.listFiles()?.isNotEmpty() == true
-                && File(rootfsDir, "bin/sh").exists()
-                && File(rootfsDir, "bin/sh").length() > 0
+        val status = inspectBaseRuntimeStatus()
+        Log.d(
+            TAG,
+            "Checking base runtime: ready=${status.ready}, prootReady=${status.prootReady}, " +
+                "rootfsReady=${status.rootfsReady}, issues=${status.issues.joinToString()}"
+        )
+        return status.ready
+    }
 
-        if (prootBinary.exists() && rootfsDir.exists()) {
-            val shFile = File(rootfsDir, "bin/sh")
-            Log.d(TAG, "Checking rootfs: exists=${rootfsDir.exists()}, " +
-                    "hasFiles=${rootfsDir.listFiles()?.isNotEmpty()}, " +
-                    "shExists=${shFile.exists()}, " +
-                    "shSize=${if (shFile.exists()) shFile.length() else 0}")
+    private fun requiredRootfsPaths(): List<String> = listOf(
+        "bin/sh",
+        "bin/busybox",
+        "lib/ld-musl-aarch64.so.1",
+        "etc/apk/repositories",
+    )
+
+    private fun inspectBaseRuntimeStatus(): BaseRuntimeStatus {
+        val issues = mutableListOf<String>()
+        val prootBinary = File(prootDir, "proot")
+        val prootReady = prootBinary.exists() && prootBinary.isFile && prootBinary.length() > 0
+        if (!prootReady) {
+            issues.add("Missing or invalid proot binary")
         }
 
-        return prootBinary.exists() && rootfsValid
+        val rootfsExists = rootfsDir.exists() && rootfsDir.isDirectory
+        val rootfsHasFiles = rootfsDir.listFiles()?.isNotEmpty() == true
+        if (!rootfsExists || !rootfsHasFiles) {
+            issues.add("Missing or empty rootfs directory")
+        }
+
+        val missingRootfsPaths = requiredRootfsPaths()
+            .map { relative -> relative to File(rootfsDir, relative) }
+            .filter { (_, file) -> !file.exists() || !file.isFile || file.length() <= 0L }
+            .map { it.first }
+
+        if (missingRootfsPaths.isNotEmpty()) {
+            issues.add("Missing rootfs paths: ${missingRootfsPaths.joinToString()}")
+        }
+
+        return BaseRuntimeStatus(
+            prootReady = prootReady,
+            rootfsReady = rootfsExists && rootfsHasFiles && missingRootfsPaths.isEmpty(),
+            issues = issues,
+        )
+    }
+
+    private fun hasRuntimeArtifacts(): Boolean {
+        return containerConfigDir.exists() ||
+            systemLayerDir.exists() ||
+            legacyUpperDir.exists() ||
+            legacyWorkDir.exists() ||
+            layoutVersionFile.exists()
+    }
+
+    private suspend fun ensureBaseRuntimeReady(allowRepair: Boolean): BaseRuntimeStatus = withContext(Dispatchers.IO) {
+        prootDir.mkdirs()
+        containerDir.mkdirs()
+
+        var status = inspectBaseRuntimeStatus()
+        if (status.ready || !allowRepair) {
+            return@withContext status
+        }
+
+        Log.w(TAG, "Base runtime is incomplete, attempting repair: ${status.issues.joinToString()}")
+
+        if (!status.prootReady) {
+            val prootBinary = File(prootDir, "proot")
+            if (prootBinary.exists()) {
+                if (prootBinary.isDirectory) {
+                    prootBinary.deleteRecursively()
+                } else {
+                    prootBinary.delete()
+                }
+            }
+            extractPRootBinary()
+        }
+
+        if (!status.rootfsReady) {
+            if (rootfsDir.exists()) {
+                rootfsDir.deleteRecursively()
+            }
+            rootfsDir.mkdirs()
+            extractAlpineRootfs()
+        }
+
+        status = inspectBaseRuntimeStatus()
+        if (!status.ready) {
+            throw IllegalStateException(
+                "Base runtime repair failed: ${status.issues.joinToString()}"
+            )
+        }
+
+        Log.i(TAG, "Base runtime repair completed successfully")
+        status
     }
 
     private fun requiredSystemPaths(): List<String> = listOf(
@@ -404,6 +492,34 @@ class PRootManager(
         }
     }
 
+    private fun repairSystemLayerIfPossible(layoutStatus: ContainerLayoutStatus): ContainerLayoutStatus {
+        if (layoutStatus.compatible || layoutStatus.hasLegacyLayout) {
+            return layoutStatus
+        }
+
+        val canRepair = when {
+            layoutStatus.hasCurrentLayout -> layoutStatus.version == null || layoutStatus.version == LAYOUT_VERSION
+            else -> layoutStatus.version == LAYOUT_VERSION
+        }
+
+        if (!canRepair) {
+            return layoutStatus
+        }
+
+        Log.w(
+            TAG,
+            "Container system layer is incomplete, attempting recovery: " +
+                "version=${layoutStatus.version}, hasCurrentLayout=${layoutStatus.hasCurrentLayout}"
+        )
+
+        ensureSystemLayerReady()
+        if (layoutStatus.version == null) {
+            writeLayoutVersion()
+        }
+
+        return inspectLayoutStatus()
+    }
+
     private fun writeLayoutVersion() {
         layoutVersionFile.parentFile?.mkdirs()
         layoutVersionFile.writeText(LAYOUT_VERSION.toString())
@@ -432,18 +548,9 @@ class PRootManager(
             containerDir.mkdirs()
             
             _containerState.value = ContainerStateEnum.Initializing(0.2f)
-            
-            // 解压 PRoot 二进制文件
-            Log.d(TAG, "Extracting PRoot binary...")
-            extractPRootBinary()
-            Log.d(TAG, "PRoot binary extracted successfully")
-            
-            _containerState.value = ContainerStateEnum.Initializing(0.5f)
-            
-            // 解压 Alpine rootfs
-            Log.d(TAG, "Extracting Alpine rootfs...")
-            extractAlpineRootfs()
-            Log.d(TAG, "Alpine rootfs extracted successfully")
+
+            // 初始化基础层；显式初始化仍会在后续重建 system-v2。
+            ensureBaseRuntimeReady(allowRepair = true)
             
             _containerState.value = ContainerStateEnum.Initializing(0.8f)
 
@@ -963,19 +1070,27 @@ fi
                     return@withContext Result.failure(IllegalStateException("Already initializing"))
                 }
                 is ContainerStateEnum.NotInitialized -> {
-                    // 需要初始化
-                    return@withContext initialize()
-                }
-                is ContainerStateEnum.Stopped -> {
-                    ensureSystemLayerReady()
-                    val layoutStatus = inspectLayoutStatus()
-                    if (!layoutStatus.compatible) {
-                        _containerState.value = ContainerStateEnum.NeedsRebuild(
-                            layoutStatus.reason ?: "Container layout is incompatible. Rebuild is required."
-                        )
-                        return@withContext Result.failure(IllegalStateException("Container layout requires rebuild"))
+                    if (!hasRuntimeArtifacts()) {
+                        return@withContext initialize()
                     }
-                    // 从停止状态恢复
+                }
+                is ContainerStateEnum.NeedsRebuild -> {
+                    return@withContext Result.failure(IllegalStateException("Container rebuild required"))
+                }
+                is ContainerStateEnum.Stopped -> Unit
+                is ContainerStateEnum.Error -> {
+                    if (!hasRuntimeArtifacts()) {
+                        _containerState.value = ContainerStateEnum.NotInitialized
+                        return@withContext initialize()
+                    }
+                }
+            }
+
+            ensureBaseRuntimeReady(allowRepair = true)
+
+            val layoutStatus = repairSystemLayerIfPossible(inspectLayoutStatus())
+            when {
+                layoutStatus.compatible -> {
                     if (globalContainer == null) {
                         createGlobalContainer()
                     } else {
@@ -987,16 +1102,21 @@ fi
                     persistContainerRuntimeEnabled(true)
                     return@withContext Result.success(Unit)
                 }
-                is ContainerStateEnum.NeedsRebuild -> {
-                    return@withContext Result.failure(IllegalStateException("Container rebuild required"))
+
+                layoutStatus.needsRebuild -> {
+                    _containerState.value = ContainerStateEnum.NeedsRebuild(
+                        layoutStatus.reason ?: "Container layout is incompatible. Rebuild is required."
+                    )
+                    return@withContext Result.failure(IllegalStateException("Container layout requires rebuild"))
                 }
-                is ContainerStateEnum.Error -> {
-                    // 错误后重试，需要重新初始化
+
+                else -> {
                     _containerState.value = ContainerStateEnum.NotInitialized
                     return@withContext initialize()
                 }
             }
         } catch (e: Exception) {
+            _containerState.value = ContainerStateEnum.Error(formatContainerError(e))
             Result.failure(e)
         }
     }
@@ -2500,20 +2620,22 @@ fi
 
     /**
      * App 启动时恢复容器状态
-     * 如果 upper 目录存在且有效，恢复到 Stopped 状态
-     * 调用此方法前应先调用 checkInitializationStatus() 确认已初始化
+     * 如果存在可恢复的运行时痕迹，则优先静默补齐基础层并恢复到 Stopped 状态
      *
      * @return 是否成功恢复状态
      */
     suspend fun restoreState(): Boolean = withContext(Dispatchers.IO) {
         try {
-            if (!checkInitializationStatus()) {
-                Log.d(TAG, "[RestoreState] Rootfs not initialized, cannot restore state")
+            val runtimeArtifacts = hasRuntimeArtifacts()
+            val baseRuntimeStatus = ensureBaseRuntimeReady(allowRepair = runtimeArtifacts)
+            if (!baseRuntimeStatus.ready) {
+                globalContainer = null
+                _containerState.value = ContainerStateEnum.NotInitialized
+                Log.d(TAG, "[RestoreState] Base runtime unavailable and no recoverable artifacts were found")
                 return@withContext false
             }
 
-            ensureSystemLayerReady()
-            val layoutStatus = inspectLayoutStatus()
+            val layoutStatus = repairSystemLayerIfPossible(inspectLayoutStatus())
             val workDir = File(containerDir, "work").apply { mkdirs() }
 
             when {
@@ -2542,12 +2664,13 @@ fi
                 else -> {
                     globalContainer = null
                     _containerState.value = ContainerStateEnum.NotInitialized
-                    Log.d(TAG, "[RestoreState] No existing runtime layer to restore")
+                    Log.d(TAG, "[RestoreState] No existing system layer to restore")
                     false
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "[RestoreState] Failed to restore container state", e)
+            _containerState.value = ContainerStateEnum.Error(formatContainerError(e))
             false
         }
     }
