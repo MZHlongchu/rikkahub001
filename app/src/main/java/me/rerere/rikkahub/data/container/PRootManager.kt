@@ -147,6 +147,43 @@ class PRootManager(
     private val settingsStore: SettingsStore
         get() = org.koin.core.context.GlobalContext.get().get()
 
+    private fun reconcileAutoManagementForCurrentState() {
+        val lifecycle = ProcessLifecycleOwner.get().lifecycle
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            return
+        }
+
+        if (!currentEnableContainerRuntime) {
+            Log.d(TAG, "[AutoManage] Current setting disables container runtime, skipping immediate reconcile")
+            return
+        }
+
+        Log.d(TAG, "[AutoManage] Reconciling current foreground state immediately, state=${_containerState.value}")
+        when (_containerState.value) {
+            is ContainerStateEnum.Stopped -> {
+                GlobalScope.launch(Dispatchers.IO) {
+                    val result = start()
+                    Log.d(TAG, "[AutoManage] Immediate auto-start result: $result")
+                }
+            }
+
+            is ContainerStateEnum.NotInitialized -> {
+                GlobalScope.launch(Dispatchers.IO) {
+                    val restored = restoreState()
+                    Log.d(TAG, "[AutoManage] Immediate restoreState() result: restored=$restored state=${_containerState.value}")
+                    if (_containerState.value is ContainerStateEnum.Stopped) {
+                        val result = start()
+                        Log.d(TAG, "[AutoManage] Immediate auto-start after restore result: $result")
+                    }
+                }
+            }
+
+            else -> {
+                Log.d(TAG, "[AutoManage] Immediate reconcile not needed for state=${_containerState.value}")
+            }
+        }
+    }
+
     private suspend fun persistContainerRuntimeEnabled(enabled: Boolean) {
         currentEnableContainerRuntime = enabled
         runCatching {
@@ -2679,7 +2716,7 @@ fi
      * 启用容器自动管理
      * - 应用进入前台时自动启动已存在的容器（如果启用且处于 Stopped 状态）
      * - 不再自动初始化/重建容器，避免意外清空系统层
-     * - 应用进入后台时自动停止容器
+     * - 应用进入后台时不自动停止容器，除非用户显式手动关闭
      *
      * @param enableContainerRuntime 用户是否启用了容器运行时功能
      */
@@ -2691,6 +2728,7 @@ fi
         // 如果已经添加过 observer，不再重复添加
         if (autoManagementEnabled) {
             Log.d(TAG, "[AutoManage] Auto management already enabled, just updating setting to $enableContainerRuntime")
+            reconcileAutoManagementForCurrentState()
             return
         }
 
@@ -2741,22 +2779,13 @@ fi
                             }
                         }
                     }
-                    Lifecycle.Event.ON_STOP -> {
-                        // 应用进入后台
-                        Log.d(TAG, "App went to background")
-                        if (false && currentEnableContainerRuntime && _containerState.value == ContainerStateEnum.Running) {
-                            Log.d(TAG, "Auto-stopping container")
-                            GlobalScope.launch(Dispatchers.IO) {
-                                stop()
-                            }
-                        }
-                    }
                     else -> {}
                 }
             }
         }
         lifecycle.addObserver(observer)
         autoManagementObserver = observer
+        reconcileAutoManagementForCurrentState()
     }
 
     // ==================== Background Process Management ====================
