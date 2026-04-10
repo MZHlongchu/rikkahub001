@@ -326,7 +326,14 @@ class PRootManager(
 
         val missingRootfsPaths = requiredRootfsPaths()
             .map { relative -> relative to File(rootfsDir, relative) }
-            .filter { (_, file) -> !file.exists() || !file.isFile || file.length() <= 0L }
+            .filter { (_, file) -> 
+    val path = file.toPath()
+    val exists = Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.exists(path)
+    val isRegularFile = Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+    val isSymlink = Files.isSymbolicLink(path)
+    val valid = exists && (isRegularFile || isSymlink)
+    !valid || (isRegularFile && Files.size(path) <= 0L)
+            }
             .map { it.first }
 
         if (missingRootfsPaths.isNotEmpty()) {
