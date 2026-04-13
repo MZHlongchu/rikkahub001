@@ -49,6 +49,11 @@ private const val TAG = "GenerationHandler"
 
 @Serializable
 sealed interface GenerationChunk {
+    data class TailMessage(
+        val message: UIMessage,
+        val messageIndex: Int,
+    ) : GenerationChunk
+
     data class Messages(
         val messages: List<UIMessage>
     ) : GenerationChunk
@@ -127,16 +132,22 @@ class GenerationHandler(
                             assistant = assistant,
                             settings = settings
                         )
+                        val visualMessages = messages.visualTransforms(
+                            transformers = outputTransformers,
+                            context = context,
+                            model = model,
+                            assistant = assistant,
+                            settings = settings
+                        )
                         emit(
-                            GenerationChunk.Messages(
-                                messages.visualTransforms(
-                                    transformers = outputTransformers,
-                                    context = context,
-                                    model = model,
-                                    assistant = assistant,
-                                    settings = settings
+                            if (assistant.streamOutput) {
+                                GenerationChunk.TailMessage(
+                                    message = visualMessages.last(),
+                                    messageIndex = visualMessages.lastIndex,
                                 )
-                            )
+                            } else {
+                                GenerationChunk.Messages(visualMessages)
+                            }
                         )
                     },
                     transformers = inputTransformers,

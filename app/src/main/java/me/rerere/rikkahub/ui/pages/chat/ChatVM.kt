@@ -17,13 +17,16 @@ import androidx.paging.insertSeparators
 import androidx.paging.map
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
@@ -39,6 +42,7 @@ import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.NodeFavoriteTarget
+import me.rerere.rikkahub.data.repository.ConversationMessageSearchResult
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
@@ -69,6 +73,8 @@ data class ChatInputBarState(
     val messageCount: Int = 0,
 )
 
+private const val PREVIEW_SEARCH_LIMIT = 50
+
 class ChatVM(
     id: String,
     private val context: Application,
@@ -85,6 +91,11 @@ class ChatVM(
     val stableMessageNodes: StateFlow<List<MessageNode>> = chatService.getMessageNodesFlow(_conversationId)
     val streamingTail: StateFlow<StreamingTailState?> = chatService.getStreamingTailFlow(_conversationId)
     val streamingUiTick: StateFlow<Long> = chatService.getStreamingUiTickFlow(_conversationId)
+    private val _messageWindowState = MutableStateFlow(ChatMessageWindowState())
+    val messageWindowState: StateFlow<ChatMessageWindowState> = _messageWindowState.asStateFlow()
+    private val _previewSearchResults = MutableStateFlow<List<ConversationPreviewSearchResult>>(emptyList())
+    val previewSearchResults: StateFlow<List<ConversationPreviewSearchResult>> = _previewSearchResults.asStateFlow()
+    private var previewSearchJob: Job? = null
     val headerState: StateFlow<ChatHeaderState> = stableConversation
         .map { conversation ->
             ChatHeaderState(
@@ -123,6 +134,14 @@ class ChatVM(
         // 鍒濆鍖栧璇?
         viewModelScope.launch {
             chatService.initializeConversation(_conversationId)
+        }
+
+        viewModelScope.launch {
+            stableMessageNodes.collect { nodes ->
+                _messageWindowState.update { current ->
+                    syncChatMessageWindowWithNodes(current, nodes)
+                }
+            }
         }
 
         // 璁颁綇瀵硅瘽ID, 鏂逛究涓嬫鍚姩鎭㈠
@@ -228,6 +247,85 @@ class ChatVM(
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
     fun clearAllErrors() = chatService.clearAllErrors()
+
+    suspend fun loadOlderMessages() {
+        val current = _messageWindowState.value
+        if (current.isLoadingOlder || !current.hasOlder) return
+
+        _messageWindowState.update { it.copy(isLoadingOlder = true) }
+        val newStartIndex = (current.loadedStartIndex - CHAT_OLDER_LOAD_BATCH_SIZE).coerceAtLeast(0)
+        val newLimit = current.loadedStableNodes.size + (current.loadedStartIndex - newStartIndex)
+        val loadedNodes = conversationRepo.loadConversationNodesRange(
+            conversationId = _conversationId,
+            startIndex = newStartIndex,
+            limit = newLimit,
+        )
+        _messageWindowState.value = current.copy(
+            totalStableCount = stableMessageNodes.value.size,
+            loadedStartIndex = newStartIndex,
+            loadedStableNodes = loadedNodes,
+            hasOlder = newStartIndex > 0,
+            isLoadingOlder = false,
+            initialized = true,
+        )
+    }
+
+    suspend fun ensureMessageIndexVisible(globalIndex: Int): Int {
+        val totalCount = stableMessageNodes.value.size
+        if (totalCount <= 0) return 0
+        val normalizedIndex = globalIndex.coerceIn(0, totalCount - 1)
+        val current = _messageWindowState.value
+        val currentEnd = current.loadedStartIndex + current.loadedStableNodes.size
+        if (normalizedIndex in current.loadedStartIndex until currentEnd) {
+            return normalizedIndex - current.loadedStartIndex
+        }
+
+        val targetWindowSize = maxOf(
+            CHAT_INITIAL_WINDOW_SIZE,
+            minOf(totalCount, current.loadedStableNodes.size.coerceAtLeast(CHAT_INITIAL_WINDOW_SIZE))
+        )
+        val startIndex = computeFocusedWindowStart(
+            totalCount = totalCount,
+            targetIndex = normalizedIndex,
+            windowSize = targetWindowSize,
+        )
+        val loadedNodes = conversationRepo.loadConversationNodesRange(
+            conversationId = _conversationId,
+            startIndex = startIndex,
+            limit = targetWindowSize,
+        )
+        _messageWindowState.value = current.copy(
+            totalStableCount = totalCount,
+            loadedStartIndex = startIndex,
+            loadedStableNodes = loadedNodes,
+            hasOlder = startIndex > 0,
+            isLoadingOlder = false,
+            initialized = true,
+        )
+        return normalizedIndex - startIndex
+    }
+
+    suspend fun ensureNodeVisible(nodeId: Uuid): Int? {
+        val globalIndex = conversationRepo.findNodeIndex(_conversationId, nodeId) ?: return null
+        return ensureMessageIndexVisible(globalIndex)
+    }
+
+    fun searchPreviewMessages(query: String) {
+        previewSearchJob?.cancel()
+        if (query.isBlank()) {
+            _previewSearchResults.value = emptyList()
+            return
+        }
+
+        previewSearchJob = viewModelScope.launch {
+            val results = conversationRepo.searchConversationMessages(
+                conversationId = _conversationId,
+                query = query,
+                limit = PREVIEW_SEARCH_LIMIT,
+            )
+            _previewSearchResults.value = results.map(ConversationMessageSearchResult::toPreviewSearchResult)
+        }
+    }
 
     fun recordUiDiagnostic(category: String, detail: String, phase: String? = null) {
         chatService.recordUiDiagnostic(
@@ -566,6 +664,16 @@ class ChatVM(
             else -> date.toLocalString(date.year != today.year)
         }
     }
+}
+
+private fun ConversationMessageSearchResult.toPreviewSearchResult(): ConversationPreviewSearchResult {
+    return ConversationPreviewSearchResult(
+        nodeId = nodeId,
+        messageId = messageId,
+        globalIndex = globalIndex,
+        message = message,
+        snippet = snippet,
+    )
 }
 
 

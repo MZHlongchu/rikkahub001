@@ -100,6 +100,42 @@ class MessageFtsManager(private val database: AppDatabase) {
         results
     }
 
+    suspend fun searchConversation(
+        conversationId: String,
+        keyword: String,
+        limit: Int,
+    ): List<MessageSearchResult> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<MessageSearchResult>()
+        val cursor = db.query(
+            """
+            SELECT node_id, message_id, conversation_id, title, update_at,
+                   simple_snippet(message_fts, 0, '[', ']', '...', 30) AS snippet
+            FROM message_fts
+            WHERE conversation_id = ?
+              AND text MATCH jieba_query(?)
+            ORDER BY rank, update_at DESC
+            LIMIT ?
+            """.trimIndent(),
+            arrayOf(conversationId, keyword, limit.toString())
+        )
+        Log.i(TAG, "searchConversation: $conversationId $keyword")
+        cursor.use {
+            while (it.moveToNext()) {
+                results.add(
+                    MessageSearchResult(
+                        nodeId = it.getString(0),
+                        messageId = it.getString(1),
+                        conversationId = it.getString(2),
+                        title = it.getString(3),
+                        updateAt = Instant.ofEpochMilli(it.getLong(4)),
+                        snippet = it.getString(5),
+                    )
+                )
+            }
+        }
+        results
+    }
+
     private fun deleteNodes(conversationId: String, nodeIds: List<String>) {
         val placeholders = nodeIds.joinToString(",") { "?" }
         db.execSQL(
