@@ -15,6 +15,9 @@ interface MessageNodeDAO {
     @Query("SELECT * FROM message_node WHERE conversation_id = :conversationId ORDER BY node_index ASC")
     suspend fun getNodesOfConversation(conversationId: String): List<MessageNodeEntity>
 
+    @Query("SELECT COUNT(*) FROM message_node WHERE conversation_id = :conversationId")
+    suspend fun getNodeCountOfConversation(conversationId: String): Int
+
     @Query(
         "SELECT id, node_index AS nodeIndex, select_index AS selectIndex FROM message_node " +
             "WHERE conversation_id = :conversationId ORDER BY node_index ASC LIMIT :limit OFFSET :offset"
@@ -35,6 +38,9 @@ interface MessageNodeDAO {
         offset: Int
     ): List<MessageNodeEntity>
 
+    @Query("SELECT * FROM message_node WHERE id IN (:nodeIds)")
+    suspend fun getNodesByIds(nodeIds: List<String>): List<MessageNodeEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(nodes: List<MessageNodeEntity>)
 
@@ -46,6 +52,9 @@ interface MessageNodeDAO {
 
     @Query("SELECT messages FROM message_node WHERE id = :nodeId")
     suspend fun getMessagesOfNode(nodeId: String): String?
+
+    @Query("SELECT node_index FROM message_node WHERE conversation_id = :conversationId AND id = :nodeId LIMIT 1")
+    suspend fun findNodeIndex(conversationId: String, nodeId: String): Int?
 
     @Query("DELETE FROM message_node WHERE conversation_id = :conversationId")
     suspend fun deleteByConversation(conversationId: String)

@@ -58,6 +58,22 @@ data class Conversation(
         return updateCurrentMessages(messages = messages, startIndex = 0)
     }
 
+    fun updateCurrentMessage(message: UIMessage, targetIndex: Int): Conversation {
+        require(targetIndex >= 0) { "targetIndex must be >= 0" }
+        val newNodes = messageNodes.toMutableList()
+        val node = newNodes
+            .getOrElse(targetIndex) { message.toMessageNode() }
+
+        val newNode = node.withSelectedMessage(message)
+        if (targetIndex > newNodes.lastIndex) {
+            newNodes.add(newNode)
+        } else {
+            newNodes[targetIndex] = newNode
+        }
+
+        return copy(messageNodes = newNodes)
+    }
+
     fun updateCurrentMessages(messages: List<UIMessage>, startIndex: Int): Conversation {
         require(startIndex >= 0) { "startIndex must be >= 0" }
         val newNodes = this.messageNodes.toMutableList()
@@ -66,20 +82,7 @@ data class Conversation(
             val targetIndex = startIndex + index
             val node = newNodes
                 .getOrElse(targetIndex) { message.toMessageNode() }
-
-            val newMessages = node.messages.toMutableList()
-            var newMessageIndex = node.selectIndex
-            if (newMessages.any { it.id == message.id }) {
-                newMessages[newMessages.indexOfFirst { it.id == message.id }] = message
-            } else {
-                newMessages.add(message)
-                newMessageIndex = newMessages.lastIndex
-            }
-
-            val newNode = node.copy(
-                messages = newMessages,
-                selectIndex = newMessageIndex
-            )
+            val newNode = node.withSelectedMessage(message)
 
             // 更新newNodes
             if (targetIndex > newNodes.lastIndex) {
@@ -131,6 +134,22 @@ data class ConversationCompressionState(
 
     val hasLedger: Boolean
         get() = rollingSummaryJson.isNotBlank()
+}
+
+private fun MessageNode.withSelectedMessage(message: UIMessage): MessageNode {
+    val newMessages = messages.toMutableList()
+    var newMessageIndex = selectIndex
+    if (newMessages.any { it.id == message.id }) {
+        newMessages[newMessages.indexOfFirst { it.id == message.id }] = message
+    } else {
+        newMessages.add(message)
+        newMessageIndex = newMessages.lastIndex
+    }
+
+    return copy(
+        messages = newMessages,
+        selectIndex = newMessageIndex
+    )
 }
 
 @Serializable

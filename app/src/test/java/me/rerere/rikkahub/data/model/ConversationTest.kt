@@ -71,6 +71,31 @@ class ConversationTest {
     }
 
     @Test
+    fun `updateCurrentMessage only rewrites the requested node`() {
+        val head = UIMessage.user("head")
+        val existingTailAssistant = UIMessage.assistant("old tail")
+        val streamedTailAssistant = existingTailAssistant.copy(parts = UIMessage.assistant("new tail").parts)
+
+        val conversation = Conversation(
+            id = Uuid.random(),
+            assistantId = Uuid.random(),
+            messageNodes = listOf(
+                head.toMessageNode(),
+                existingTailAssistant.toMessageNode()
+            )
+        )
+
+        val updatedConversation = conversation.updateCurrentMessage(
+            message = streamedTailAssistant,
+            targetIndex = 1
+        )
+
+        assertSame(head, updatedConversation.messageNodes[0].currentMessage)
+        assertEquals(streamedTailAssistant.id, updatedConversation.messageNodes[1].currentMessage.id)
+        assertEquals("new tail", updatedConversation.messageNodes[1].currentMessage.toText())
+    }
+
+    @Test
     fun `compression state treats dialogue summary or ledger as available summary`() {
         val dialogueOnly = ConversationCompressionState(dialogueSummaryText = "Current State:\n- Continue work")
         val ledgerOnly = ConversationCompressionState(rollingSummaryJson = """{"facts":[{"text":"Port is 6432"}]}""")

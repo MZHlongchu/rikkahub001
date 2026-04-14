@@ -218,6 +218,64 @@ class ConversationRepository(
         )
     }
 
+    suspend fun getConversationNodeCount(conversationId: Uuid): Int {
+        return messageNodeDAO.getNodeCountOfConversation(conversationId.toString())
+    }
+
+    suspend fun loadConversationNodesRange(
+        conversationId: Uuid,
+        startIndex: Int,
+        limit: Int,
+    ): List<MessageNode> {
+        if (limit <= 0) return emptyList()
+        return loadMessageNodesRange(
+            conversationId = conversationId.toString(),
+            startIndex = startIndex,
+            limit = limit,
+        )
+    }
+
+    suspend fun findNodeIndex(conversationId: Uuid, nodeId: Uuid): Int? {
+        return messageNodeDAO.findNodeIndex(conversationId.toString(), nodeId.toString())
+    }
+
+    suspend fun searchConversationMessages(
+        conversationId: Uuid,
+        query: String,
+        limit: Int = 50,
+    ): List<ConversationMessageSearchResult> {
+        if (query.isBlank() || limit <= 0) return emptyList()
+        val rawResults = messageFtsManager.searchConversation(
+            conversationId = conversationId.toString(),
+            keyword = query,
+            limit = limit * 3,
+        )
+        if (rawResults.isEmpty()) return emptyList()
+
+        val nodesById = messageNodeDAO.getNodesByIds(rawResults.map { it.nodeId }.distinct())
+            .associateBy { it.id }
+        val nodeIndexById = nodesById.values.associate { it.id to it.nodeIndex }
+
+        return rawResults.mapNotNull { result ->
+            val entity = nodesById[result.nodeId] ?: return@mapNotNull null
+            val node = decodeMessageNode(
+                entity = entity,
+                favoriteNodeIds = emptySet(),
+            )
+            val selectedMessage = node.currentMessage
+            if (selectedMessage.id.toString() != result.messageId) {
+                return@mapNotNull null
+            }
+            ConversationMessageSearchResult(
+                nodeId = node.id,
+                messageId = selectedMessage.id,
+                globalIndex = nodeIndexById[result.nodeId] ?: return@mapNotNull null,
+                message = selectedMessage,
+                snippet = result.snippet,
+            )
+        }.take(limit)
+    }
+
     suspend fun getConversationWithCompressionPayload(uuid: Uuid): Conversation? {
         val conversation = getConversationById(uuid) ?: return null
         return conversation.withCompressionPayload(getCompressionPayload(uuid))
@@ -550,10 +608,7 @@ class ConversationRepository(
     }
 
     private suspend fun loadMessageNodes(conversationId: String): List<MessageNode> {
-        val favoriteNodeIds = favoriteDAO
-            .getFavoriteNodeIdsOfConversation(conversationId)
-            .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
-            .toSet()
+        val favoriteNodeIds = loadFavoriteNodeIds(conversationId)
 
         return database.withTransaction {
             val nodes = mutableListOf<MessageNode>()
@@ -615,22 +670,35 @@ class ConversationRepository(
                     continue
                 }
                 if (page.isEmpty()) break
-                page.forEach { entity ->
-                    val messages = JsonInstant.decodeFromString<List<UIMessage>>(entity.messages)
-                    val nodeId = Uuid.parse(entity.id)
-                    nodes.add(
-                        MessageNode(
-                            id = nodeId,
-                            messages = messages,
-                            selectIndex = entity.selectIndex,
-                            isFavorite = favoriteNodeIds.contains(nodeId),
-                        )
-                    )
-                }
+                page.forEach { entity -> nodes.add(decodeMessageNode(entity, favoriteNodeIds)) }
                 offset += page.size
             }
             nodes
         }
+    }
+
+    private suspend fun loadMessageNodesRange(
+        conversationId: String,
+        startIndex: Int,
+        limit: Int,
+    ): List<MessageNode> {
+        val favoriteNodeIds = loadFavoriteNodeIds(conversationId)
+        return database.withTransaction {
+            messageNodeDAO.getNodesOfConversationPaged(
+                conversationId = conversationId,
+                limit = limit,
+                offset = startIndex,
+            ).map { entity ->
+                decodeMessageNode(entity, favoriteNodeIds)
+            }
+        }
+    }
+
+    private suspend fun loadFavoriteNodeIds(conversationId: String): Set<Uuid> {
+        return favoriteDAO
+            .getFavoriteNodeIdsOfConversation(conversationId)
+            .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
+            .toSet()
     }
 
     private suspend fun loadCompressionEvents(conversationId: String): List<CompressionEvent> {
@@ -720,6 +788,19 @@ class ConversationRepository(
         )
     }
 
+    private fun decodeMessageNode(
+        entity: MessageNodeEntity,
+        favoriteNodeIds: Set<Uuid>,
+    ): MessageNode {
+        val nodeId = Uuid.parse(entity.id)
+        return MessageNode(
+            id = nodeId,
+            messages = JsonInstant.decodeFromString<List<UIMessage>>(entity.messages),
+            selectIndex = entity.selectIndex,
+            isFavorite = favoriteNodeIds.contains(nodeId),
+        )
+    }
+
     private fun ConversationCompressionPayloadEntity.toModel(): ConversationCompressionPayload {
         return ConversationCompressionPayload(
             dialogueSummaryText = dialogueSummaryText,
@@ -774,4 +855,12 @@ data class LightConversationEntity(
 data class ConversationPageResult(
     val items: List<Conversation>,
     val nextOffset: Int?,
+)
+
+data class ConversationMessageSearchResult(
+    val nodeId: Uuid,
+    val messageId: Uuid,
+    val globalIndex: Int,
+    val message: UIMessage,
+    val snippet: String,
 )

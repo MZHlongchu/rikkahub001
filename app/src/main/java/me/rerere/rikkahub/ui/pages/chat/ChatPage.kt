@@ -102,6 +102,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.stableConversation.collectAsStateWithLifecycle()
+    val messageWindowState by vm.messageWindowState.collectAsStateWithLifecycle()
     val headerState by vm.headerState.collectAsStateWithLifecycle()
     val inputBarState by vm.inputBarState.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
@@ -134,6 +135,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val inputState = vm.inputState
     val latestConversation by rememberUpdatedState(conversation)
+    val latestWindowState by rememberUpdatedState(messageWindowState)
     var pendingCompressionScrollEventId by rememberSaveable(id) { mutableStateOf<Long?>(null) }
 
     // Initialize input state from incoming files/text arguments
@@ -165,8 +167,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val chatListState = rememberLazyListState()
-    LaunchedEffect(vm, conversation.messageNodes.size) {
-        if (nodeId == null && !vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
+    LaunchedEffect(vm, messageWindowState.loadedStableNodes.size, messageWindowState.initialized) {
+        if (nodeId == null && !vm.chatListInitialized && messageWindowState.loadedStableNodes.isNotEmpty()) {
             snapshotFlow { chatListState.layoutInfo.totalItemsCount }
                 .first { it > 0 }
             chatListState.scrollToItem(chatListState.layoutInfo.totalItemsCount)
@@ -174,12 +176,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    LaunchedEffect(nodeId, conversation.messageNodes.size) {
-        if (nodeId != null && conversation.messageNodes.isNotEmpty() && !vm.chatListInitialized) {
-            val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
-            if (index >= 0) {
+    LaunchedEffect(nodeId, messageWindowState.totalStableCount) {
+        if (nodeId != null && messageWindowState.totalStableCount > 0 && !vm.chatListInitialized) {
+            val index = vm.ensureNodeVisible(nodeId)
+            if (index != null) {
                 snapshotFlow { chatListState.layoutInfo.totalItemsCount }
-                    .first { it > index }
+                    .first { it > 0 }
                 chatListState.scrollToItem(index)
             }
             vm.chatListInitialized = true
@@ -199,10 +201,34 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     LaunchedEffect(
         pendingCompressionScrollEventId,
         conversation.compressionEvents,
-        conversation.messageNodes.size
+        messageWindowState.loadedStartIndex,
+        messageWindowState.loadedStableNodes.size,
+        messageWindowState.totalStableCount,
     ) {
         val eventId = pendingCompressionScrollEventId ?: return@LaunchedEffect
-        val targetIndex = latestConversation.findCompressionScrollIndex(eventId) ?: return@LaunchedEffect
+        val boundaryIndex = latestConversation.findCompressionBoundaryIndex(eventId) ?: return@LaunchedEffect
+        val windowState = latestWindowState
+        val windowEnd = windowState.loadedStartIndex + windowState.loadedStableNodes.size
+        if (windowState.totalStableCount > 0 && boundaryIndex !in windowState.loadedStartIndex..windowEnd) {
+            val anchorIndex = if (boundaryIndex >= windowState.totalStableCount) {
+                windowState.totalStableCount - 1
+            } else {
+                boundaryIndex
+            }
+            vm.ensureMessageIndexVisible(anchorIndex)
+        }
+
+        val localizedEvents = localizeCompressionEvents(
+            events = latestConversation.compressionEvents,
+            totalStableCount = latestWindowState.totalStableCount,
+            loadedStartIndex = latestWindowState.loadedStartIndex,
+            loadedNodeCount = latestWindowState.loadedStableNodes.size,
+        )
+        val targetIndex = findCompressionListIndexInWindow(
+            eventId = eventId,
+            localizedEvents = localizedEvents,
+            loadedNodeCount = latestWindowState.loadedStableNodes.size,
+        ) ?: return@LaunchedEffect
 
         // Wait until LazyColumn has laid out the target item before jumping to it.
         repeat(20) {
@@ -331,22 +357,25 @@ private fun StreamingChatList(
     val stableNodes by vm.stableMessageNodes.collectAsStateWithLifecycle()
     val streamingTail by vm.streamingTail.collectAsStateWithLifecycle()
     val streamingUiTick by vm.streamingUiTick.collectAsStateWithLifecycle()
-    val displayedConversation = remember(stableConversation, stableNodes, streamingTail) {
-        stableConversation.withDisplayedNodes(
-            stableNodes = stableNodes,
-            streamingTail = streamingTail,
-        )
-    }
+    val messageWindowState by vm.messageWindowState.collectAsStateWithLifecycle()
+    val previewSearchResults by vm.previewSearchResults.collectAsStateWithLifecycle()
 
     ChatList(
         innerPadding = innerPadding,
-        conversation = displayedConversation,
+        conversation = stableConversation,
+        stableNodes = messageWindowState.loadedStableNodes,
+        streamingTail = streamingTail,
+        loadedStartIndex = messageWindowState.loadedStartIndex,
+        totalStableCount = messageWindowState.totalStableCount,
+        hasOlder = messageWindowState.hasOlder,
+        isLoadingOlder = messageWindowState.isLoadingOlder,
         state = state,
         loading = loading,
         streamingUiTick = streamingUiTick,
         previewMode = previewMode,
         settings = settings,
         hazeState = hazeState,
+        previewSearchResults = previewSearchResults,
         errors = errors,
         onDismissError = onDismissError,
         onClearAllErrors = onClearAllErrors,
@@ -364,6 +393,8 @@ private fun StreamingChatList(
         onToolApproval = onToolApproval,
         onToolAnswer = onToolAnswer,
         onToggleFavorite = onToggleFavorite,
+        onSearchPreviewMessages = vm::searchPreviewMessages,
+        onLoadOlder = { vm.loadOlderMessages() },
         onAutoScrollCheck = onAutoScrollCheck,
     )
 }
@@ -486,7 +517,7 @@ private fun ChatPageContent(
                         } else {
                             vm.handleMessageSend(inputState.getContents())
                             scope.launch {
-                                chatListState.requestScrollToItem(inputBarState.messageCount + 5)
+                                chatListState.requestScrollToItem(chatListState.layoutInfo.totalItemsCount + 5)
                             }
                         }
                         inputState.clearInput()
@@ -500,7 +531,7 @@ private fun ChatPageContent(
                         } else {
                             vm.handleMessageSend(content = inputState.getContents(), answer = false)
                             scope.launch {
-                                chatListState.requestScrollToItem(inputBarState.messageCount + 5)
+                                chatListState.requestScrollToItem(chatListState.layoutInfo.totalItemsCount + 5)
                             }
                         }
                         inputState.clearInput()
@@ -601,7 +632,10 @@ private fun ChatPageContent(
                 onJumpToMessage = { index ->
                     previewMode = false
                     scope.launch {
-                        chatListState.animateScrollToItem(index)
+                        val localIndex = vm.ensureMessageIndexVisible(index)
+                        snapshotFlow { chatListState.layoutInfo.totalItemsCount }
+                            .first { it > 0 }
+                        chatListState.animateScrollToItem(localIndex)
                     }
                 },
                 onToolApproval = { toolCallId, approved, reason ->
@@ -783,36 +817,11 @@ private fun TopBar(
     }
 }
 
-private fun Conversation.findCompressionScrollIndex(eventId: Long): Int? {
+private fun Conversation.findCompressionBoundaryIndex(eventId: Long): Int? {
     val normalizedEvents = compressionEvents
         .map { event -> event.copy(boundaryIndex = event.boundaryIndex.coerceIn(0, messageNodes.size)) }
         .sortedBy { it.createdAt }
-    var listIndex = 0
-    for (boundary in 0..messageNodes.size) {
-        normalizedEvents.filter { it.boundaryIndex == boundary }.forEach { event ->
-            if (event.id == eventId) return listIndex
-            listIndex++
-        }
-        if (boundary < messageNodes.size) {
-            listIndex++
-        }
-    }
-    return null
+    return normalizedEvents.firstOrNull { it.id == eventId }?.boundaryIndex
 }
 
-private fun Conversation.withDisplayedNodes(
-    stableNodes: List<MessageNode>,
-    streamingTail: StreamingTailState?,
-): Conversation {
-    if (streamingTail == null) {
-        return copy(messageNodes = stableNodes)
-    }
-
-    val displayedNodes = stableNodes.toMutableList()
-    when {
-        streamingTail.index < displayedNodes.size -> displayedNodes[streamingTail.index] = streamingTail.node
-        else -> displayedNodes.add(streamingTail.node)
-    }
-    return copy(messageNodes = displayedNodes)
-}
 

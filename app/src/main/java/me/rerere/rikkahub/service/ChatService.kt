@@ -490,6 +490,7 @@ class ChatService(
             },
         ).collect { chunk ->
             when (chunk) {
+                is GenerationChunk.TailMessage -> Unit
                 is GenerationChunk.Messages -> {
                     generatedMessages = chunk.messages
                 }
@@ -643,7 +644,7 @@ class ChatService(
     }
 
     private fun getPendingOrCurrentConversation(conversationId: Uuid): Conversation {
-        return pendingStreamingUpdates[conversationId]?.conversation ?: getConversationFlow(conversationId).value
+        return pendingStreamingUpdates[conversationId]?.conversation ?: runtimeService.getCurrentConversation(conversationId)
     }
 
     private fun enqueueStreamingConversationUpdate(
@@ -1184,8 +1185,9 @@ class ChatService(
                 flushPendingStreamingConversationNow(conversationId)
 
                 // 可能被取消了，或者意外结束，兜底更新
-                val updatedConversation = getConversationFlow(conversationId).value.copy(
-                    messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
+                val currentConversation = runtimeService.getCurrentConversation(conversationId)
+                val updatedConversation = currentConversation.copy(
+                    messageNodes = currentConversation.messageNodes.map { node ->
                         node.copy(messages = node.messages.map { it.finishReasoning() })
                     },
                     updateAt = Instant.now()
@@ -1198,6 +1200,69 @@ class ChatService(
                 }
             }.collect { chunk ->
                 when (chunk) {
+                    is GenerationChunk.TailMessage -> {
+                        val absoluteIndex = generationWriteBackStartIndex + chunk.messageIndex
+                        val chunkDetail = "messageIndex=$absoluteIndex localIndex=${chunk.messageIndex}"
+                        val chunkSizeHint = buildChunkSizeHint(
+                            messages = listOf(chunk.message),
+                            startIndex = absoluteIndex,
+                        )
+                        diagnosticsRecorder.record(
+                            category = "tail-received",
+                            detail = chunkDetail,
+                            conversationId = conversationId,
+                            phase = "received",
+                            sizeHint = chunkSizeHint,
+                        )
+                        val currentConversation = getPendingOrCurrentConversation(conversationId)
+                        val updatedConversation = traceDiagnostic(
+                            category = "tail-updateCurrentMessage",
+                            detail = chunkDetail,
+                            conversationId = conversationId,
+                            phase = "updateCurrentMessage",
+                            sizeHint = chunkSizeHint,
+                        ) {
+                            currentConversation.updateCurrentMessage(
+                                message = chunk.message,
+                                targetIndex = absoluteIndex,
+                            )
+                        }
+                        traceDiagnostic(
+                            category = "tail-runtimeUpdate",
+                            detail = "messageNodes=${updatedConversation.messageNodes.size}",
+                            conversationId = conversationId,
+                            phase = "runtimeUpdate",
+                            sizeHint = chunkSizeHint,
+                        ) {
+                            enqueueStreamingConversationUpdate(
+                                conversationId = conversationId,
+                                conversation = updatedConversation,
+                                source = "tail",
+                                detail = "messageNodes=${updatedConversation.messageNodes.size}",
+                                sizeHint = chunkSizeHint,
+                            )
+                        }
+                        diagnosticsRecorder.record(
+                            category = "tail",
+                            detail = chunkDetail,
+                            conversationId = conversationId,
+                            phase = "complete",
+                            sizeHint = chunkSizeHint,
+                        )
+
+                        if (!isForeground.value && settings.displaySetting.enableNotificationOnMessageGeneration && settings.displaySetting.enableLiveUpdateNotification) {
+                            traceDiagnostic(
+                                category = "tail-liveNotification",
+                                detail = "sender=$senderName",
+                                conversationId = conversationId,
+                                phase = "liveNotification",
+                                sizeHint = chunkSizeHint,
+                            ) {
+                                sendLiveUpdateNotification(conversationId, listOf(chunk.message), senderName)
+                            }
+                        }
+                    }
+
                     is GenerationChunk.Messages -> {
                         val chunkDetail = "messages=${chunk.messages.size} startIndex=$generationWriteBackStartIndex"
                         val chunkSizeHint = buildChunkSizeHint(
@@ -1273,7 +1338,7 @@ class ChatService(
             Logging.log(TAG, it.stackTraceToString())
         }.onSuccess {
             clearPendingStreamingConversation(conversationId)
-            val finalConversation = getConversationFlow(conversationId).value
+            val finalConversation = runtimeService.getCurrentConversation(conversationId)
             traceDiagnostic(
                 category = "generation-finish-save",
                 detail = "messageNodes=${finalConversation.messageNodes.size}",

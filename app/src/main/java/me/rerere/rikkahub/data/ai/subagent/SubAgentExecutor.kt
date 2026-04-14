@@ -107,6 +107,20 @@ class SubAgentExecutor(
                 maxSteps = 50,
             ).collect { chunk ->
                 when (chunk) {
+                    is GenerationChunk.TailMessage -> {
+                        val textContent = chunk.message.toText()
+                        if (textContent.isNotEmpty() && textContent != resultText) {
+                            val newContent = textContent.removePrefix(resultText)
+                            resultText = textContent
+                            emit(
+                                SubAgentProgress.TextChunk(
+                                    content = newContent,
+                                    isThinking = chunk.message.parts.any { it is UIMessagePart.Reasoning }
+                                )
+                            )
+                        }
+                    }
+
                     is GenerationChunk.Messages -> {
                         finalMessages = chunk.messages
                         val lastMessage = chunk.messages.lastOrNull()
