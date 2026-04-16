@@ -559,13 +559,13 @@ fun ChatInput(
                                 )
                         ) {
                             val containerColor = when {
-                                loading -> MaterialTheme.colorScheme.errorContainer // 鍔犺浇鏃讹紝绾㈣壊
-                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh // 绂佺敤鏃?杈撳叆涓虹┖)锛岀伆鑹?
-                                else -> MaterialTheme.colorScheme.primary // 鍚敤鏃?杈撳叆闈炵┖)锛岀豢鑹?涓婚鑹?
+                                loading -> MaterialTheme.colorScheme.errorContainer // 加载时使用错误色
+                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh // 禁用时（输入为空）使用灰色
+                                else -> MaterialTheme.colorScheme.primary // 启用时（输入非空）使用主题色
                             }
                             val contentColor = when {
                                 loading -> MaterialTheme.colorScheme.onErrorContainer
-                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // 绂佺敤鏃讹紝鍐呭鐢ㄥ甫閫忔槑搴︾殑鐏拌壊
+                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // 禁用时内容使用半透明灰色
                                 else -> MaterialTheme.colorScheme.onPrimary
                             }
                             Surface(
@@ -1517,4 +1517,3 @@ private fun BigIconTextButtonPreview() {
         }) {}
     }
 }
-

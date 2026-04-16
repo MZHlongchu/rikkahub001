@@ -102,12 +102,12 @@ class ChatVM(
     private val _previewSearchResults = MutableStateFlow<List<ConversationPreviewSearchResult>>(emptyList())
     val previewSearchResults: StateFlow<List<ConversationPreviewSearchResult>> = _previewSearchResults.asStateFlow()
     private var previewSearchJob: Job? = null
-    var chatListInitialized by mutableStateOf(false) // 鑱婂ぉ鍒楄〃鏄惁宸茬粡婊氬姩鍒板簳閮?
+    var chatListInitialized by mutableStateOf(false) // 聊天列表是否已完成初始滚动
 
-    // 鑱婂ぉ杈撳叆鐘舵€?- 淇濆瓨鍦?ViewModel 涓伩鍏?TransactionTooLargeException
+    // 聊天输入状态，保存在 ViewModel 中以避免 TransactionTooLargeException
     val inputState = ChatInputState()
 
-    // 寮傛浠诲姟 (浠嶤hatService鑾峰彇锛屽搷搴斿紡)
+    // 异步任务（从 ChatService 获取，响应式）
     val conversationJob: StateFlow<Job?> =
         chatService
             .getGenerationJobStateFlow(_conversationId)
@@ -118,10 +118,10 @@ class ChatVM(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     init {
-        // 娣诲姞瀵硅瘽寮曠敤
+        // 添加对话引用
         chatService.addConversationReference(_conversationId)
 
-        // 鍒濆鍖栧璇?
+        // 初始化对话
         viewModelScope.launch {
             chatService.initializeConversation(_conversationId)
         }
@@ -134,26 +134,26 @@ class ChatVM(
             }
         }
 
-        // 璁颁綇瀵硅瘽ID, 鏂逛究涓嬫鍚姩鎭㈠
+        // 记住对话 ID，方便下次启动恢复
         context.writeStringPreference("lastConversationId", _conversationId.toString())
     }
 
     override fun onCleared() {
         super.onCleared()
-        // 绉婚櫎瀵硅瘽寮曠敤
+        // 移除对话引用
         chatService.removeConversationReference(_conversationId)
     }
 
-    // 鐢ㄦ埛璁剧疆
+    // 用户设置
     val settings: StateFlow<Settings> =
         settingsStore.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
 
-    // 缃戠粶鎼滅储
+    // 网络搜索
     val enableWebSearch = settings.map {
         it.enableWebSearch
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    // 鑱婂ぉ鍒楄〃 (浣跨敤 Paging 鍒嗛〉鍔犺浇)
+    // 聊天列表（使用 Paging 分页加载）
     val conversations: Flow<PagingData<ConversationListItem>> =
         settings.map { it.assistantId }.distinctUntilChanged()
             .flatMapLatest { assistantId ->
@@ -164,7 +164,7 @@ class ChatVM(
                     .map { ConversationListItem.Item(it) }
                     .insertSeparators { before, after ->
                         when {
-                            // 鍒楄〃寮€澶达細妫€鏌ョ涓€椤规槸鍚︾疆椤?
+                            // 列表开头：检查第一项是否置顶
                             before == null && after is ConversationListItem.Item -> {
                                 if (after.conversation.isPinned) {
                                     ConversationListItem.PinnedHeader
@@ -179,9 +179,9 @@ class ChatVM(
                                 }
                             }
 
-                            // 涓棿椤癸細妫€鏌ョ疆椤剁姸鎬佸彉鍖栧拰鏃ユ湡鍙樺寲
+                            // 中间项：检查置顶状态和日期是否变化
                             before is ConversationListItem.Item && after is ConversationListItem.Item -> {
-                                // 浠庣疆椤跺垏鎹㈠埌闈炵疆椤讹紝鏄剧ず鏃ユ湡澶撮儴
+                                // 从置顶切换到非置顶时，显示日期头部
                                 if (before.conversation.isPinned && !after.conversation.isPinned) {
                                     val afterDate = after.conversation.updateAt
                                         .atZone(ZoneId.systemDefault())
@@ -191,7 +191,7 @@ class ChatVM(
                                         label = getDateLabel(afterDate)
                                     )
                                 }
-                                // 瀵逛簬闈炵疆椤堕」锛屾鏌ユ棩鏈熷彉鍖?
+                                // 对于非置顶项，检查日期是否变化
                                 else if (!after.conversation.isPinned) {
                                     val beforeDate = before.conversation.updateAt
                                         .atZone(ZoneId.systemDefault())
@@ -219,12 +219,12 @@ class ChatVM(
             }
             .cachedIn(viewModelScope)
 
-    // 褰撳墠妯″瀷
+    // 当前模型
     val currentChatModel = settings.map { settings ->
         settings.getCurrentChatModel()
     }.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
-    // 閿欒鐘舵€?
+    // 错误状态
     val errors: StateFlow<List<ChatError>> = chatService.errors
     val compressionUiState: StateFlow<CompressionUiState?> =
         chatService.getCompressionUiStateFlow(_conversationId)
@@ -421,23 +421,23 @@ class ChatVM(
         )
     }
 
-    // 鐢熸垚瀹屾垚
+    // 生成完成
     val generationDoneFlow: SharedFlow<Uuid> = chatService.generationDoneFlow
 
-    // MCP绠＄悊鍣?
+    // MCP 管理器
     val mcpManager = chatService.mcpManager
 
-    // 鏇存柊璁剧疆
+    // 更新设置
     fun updateSettings(newSettings: Settings) {
         viewModelScope.launch {
             val oldSettings = settings.value
-            // 妫€鏌ョ敤鎴峰ご鍍忔槸鍚︽湁鍙樺寲锛屽鏋滄湁鍒欏垹闄ゆ棫澶村儚
+            // 检查用户头像是否有变化，如果有则删除旧头像
             checkUserAvatarDelete(oldSettings, newSettings)
             settingsStore.update(newSettings)
         }
     }
 
-    // 妫€鏌ョ敤鎴峰ご鍍忓垹闄?
+    // 检查是否需要删除旧用户头像
     private fun checkUserAvatarDelete(oldSettings: Settings, newSettings: Settings) {
         val oldAvatar = oldSettings.displaySetting.userAvatar
         val newAvatar = newSettings.displaySetting.userAvatar
@@ -447,7 +447,7 @@ class ChatVM(
         }
     }
 
-    // 璁剧疆鑱婂ぉ妯″瀷
+    // 设置聊天模型
     fun setChatModel(assistant: Assistant, model: Model) {
         viewModelScope.launch {
             settingsStore.update { settings ->
@@ -470,10 +470,10 @@ class ChatVM(
         updateChecker.checkUpdate().stateIn(viewModelScope, SharingStarted.Eagerly, UiState.Loading)
 
     /**
-     * 澶勭悊娑堟伅鍙戦€?
+     * 处理消息发送
      *
-     * @param content 娑堟伅鍐呭
-     * @param answer 鏄惁瑙﹀彂娑堟伅鐢熸垚锛屽鏋滀负false锛屽垯浠呮坊鍔犳秷鎭埌娑堟伅鍒楄〃涓?
+     * @param content 消息内容
+     * @param answer 是否触发消息生成；为 false 时只把消息加入消息列表
      */
     fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
@@ -492,11 +492,11 @@ class ChatVM(
     fun handleMessageTruncate() {
         viewModelScope.launch {
 
-            // 濡傛灉鎴柇鍦ㄦ渶鍚庝竴涓储寮曪紝鍒欏彇娑堟埅鏂紝鍚﹀垯鏇存柊 truncateIndex 鍒版渶鍚庝竴涓埅鏂綅缃?
+            // 清空截断后的标题和建议
             val newConversation = conversation.value.copy(
 
                 title = "",
-                chatSuggestions = emptyList(), // 娓呯┖寤鸿
+                chatSuggestions = emptyList(), // 清空建议
             )
             chatService.saveConversation(conversationId = _conversationId, conversation = newConversation)
         }

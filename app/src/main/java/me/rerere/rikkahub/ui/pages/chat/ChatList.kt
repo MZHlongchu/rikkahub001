@@ -278,15 +278,15 @@ private fun ChatListNormal(
         }
     }
 
-    // 鑱婂ぉ閫夋嫨
+    // 聊天选择
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
 
-    // 鑷姩璺熼殢閿洏婊氬姩
+    // 自动跟随键盘滚动
     ImeLazyListAutoScroller(lazyListState = state)
 
-    // 瀵硅瘽澶у皬璀﹀憡瀵硅瘽妗?
+    // 对话大小警告对话框
     val sizeInfo = rememberConversationSizeInfo(
         nodeCount = timelineState.totalStableCount + if (streamingTailItem != null) 1 else 0,
         lastAssistantInputTokens = timelineState.lastAssistantInputTokens,
@@ -382,7 +382,7 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 鍒ゆ柇鏈€杩戞槸鍚︽粴鍔?
+        // 判断最近是否滚动过
         LaunchedEffect(state.isScrollInProgress) {
             if (state.isScrollInProgress) {
                 isRecentScroll = true
@@ -610,7 +610,7 @@ private fun ChatListNormal(
                 }
             }
 
-            // 涓轰簡鑳芥纭粴鍔ㄥ埌杩?
+            // 用于确保能够正确滚动到底部
             item(ScrollBottomKey) {
                 Spacer(
                     Modifier
@@ -625,7 +625,7 @@ private fun ChatListNormal(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            // 閿欒娑堟伅鍗＄墖
+            // 错误消息卡片
             ErrorCardsDisplay(
                 errors = errors,
                 onDismissError = onDismissError,
@@ -635,7 +635,7 @@ private fun ChatListNormal(
                     .zIndex(5f)
             )
 
-            // 瀹屾垚閫夋嫨
+            // 完成选择
             AnimatedVisibility(
                 visible = selecting,
                 modifier = Modifier
@@ -702,7 +702,7 @@ private fun ChatListNormal(
                 }
             }
 
-            // 瀵煎嚭瀵硅瘽妗?
+            // 导出对话框
             ChatExportSheet(
                 visible = showExportSheet,
                 onDismissRequest = {
@@ -717,7 +717,7 @@ private fun ChatListNormal(
 
             val captureProgress = LocalScrollCaptureInProgress.current
 
-            // 娑堟伅蹇€熻烦杞?
+            // 消息快速跳转
             MessageJumper(
                 show = isRecentScroll && !state.isScrollInProgress && settings.displaySetting.showMessageJumper && !captureProgress,
                 onLeft = settings.displaySetting.messageJumperOnLeft,
@@ -1138,7 +1138,7 @@ private fun CompressionSummarySectionView(
 }
 
 /**
- * 鎻愬彇鍖呭惈鎼滅储璇嶇殑鏂囨湰鐗囨锛岀‘淇濆尮閰嶈瘝鍦ㄥ紑澶村彲瑙?
+ * 提取包含搜索词的文本片段，确保匹配词在开头可见。
  */
 private fun extractMatchingSnippet(
     text: String,
@@ -1153,10 +1153,10 @@ private fun extractMatchingSnippet(
         return text
     }
 
-    // 鐩存帴浠庡尮閰嶈瘝寮€濮嬫樉绀猴紝纭繚鍖归厤璇嶅湪鏈€鍓嶉潰
+    // 直接从匹配词开始显示，确保匹配词在最前面
     val snippet = text.substring(matchIndex)
 
-    // 鍙湪鍓嶉潰鏈夊唴瀹规椂娣诲姞鐪佺暐鍙?
+    // 只在前面有内容时添加省略号
     return if (matchIndex > 0) {
         "...$snippet"
     } else {
@@ -1178,10 +1178,10 @@ private fun buildHighlightedText(
         var index = text.indexOf(query, startIndex, ignoreCase = true)
 
         while (index >= 0) {
-            // 娣诲姞楂樹寒鍓嶇殑鏂囨湰
+            // 添加高亮前的文本
             append(text.substring(startIndex, index))
 
-            // 娣诲姞楂樹寒鏂囨湰
+            // 添加高亮文本
             withStyle(
                 style = SpanStyle(
                     background = highlightColor,
@@ -1195,7 +1195,7 @@ private fun buildHighlightedText(
             index = text.indexOf(query, startIndex, ignoreCase = true)
         }
 
-        // 娣诲姞鍓╀綑鏂囨湰
+        // 添加剩余文本
         if (startIndex < text.length) {
             append(text.substring(startIndex))
         }
@@ -1215,7 +1215,7 @@ private fun ChatListPreview(
         onSearchQueryChange(searchQuery)
     }
 
-    // 杩囨护娑堟伅锛屽悓鏃朵繚鐣欏師濮?index 閬垮厤鍚庣画 O(n) indexOf 鏌ユ壘
+    // 过滤消息，同时保留原始 index，避免后续 O(n) indexOf 查找
     val filteredMessages = remember(displayedNodes, searchQuery) {
         if (searchQuery.isBlank()) {
             displayedNodes
@@ -1229,7 +1229,7 @@ private fun ChatListPreview(
             .padding(top = innerPadding.calculateTopPadding())
             .fillMaxSize(),
     ) {
-        // 鎼滅储妗?
+        // 搜索框
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -1260,7 +1260,7 @@ private fun ChatListPreview(
             maxLines = 1,
         )
 
-        // 娑堟伅棰勮
+        // 消息预览
         LazyColumn(
             contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
