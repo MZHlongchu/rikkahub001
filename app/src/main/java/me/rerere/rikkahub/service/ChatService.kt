@@ -653,6 +653,7 @@ class ChatService(
         source: String,
         detail: String,
         sizeHint: String,
+        immediate: Boolean = false,
     ) {
         pendingStreamingUpdates[conversationId] = PendingStreamingUpdate(
             conversation = conversation,
@@ -660,6 +661,12 @@ class ChatService(
             detail = detail,
             sizeHint = sizeHint,
         )
+        if (immediate) {
+            appScope.launch {
+                flushPendingStreamingConversationNow(conversationId)
+            }
+            return
+        }
         val existingJob = streamingFlushJobs[conversationId]
         if (existingJob?.isActive == true) return
 
@@ -1240,6 +1247,7 @@ class ChatService(
                                 source = "tail",
                                 detail = "messageNodes=${updatedConversation.messageNodes.size}",
                                 sizeHint = chunkSizeHint,
+                                immediate = true,
                             )
                         }
                         diagnosticsRecorder.record(
