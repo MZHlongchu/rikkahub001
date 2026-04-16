@@ -50,10 +50,7 @@ data class ChatTimelineUiState(
     val previewMessages: List<ChatPreviewMessageItem> = emptyList(),
     val previewSearchResults: List<ConversationPreviewSearchResult> = emptyList(),
     val chatSuggestions: List<String> = emptyList(),
-    val loadedStartIndex: Int = 0,
     val totalStableCount: Int = 0,
-    val hasOlder: Boolean = false,
-    val isLoadingOlder: Boolean = false,
     val latestCompressionEventId: Long? = null,
     val lastAssistantInputTokens: Int = 0,
 )
@@ -168,15 +165,13 @@ internal fun buildChatInputUiState(
 internal fun buildChatTimelineUiState(
     conversation: Conversation,
     settings: Settings,
-    windowState: ChatMessageWindowState,
+    stableNodes: List<MessageNode>,
     previewSearchResults: List<ConversationPreviewSearchResult>,
 ): ChatTimelineUiState {
-    val displayedNodes = windowState.loadedStableNodes
+    val displayedNodes = stableNodes
     val normalizedCompressionEvents = localizeCompressionEvents(
         events = conversation.compressionEvents,
-        totalStableCount = windowState.totalStableCount,
-        loadedStartIndex = windowState.loadedStartIndex,
-        loadedNodeCount = displayedNodes.size,
+        totalStableCount = displayedNodes.size,
     ).sortedWith(compressionEventOrder)
     val latestCompressionEventId = normalizedCompressionEvents.lastOrNull()?.id
     val eventsByBoundary = normalizedCompressionEvents.groupBy { it.boundaryIndex }
@@ -212,7 +207,7 @@ internal fun buildChatTimelineUiState(
                             model = node.currentMessage.modelId?.let(settings::findModelById),
                             assistant = assistant,
                         ),
-                        globalIndex = windowState.loadedStartIndex + index,
+                        globalIndex = index,
                         isLastMessage = index == displayedNodes.lastIndex,
                     )
                 )
@@ -243,7 +238,7 @@ internal fun buildChatTimelineUiState(
         ChatPreviewMessageItem(
             nodeId = node.id,
             message = node.currentMessage,
-            globalIndex = windowState.loadedStartIndex + index,
+            globalIndex = index,
         )
     }
     val lastAssistantInputTokens = conversation.messageNodes
@@ -260,10 +255,7 @@ internal fun buildChatTimelineUiState(
         previewMessages = previewMessages,
         previewSearchResults = previewSearchResults,
         chatSuggestions = conversation.chatSuggestions,
-        loadedStartIndex = windowState.loadedStartIndex,
-        totalStableCount = windowState.totalStableCount,
-        hasOlder = windowState.hasOlder,
-        isLoadingOlder = windowState.isLoadingOlder,
+        totalStableCount = displayedNodes.size,
         latestCompressionEventId = latestCompressionEventId,
         lastAssistantInputTokens = lastAssistantInputTokens,
     )
@@ -272,14 +264,13 @@ internal fun buildChatTimelineUiState(
 internal fun buildChatStreamingTailUiState(
     conversation: Conversation,
     settings: Settings,
-    windowState: ChatMessageWindowState,
+    stableNodeCount: Int,
     streamingTail: StreamingTailState?,
 ): ChatStreamingTailUiState {
     if (streamingTail == null) {
         return ChatStreamingTailUiState()
     }
-    val localStreamingIndex = streamingTail.index - windowState.loadedStartIndex
-    if (localStreamingIndex != windowState.loadedStableNodes.size) {
+    if (streamingTail.index != stableNodeCount) {
         return ChatStreamingTailUiState()
     }
 

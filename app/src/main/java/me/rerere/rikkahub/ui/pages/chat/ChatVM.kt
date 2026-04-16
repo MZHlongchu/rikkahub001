@@ -97,8 +97,6 @@ class ChatVM(
     val stableMessageNodes: StateFlow<List<MessageNode>> = chatService.getMessageNodesFlow(_conversationId)
     val streamingTail: StateFlow<StreamingTailState?> = chatService.getStreamingTailFlow(_conversationId)
     val streamingUiTick: StateFlow<Long> = chatService.getStreamingUiTickFlow(_conversationId)
-    private val _messageWindowState = MutableStateFlow(ChatMessageWindowState())
-    val messageWindowState: StateFlow<ChatMessageWindowState> = _messageWindowState.asStateFlow()
     private val _previewSearchResults = MutableStateFlow<List<ConversationPreviewSearchResult>>(emptyList())
     val previewSearchResults: StateFlow<List<ConversationPreviewSearchResult>> = _previewSearchResults.asStateFlow()
     private var previewSearchJob: Job? = null
@@ -124,14 +122,6 @@ class ChatVM(
         // 初始化对话
         viewModelScope.launch {
             chatService.initializeConversation(_conversationId)
-        }
-
-        viewModelScope.launch {
-            stableMessageNodes.collect { nodes ->
-                _messageWindowState.update { current ->
-                    syncChatMessageWindowWithNodes(current, nodes)
-                }
-            }
         }
 
         // 记住对话 ID，方便下次启动恢复
@@ -305,26 +295,26 @@ class ChatVM(
     val chatTimelineUiState: StateFlow<ChatTimelineUiState> = combine(
         stableConversation,
         settings,
-        messageWindowState,
+        stableMessageNodes,
         previewSearchResults,
-    ) { conversation, settings, messageWindowState, previewSearchResults ->
+    ) { conversation, settings, stableMessageNodes, previewSearchResults ->
         buildChatTimelineUiState(
             conversation = conversation,
             settings = settings,
-            windowState = messageWindowState,
+            stableNodes = stableMessageNodes,
             previewSearchResults = previewSearchResults,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatTimelineUiState())
     val chatStreamingTailUiState: StateFlow<ChatStreamingTailUiState> = combine(
         stableConversation,
         settings,
-        messageWindowState,
+        stableMessageNodes,
         streamingTail,
-    ) { conversation, settings, messageWindowState, streamingTail ->
+    ) { conversation, settings, stableMessageNodes, streamingTail ->
         buildChatStreamingTailUiState(
             conversation = conversation,
             settings = settings,
-            windowState = messageWindowState,
+            stableNodeCount = stableMessageNodes.size,
             streamingTail = streamingTail,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatStreamingTailUiState())
@@ -332,104 +322,6 @@ class ChatVM(
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
     fun clearAllErrors() = chatService.clearAllErrors()
-
-    suspend fun loadOlderMessages() {
-        val current = _messageWindowState.value
-        if (current.isLoadingOlder || !current.hasOlder) return
-
-        val newStartIndex = (current.loadedStartIndex - CHAT_OLDER_LOAD_BATCH_SIZE).coerceAtLeast(0)
-        val newLimit = current.loadedStableNodes.size + (current.loadedStartIndex - newStartIndex)
-        recordUiDiagnostic(
-            category = "older-load-start",
-            detail = "currentStart=${current.loadedStartIndex} requestStart=$newStartIndex limit=$newLimit loaded=${current.loadedStableNodes.size}",
-            phase = "start",
-        )
-        _messageWindowState.update { it.copy(isLoadingOlder = true) }
-        try {
-            val loadResult = conversationRepo.loadConversationNodesRange(
-                conversationId = _conversationId,
-                startIndex = newStartIndex,
-                limit = newLimit,
-            )
-            if (newLimit > 0 && loadResult.nodes.isEmpty()) {
-                error("Older message load returned no nodes for requestStart=$newStartIndex limit=$newLimit")
-            }
-            _messageWindowState.value = current.copy(
-                totalStableCount = stableMessageNodes.value.size,
-                loadedStartIndex = newStartIndex,
-                loadedStableNodes = loadResult.nodes,
-                hasOlder = newStartIndex > 0,
-                isLoadingOlder = false,
-                initialized = true,
-            )
-            recordUiDiagnostic(
-                category = "older-load-success",
-                detail = "requestStart=$newStartIndex limit=$newLimit returned=${loadResult.nodes.size} fallback=${loadResult.fallbackUsed} skipped=${loadResult.skippedNodeCount}",
-                phase = "success",
-            )
-        } catch (error: Exception) {
-            if (error is kotlinx.coroutines.CancellationException) throw error
-            recordUiDiagnostic(
-                category = "older-load-failure",
-                detail = "requestStart=$newStartIndex limit=$newLimit error=${error::class.simpleName ?: "unknown"}",
-                phase = "failure",
-            )
-            chatService.addError(
-                error = error,
-                conversationId = _conversationId,
-                title = "加载旧消息失败",
-            )
-        } finally {
-            _messageWindowState.update { state ->
-                if (state.isLoadingOlder) {
-                    state.copy(isLoadingOlder = false)
-                } else {
-                    state
-                }
-            }
-        }
-    }
-
-    suspend fun ensureMessageIndexVisible(globalIndex: Int): Int {
-        val totalCount = stableMessageNodes.value.size
-        if (totalCount <= 0) return 0
-        val normalizedIndex = globalIndex.coerceIn(0, totalCount - 1)
-        val current = _messageWindowState.value
-        val currentEnd = current.loadedStartIndex + current.loadedStableNodes.size
-        if (normalizedIndex in current.loadedStartIndex until currentEnd) {
-            return normalizedIndex - current.loadedStartIndex
-        }
-
-        val targetWindowSize = maxOf(
-            CHAT_INITIAL_WINDOW_SIZE,
-            minOf(totalCount, current.loadedStableNodes.size.coerceAtLeast(CHAT_INITIAL_WINDOW_SIZE))
-        )
-        val startIndex = computeFocusedWindowStart(
-            totalCount = totalCount,
-            targetIndex = normalizedIndex,
-            windowSize = targetWindowSize,
-        )
-        val loadResult = conversationRepo.loadConversationNodesRange(
-            conversationId = _conversationId,
-            startIndex = startIndex,
-            limit = targetWindowSize,
-        )
-        val loadedNodes = loadResult.nodes
-        _messageWindowState.value = current.copy(
-            totalStableCount = totalCount,
-            loadedStartIndex = startIndex,
-            loadedStableNodes = loadedNodes,
-            hasOlder = startIndex > 0,
-            isLoadingOlder = false,
-            initialized = true,
-        )
-        return normalizedIndex - startIndex
-    }
-
-    suspend fun ensureNodeVisible(nodeId: Uuid): Int? {
-        val globalIndex = conversationRepo.findNodeIndex(_conversationId, nodeId) ?: return null
-        return ensureMessageIndexVisible(globalIndex)
-    }
 
     fun searchPreviewMessages(query: String) {
         previewSearchJob?.cancel()

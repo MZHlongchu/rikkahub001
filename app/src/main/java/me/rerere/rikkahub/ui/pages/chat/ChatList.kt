@@ -160,7 +160,6 @@ fun ChatList(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onSearchPreviewMessages: (String) -> Unit = {},
-    onLoadOlder: suspend () -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -202,7 +201,6 @@ fun ChatList(
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
-                onLoadOlder = onLoadOlder,
             )
         }
     }
@@ -233,22 +231,12 @@ private fun ChatListNormal(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
-    onLoadOlder: suspend () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var isRecentScroll by remember { mutableStateOf(false) }
     val timelineItems = timelineState.items
     val stableMessageItems = remember(timelineItems) {
         timelineItems.filterIsInstance<ChatTimelineMessageItem>()
-    }
-    val messageListIndexByNodeId = remember(timelineItems) {
-        buildMap<Uuid, Int> {
-            timelineItems.forEachIndexed { index, item ->
-                if (item is ChatTimelineMessageItem) {
-                    put(item.model.node.id, index)
-                }
-            }
-        }
     }
     val allMessageItems = remember(stableMessageItems, streamingTailItem) {
         if (streamingTailItem == null) {
@@ -382,7 +370,6 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 判断最近是否滚动过
         LaunchedEffect(state.isScrollInProgress) {
             if (state.isScrollInProgress) {
                 isRecentScroll = true
@@ -392,34 +379,6 @@ private fun ChatListNormal(
                 delay(1500)
                 isRecentScroll = false
             }
-        }
-
-        var pendingAnchorNodeId by remember { mutableStateOf<Uuid?>(null) }
-        var pendingAnchorOffset by remember { mutableStateOf(0) }
-        LaunchedEffect(timelineState.hasOlder, timelineState.isLoadingOlder, state.firstVisibleItemIndex, timelineItems) {
-            if (!timelineState.hasOlder || timelineState.isLoadingOlder || stableMessageItems.isEmpty()) return@LaunchedEffect
-            val anchorItem = state.layoutInfo.visibleItemsInfo.firstOrNull { info ->
-                timelineItems.getOrNull(info.index) is ChatTimelineMessageItem
-            } ?: return@LaunchedEffect
-            val firstVisibleMessageGlobalIndex =
-                (timelineItems.getOrNull(anchorItem.index) as? ChatTimelineMessageItem)?.model?.globalIndex
-            if (!shouldLoadOlderMessages(firstVisibleMessageGlobalIndex, timelineState.loadedStartIndex)) {
-                return@LaunchedEffect
-            }
-            val anchorNodeId = (timelineItems[anchorItem.index] as? ChatTimelineMessageItem)?.model?.node?.id
-                ?: return@LaunchedEffect
-            pendingAnchorNodeId = anchorNodeId
-            pendingAnchorOffset = anchorItem.offset
-            onLoadOlder()
-        }
-
-        LaunchedEffect(timelineItems, pendingAnchorNodeId) {
-            val anchorNodeId = pendingAnchorNodeId ?: return@LaunchedEffect
-            val anchorIndex = messageListIndexByNodeId[anchorNodeId]
-            if (anchorIndex != null) {
-                state.scrollToItem(anchorIndex, pendingAnchorOffset)
-            }
-            pendingAnchorNodeId = null
         }
 
         LazyColumn(
@@ -432,15 +391,6 @@ private fun ChatListNormal(
                 .hazeSource(state = hazeState)
                 .padding(top = innerPadding.calculateTopPadding()),
         ) {
-            if (timelineState.isLoadingOlder) {
-                item("load_older_indicator") {
-                    RabbitLoadingIndicator(
-                        modifier = Modifier
-                            .padding(vertical = 4.dp)
-                            .size(24.dp)
-                    )
-                }
-            }
             items(
                 items = timelineItems,
                 key = { item -> item.stableKey },
