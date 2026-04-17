@@ -34,8 +34,8 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.finishReasoning
-import me.rerere.ai.ui.freezeInterruptedGeneration
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
@@ -655,7 +655,7 @@ class ChatService(
         val currentMessage = currentConversation.messageNodes[lastIndex].currentMessage
         val finalizedConversation = if (currentMessage.role == MessageRole.ASSISTANT) {
             currentConversation.updateCurrentMessage(
-                message = currentMessage.freezeInterruptedGeneration(),
+                message = currentMessage.finishPendingTools(::cancelToolByUser),
                 targetIndex = lastIndex,
             )
         } else {
@@ -665,6 +665,17 @@ class ChatService(
         saveConversation(
             conversationId,
             finalizedConversation.copy(updateAt = Instant.now())
+        )
+    }
+
+    private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
+        return tool.copy(
+            output = listOf(
+                UIMessagePart.Text(
+                    """{"status":"cancelled","error":"Generation cancelled by user before tool execution completed."}"""
+                )
+            ),
+            approvalState = ToolApprovalState.Denied("Generation cancelled by user")
         )
     }
 
@@ -696,7 +707,7 @@ class ChatService(
         return finalizeJob
     }
 
-    fun cancelGeneration(conversationId: Uuid) {
+    private fun cancelGeneration(conversationId: Uuid) {
         getOrStartGenerationFinalizer(conversationId)
     }
 

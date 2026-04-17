@@ -6,10 +6,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.Model
@@ -580,36 +577,28 @@ fun UIMessage.finishReasoning(): UIMessage {
     )
 }
 
-private const val INTERRUPTED_TOOL_METADATA_KEY = "interrupted"
-private const val INTERRUPTED_TOOL_METADATA_REASON_KEY = "interrupted_reason"
-
-fun UIMessage.freezeInterruptedGeneration(
-    toolResultText: String = "Generation interrupted by user before tool execution completed.",
+fun UIMessage.finishPendingTools(
+    transform: (UIMessagePart.Tool) -> UIMessagePart.Tool
 ): UIMessage {
-    val finishedMessage = finishReasoning()
-    val finishedAt = finishedMessage.finishedAt
+    val updatedParts = parts.map { part ->
+        if (part is UIMessagePart.Tool && !part.isExecuted) {
+            transform(part)
+        } else {
+            part
+        }
+    }
+
+    if (updatedParts == parts) {
+        return this
+    }
+
+    val finishedAt = this.finishedAt
         ?: Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
 
-    return finishedMessage.copy(
-        finishedAt = finishedAt,
-        parts = finishedMessage.parts.map { part ->
-            if (part is UIMessagePart.Tool && !part.isExecuted) {
-                part.copy(
-                    output = listOf(UIMessagePart.Text(toolResultText)),
-                    metadata = buildJsonObject {
-                        part.metadata?.forEach { (key, value) -> put(key, value) }
-                        put(INTERRUPTED_TOOL_METADATA_KEY, JsonPrimitive(true))
-                        put(
-                            INTERRUPTED_TOOL_METADATA_REASON_KEY,
-                            JsonPrimitive("generation_cancelled")
-                        )
-                    }
-                )
-            } else {
-                part
-            }
-        }
-    )
+    return copy(
+        parts = updatedParts,
+        finishedAt = finishedAt
+    ).finishReasoning()
 }
 
 /**

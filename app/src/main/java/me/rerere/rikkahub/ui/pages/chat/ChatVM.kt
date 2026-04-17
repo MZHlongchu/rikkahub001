@@ -516,8 +516,8 @@ class ChatVM(
     ) {        chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
     }
 
-    fun cancelGeneration() {
-        chatService.cancelGeneration(_conversationId)
+    fun stopGeneration() {
+        chatService.stopGeneration(_conversationId)
     }
 
     fun saveConversationAsync() {

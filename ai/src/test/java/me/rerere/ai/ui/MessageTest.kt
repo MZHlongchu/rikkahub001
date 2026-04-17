@@ -221,7 +221,7 @@ class MessageTest {
     }
 
     @Test
-    fun `freezeInterruptedGeneration should finalize unfinished tools and message`() {
+    fun `finishPendingTools should finalize unfinished tools and message`() {
         val message = UIMessage(
             role = MessageRole.ASSISTANT,
             parts = listOf(
@@ -236,17 +236,21 @@ class MessageTest {
             finishedAt = null,
         )
 
-        val frozen = message.freezeInterruptedGeneration()
-        val tool = frozen.parts.filterIsInstance<UIMessagePart.Tool>().single()
+        val finished = message.finishPendingTools { tool ->
+            tool.copy(
+                output = listOf(UIMessagePart.Text("""{"status":"cancelled"}""")),
+                approvalState = ToolApprovalState.Denied("Generation cancelled by user")
+            )
+        }
+        val tool = finished.parts.filterIsInstance<UIMessagePart.Tool>().single()
 
         assertTrue(tool.isExecuted)
         assertEquals(
-            "Generation interrupted by user before tool execution completed.",
+            """{"status":"cancelled"}""",
             tool.output.filterIsInstance<UIMessagePart.Text>().single().text
         )
-        assertEquals("true", (tool.metadata?.get("interrupted") as? JsonPrimitive)?.content)
-        assertEquals("generation_cancelled", (tool.metadata?.get("interrupted_reason") as? JsonPrimitive)?.content)
-        assertTrue(frozen.finishedAt != null)
+        assertTrue(tool.approvalState is ToolApprovalState.Denied)
+        assertTrue(finished.finishedAt != null)
     }
 
     @Test
