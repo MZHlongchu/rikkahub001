@@ -62,6 +62,7 @@ Run:
 
 ```bash
 git fetch upstream --prune --tags
+OLD_BASE="$(git merge-base master main)"
 git switch main
 git merge --ff-only upstream/master
 git push origin main
@@ -73,6 +74,19 @@ Record upstream version from tag or commit:
 git describe --tags --abbrev=0 upstream/master
 git rev-parse --short upstream/master
 ```
+
+Generate an audit report before you start porting anything:
+
+```bash
+python3 scripts/upstream_sync.py report --base "$OLD_BASE" --output "docs/upstream-audits/$(date +%Y%m%d)-$(git describe --tags --abbrev=0 main).md"
+```
+
+Rules for the audit:
+
+- Treat `git merge-base master main` as the source of truth for the previous synced upstream base.
+- Do not infer the sync point from commit author alone.
+- Use the generated report to review upstream commits one by one before porting fork changes back in.
+- Start with commits flagged as perf/hotspot first, then bug fixes, then neutral refactors.
 
 ## Step 2: Create Port Branch from Master
 
@@ -190,7 +204,15 @@ rg -n "TODO|FIXME|TEMP|兼容|回退|fallback" app search web ai
 Commit on `port-*`:
 
 ```bash
-git commit -m "merge: sync upstream <version> into master line"
+git commit
+# commit body must include the output of:
+python3 scripts/upstream_sync.py trailers --base "$OLD_BASE"
+```
+
+Also create a sync anchor tag on the finished master commit:
+
+```bash
+git tag -a "sync-upstream-$(git describe --tags --abbrev=0 main)" -m "master synced through $(git describe --tags --abbrev=0 main)"
 ```
 
 Fast-forward master:
@@ -199,6 +221,7 @@ Fast-forward master:
 git switch master
 git merge --ff-only port-upstream-<yyyymmdd>-<version>
 git push origin master
+git push origin "sync-upstream-$(git describe --tags --abbrev=0 main)"
 ```
 
 Delete the finished port branch after master is updated:
