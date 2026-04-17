@@ -113,8 +113,10 @@ class ConversationRuntimeService(
         }
     }
 
-    fun cancelGenerationJob(conversationId: Uuid) {
-        getOrCreateSession(conversationId).getJob()?.cancel()
+    fun cancelGenerationJob(conversationId: Uuid): Job? {
+        val job = getOrCreateSession(conversationId).getJob()
+        job?.cancel()
+        return job
     }
 
     fun setGenerationJob(conversationId: Uuid, job: Job?) {

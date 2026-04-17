@@ -479,7 +479,7 @@ private fun ChatPageContent(
                     hazeState = hazeState,
                     autoCompressionUiState = chatInputUiState.compressionUiState,
                     onCancelClick = {
-                        loadingJob?.cancel()
+                        vm.cancelGeneration()
                     },
                     onCancelCompressionProgress = {
                         vm.cancelCompressionWork()

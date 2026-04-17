@@ -35,6 +35,7 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.finishReasoning
+import me.rerere.ai.ui.freezeInterruptedGeneration
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
@@ -627,6 +628,61 @@ class ChatService(
         pendingStreamingUpdates.remove(conversationId)
     }
 
+    private suspend fun finalizeInterruptedGeneration(
+        conversationId: Uuid,
+        previousJob: Job?,
+    ) {
+        if (previousJob == null) return
+
+        runCatching {
+            previousJob.join()
+        }.onFailure { error ->
+            if (error !is CancellationException) {
+                throw error
+            }
+        }
+
+        flushPendingStreamingConversationNow(conversationId)
+
+        val currentConversation = runtimeService.getCurrentConversation(conversationId)
+        val lastIndex = currentConversation.messageNodes.lastIndex
+        if (lastIndex < 0) {
+            saveConversation(conversationId, currentConversation)
+            return
+        }
+
+        val currentMessage = currentConversation.messageNodes[lastIndex].currentMessage
+        val finalizedConversation = if (currentMessage.role == MessageRole.ASSISTANT) {
+            currentConversation.updateCurrentMessage(
+                message = currentMessage.freezeInterruptedGeneration(),
+                targetIndex = lastIndex,
+            )
+        } else {
+            currentConversation
+        }
+
+        saveConversation(
+            conversationId,
+            finalizedConversation.copy(updateAt = Instant.now())
+        )
+    }
+
+    fun cancelGeneration(conversationId: Uuid) {
+        val previousJob = runtimeService.cancelGenerationJob(conversationId) ?: return
+        val job = appScope.launch {
+            try {
+                finalizeInterruptedGeneration(conversationId, previousJob)
+            } catch (error: Exception) {
+                addError(
+                    error,
+                    conversationId = conversationId,
+                    title = context.getString(R.string.error_title_generation)
+                )
+            }
+        }
+        runtimeService.setGenerationJob(conversationId, job)
+    }
+
     // ---- 初始化对话 ----
 
     suspend fun initializeConversation(conversationId: Uuid) {
@@ -658,11 +714,12 @@ class ChatService(
     fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
 
-        runtimeService.cancelGenerationJob(conversationId)
+        val previousJob = runtimeService.cancelGenerationJob(conversationId)
         val processedContent = preprocessUserInputParts(content)
 
         val job = appScope.launch {
             try {
+                finalizeInterruptedGeneration(conversationId, previousJob)
                 val currentConversation = getConversationFlow(conversationId).value
 
                 // 添加消息到列表
@@ -714,10 +771,11 @@ class ChatService(
         message: UIMessage,
         regenerateAssistantMsg: Boolean = true
     ) {
-        runtimeService.cancelGenerationJob(conversationId)
+        val previousJob = runtimeService.cancelGenerationJob(conversationId)
 
         val job = appScope.launch {
             try {
+                finalizeInterruptedGeneration(conversationId, previousJob)
                 val conversation = getConversationFlow(conversationId).value
 
                 if (message.role == MessageRole.USER) {
@@ -757,10 +815,11 @@ class ChatService(
         reason: String = "",
         answer: String? = null,
     ) {
-        runtimeService.cancelGenerationJob(conversationId)
+        val previousJob = runtimeService.cancelGenerationJob(conversationId)
 
         val job = appScope.launch {
             try {
+                finalizeInterruptedGeneration(conversationId, previousJob)
                 val conversation = getConversationFlow(conversationId).value
                 val newApprovalState = when {
                     answer != null -> ToolApprovalState.Answered(answer)
@@ -2054,6 +2113,6 @@ class ChatService(
 
     // 停止当前会话生成任务（不清理会话缓存）
     fun stopGeneration(conversationId: Uuid) {
-        runtimeService.cancelGenerationJob(conversationId)
+        cancelGeneration(conversationId)
     }
 }

@@ -516,6 +516,10 @@ class ChatVM(
     ) {        chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
     }
 
+    fun cancelGeneration() {
+        chatService.cancelGeneration(_conversationId)
+    }
+
     fun saveConversationAsync() {
         viewModelScope.launch {
             chatService.saveConversation(_conversationId, conversation.value)
