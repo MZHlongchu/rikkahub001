@@ -221,6 +221,35 @@ class MessageTest {
     }
 
     @Test
+    fun `freezeInterruptedGeneration should finalize unfinished tools and message`() {
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Text("Calling tool"),
+                UIMessagePart.Tool(
+                    toolCallId = "call-1",
+                    toolName = "search_web",
+                    input = """{"query":"weather"}""",
+                    output = emptyList()
+                )
+            ),
+            finishedAt = null,
+        )
+
+        val frozen = message.freezeInterruptedGeneration()
+        val tool = frozen.parts.filterIsInstance<UIMessagePart.Tool>().single()
+
+        assertTrue(tool.isExecuted)
+        assertEquals(
+            "Generation interrupted by user before tool execution completed.",
+            tool.output.filterIsInstance<UIMessagePart.Text>().single().text
+        )
+        assertEquals("true", (tool.metadata?.get("interrupted") as? JsonPrimitive)?.content)
+        assertEquals("generation_cancelled", (tool.metadata?.get("interrupted_reason") as? JsonPrimitive)?.content)
+        assertTrue(frozen.finishedAt != null)
+    }
+
+    @Test
     fun `findKeepStartIndexForVisibleMessages should return null when not enough visible messages`() {
         val messages = listOf(
             UIMessage(

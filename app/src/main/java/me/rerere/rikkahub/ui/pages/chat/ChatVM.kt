@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -33,8 +34,11 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -63,14 +67,16 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatVM"
 
-data class ChatHeaderState(
-    val title: String = "",
-    val hasMessages: Boolean = false,
-    val assistantId: Uuid? = null,
+private data class ChatInputMetaState(
+    val workflowEnabled: Boolean,
+    val currentChatModel: Model?,
+    val enableWebSearch: Boolean,
 )
 
-data class ChatInputBarState(
-    val messageCount: Int = 0,
+private data class ChatInputRuntimeState(
+    val loading: Boolean,
+    val compressionUiState: CompressionUiState?,
+    val showLedgerGenerationDialog: Boolean,
 )
 
 private const val PREVIEW_SEARCH_LIMIT = 50
@@ -91,33 +97,15 @@ class ChatVM(
     val stableMessageNodes: StateFlow<List<MessageNode>> = chatService.getMessageNodesFlow(_conversationId)
     val streamingTail: StateFlow<StreamingTailState?> = chatService.getStreamingTailFlow(_conversationId)
     val streamingUiTick: StateFlow<Long> = chatService.getStreamingUiTickFlow(_conversationId)
-    private val _messageWindowState = MutableStateFlow(ChatMessageWindowState())
-    val messageWindowState: StateFlow<ChatMessageWindowState> = _messageWindowState.asStateFlow()
     private val _previewSearchResults = MutableStateFlow<List<ConversationPreviewSearchResult>>(emptyList())
     val previewSearchResults: StateFlow<List<ConversationPreviewSearchResult>> = _previewSearchResults.asStateFlow()
     private var previewSearchJob: Job? = null
-    val headerState: StateFlow<ChatHeaderState> = stableConversation
-        .map { conversation ->
-            ChatHeaderState(
-                title = conversation.title,
-                hasMessages = conversation.messageNodes.isNotEmpty(),
-                assistantId = conversation.assistantId,
-            )
-        }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ChatHeaderState())
-    val inputBarState: StateFlow<ChatInputBarState> = stableConversation
-        .map { conversation ->
-            ChatInputBarState(
-                messageCount = conversation.messageNodes.size,
-            )
-        }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ChatInputBarState())
-    var chatListInitialized by mutableStateOf(false) // 鑱婂ぉ鍒楄〃鏄惁宸茬粡婊氬姩鍒板簳閮?
+    var chatListInitialized by mutableStateOf(false) // 聊天列表是否已完成初始滚动
 
-    // 鑱婂ぉ杈撳叆鐘舵€?- 淇濆瓨鍦?ViewModel 涓伩鍏?TransactionTooLargeException
+    // 聊天输入状态，保存在 ViewModel 中以避免 TransactionTooLargeException
     val inputState = ChatInputState()
 
-    // 寮傛浠诲姟 (浠嶤hatService鑾峰彇锛屽搷搴斿紡)
+    // 异步任务（从 ChatService 获取，响应式）
     val conversationJob: StateFlow<Job?> =
         chatService
             .getGenerationJobStateFlow(_conversationId)
@@ -128,42 +116,34 @@ class ChatVM(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     init {
-        // 娣诲姞瀵硅瘽寮曠敤
+        // 添加对话引用
         chatService.addConversationReference(_conversationId)
 
-        // 鍒濆鍖栧璇?
+        // 初始化对话
         viewModelScope.launch {
             chatService.initializeConversation(_conversationId)
         }
 
-        viewModelScope.launch {
-            stableMessageNodes.collect { nodes ->
-                _messageWindowState.update { current ->
-                    syncChatMessageWindowWithNodes(current, nodes)
-                }
-            }
-        }
-
-        // 璁颁綇瀵硅瘽ID, 鏂逛究涓嬫鍚姩鎭㈠
+        // 记住对话 ID，方便下次启动恢复
         context.writeStringPreference("lastConversationId", _conversationId.toString())
     }
 
     override fun onCleared() {
         super.onCleared()
-        // 绉婚櫎瀵硅瘽寮曠敤
+        // 移除对话引用
         chatService.removeConversationReference(_conversationId)
     }
 
-    // 鐢ㄦ埛璁剧疆
+    // 用户设置
     val settings: StateFlow<Settings> =
         settingsStore.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
 
-    // 缃戠粶鎼滅储
+    // 网络搜索
     val enableWebSearch = settings.map {
         it.enableWebSearch
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    // 鑱婂ぉ鍒楄〃 (浣跨敤 Paging 鍒嗛〉鍔犺浇)
+    // 聊天列表（使用 Paging 分页加载）
     val conversations: Flow<PagingData<ConversationListItem>> =
         settings.map { it.assistantId }.distinctUntilChanged()
             .flatMapLatest { assistantId ->
@@ -174,7 +154,7 @@ class ChatVM(
                     .map { ConversationListItem.Item(it) }
                     .insertSeparators { before, after ->
                         when {
-                            // 鍒楄〃寮€澶达細妫€鏌ョ涓€椤规槸鍚︾疆椤?
+                            // 列表开头：检查第一项是否置顶
                             before == null && after is ConversationListItem.Item -> {
                                 if (after.conversation.isPinned) {
                                     ConversationListItem.PinnedHeader
@@ -189,9 +169,9 @@ class ChatVM(
                                 }
                             }
 
-                            // 涓棿椤癸細妫€鏌ョ疆椤剁姸鎬佸彉鍖栧拰鏃ユ湡鍙樺寲
+                            // 中间项：检查置顶状态和日期是否变化
                             before is ConversationListItem.Item && after is ConversationListItem.Item -> {
-                                // 浠庣疆椤跺垏鎹㈠埌闈炵疆椤讹紝鏄剧ず鏃ユ湡澶撮儴
+                                // 从置顶切换到非置顶时，显示日期头部
                                 if (before.conversation.isPinned && !after.conversation.isPinned) {
                                     val afterDate = after.conversation.updateAt
                                         .atZone(ZoneId.systemDefault())
@@ -201,7 +181,7 @@ class ChatVM(
                                         label = getDateLabel(afterDate)
                                     )
                                 }
-                                // 瀵逛簬闈炵疆椤堕」锛屾鏌ユ棩鏈熷彉鍖?
+                                // 对于非置顶项，检查日期是否变化
                                 else if (!after.conversation.isPinned) {
                                     val beforeDate = before.conversation.updateAt
                                         .atZone(ZoneId.systemDefault())
@@ -229,12 +209,12 @@ class ChatVM(
             }
             .cachedIn(viewModelScope)
 
-    // 褰撳墠妯″瀷
+    // 当前模型
     val currentChatModel = settings.map { settings ->
         settings.getCurrentChatModel()
     }.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
-    // 閿欒鐘舵€?
+    // 错误状态
     val errors: StateFlow<List<ChatError>> = chatService.errors
     val compressionUiState: StateFlow<CompressionUiState?> =
         chatService.getCompressionUiStateFlow(_conversationId)
@@ -243,72 +223,112 @@ class ChatVM(
         chatService.getLedgerGenerationUiStateFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val compressionScrollEvents: SharedFlow<Pair<Uuid, Long>> = chatService.compressionScrollEvents
+    private val workflowEnabledState: StateFlow<Boolean> = combine(stableConversation, settings) { conversation, settings ->
+        val assistant = settings.getAssistantById(conversation.assistantId) ?: settings.getCurrentAssistant()
+        assistant.localTools.contains(LocalToolOption.WorkflowControl)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val chatChromeState: StateFlow<ChatChromeUiState> = combine(
+        stableConversation,
+        settings,
+        workflowEnabledState,
+    ) { conversation, settings, workflowEnabled ->
+        buildChatChromeUiState(
+            conversation = conversation,
+            settings = settings,
+            workflowEnabled = workflowEnabled,
+            defaultAssistantLabel = context.getString(R.string.assistant_page_default_assistant),
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatChromeUiState())
+    private val chatInputMetaState: StateFlow<ChatInputMetaState> = combine(
+        workflowEnabledState,
+        currentChatModel,
+        enableWebSearch,
+    ) { workflowEnabled, currentChatModel, enableWebSearch ->
+        ChatInputMetaState(
+            workflowEnabled = workflowEnabled,
+            currentChatModel = currentChatModel,
+            enableWebSearch = enableWebSearch,
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        ChatInputMetaState(
+            workflowEnabled = false,
+            currentChatModel = null,
+            enableWebSearch = false,
+        )
+    )
+    private val chatInputRuntimeState: StateFlow<ChatInputRuntimeState> = combine(
+        conversationJob,
+        compressionUiState,
+        ledgerGenerationUiState,
+    ) { loadingJob, compressionUiState, ledgerGenerationUiState ->
+        ChatInputRuntimeState(
+            loading = loadingJob != null,
+            compressionUiState = compressionUiState,
+            showLedgerGenerationDialog = ledgerGenerationUiState != null,
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        ChatInputRuntimeState(
+            loading = false,
+            compressionUiState = null,
+            showLedgerGenerationDialog = false,
+        )
+    )
+    val chatInputUiState: StateFlow<ChatInputUiState> = combine(
+        stableConversation,
+        chatInputMetaState,
+        chatInputRuntimeState,
+    ) { conversation, metaState, runtimeState ->
+        buildChatInputUiState(
+            conversation = conversation,
+            workflowEnabled = metaState.workflowEnabled,
+            currentChatModel = metaState.currentChatModel,
+            loading = runtimeState.loading,
+            enableWebSearch = metaState.enableWebSearch,
+            compressionUiState = runtimeState.compressionUiState,
+            showLedgerGenerationDialog = runtimeState.showLedgerGenerationDialog,
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatInputUiState())
+    val chatTimelineUiState: StateFlow<ChatTimelineUiState> = combine(
+        stableConversation,
+        settings,
+        stableMessageNodes,
+    ) { conversation, settings, stableMessageNodes ->
+        buildChatTimelineUiState(
+            conversation = conversation,
+            settings = settings,
+            stableNodes = stableMessageNodes,
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatTimelineUiState())
+    val chatPreviewUiState: StateFlow<ChatPreviewUiState> = combine(
+        stableMessageNodes,
+        previewSearchResults,
+    ) { stableMessageNodes, previewSearchResults ->
+        buildChatPreviewUiState(
+            stableNodes = stableMessageNodes,
+            previewSearchResults = previewSearchResults,
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatPreviewUiState())
+    val chatStreamingTailUiState: StateFlow<ChatStreamingTailUiState> = combine(
+        stableConversation,
+        settings,
+        stableMessageNodes,
+        streamingTail,
+    ) { conversation, settings, stableMessageNodes, streamingTail ->
+        buildChatStreamingTailUiState(
+            conversation = conversation,
+            settings = settings,
+            stableNodeCount = stableMessageNodes.size,
+            streamingTail = streamingTail,
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatStreamingTailUiState())
 
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
     fun clearAllErrors() = chatService.clearAllErrors()
-
-    suspend fun loadOlderMessages() {
-        val current = _messageWindowState.value
-        if (current.isLoadingOlder || !current.hasOlder) return
-
-        _messageWindowState.update { it.copy(isLoadingOlder = true) }
-        val newStartIndex = (current.loadedStartIndex - CHAT_OLDER_LOAD_BATCH_SIZE).coerceAtLeast(0)
-        val newLimit = current.loadedStableNodes.size + (current.loadedStartIndex - newStartIndex)
-        val loadedNodes = conversationRepo.loadConversationNodesRange(
-            conversationId = _conversationId,
-            startIndex = newStartIndex,
-            limit = newLimit,
-        )
-        _messageWindowState.value = current.copy(
-            totalStableCount = stableMessageNodes.value.size,
-            loadedStartIndex = newStartIndex,
-            loadedStableNodes = loadedNodes,
-            hasOlder = newStartIndex > 0,
-            isLoadingOlder = false,
-            initialized = true,
-        )
-    }
-
-    suspend fun ensureMessageIndexVisible(globalIndex: Int): Int {
-        val totalCount = stableMessageNodes.value.size
-        if (totalCount <= 0) return 0
-        val normalizedIndex = globalIndex.coerceIn(0, totalCount - 1)
-        val current = _messageWindowState.value
-        val currentEnd = current.loadedStartIndex + current.loadedStableNodes.size
-        if (normalizedIndex in current.loadedStartIndex until currentEnd) {
-            return normalizedIndex - current.loadedStartIndex
-        }
-
-        val targetWindowSize = maxOf(
-            CHAT_INITIAL_WINDOW_SIZE,
-            minOf(totalCount, current.loadedStableNodes.size.coerceAtLeast(CHAT_INITIAL_WINDOW_SIZE))
-        )
-        val startIndex = computeFocusedWindowStart(
-            totalCount = totalCount,
-            targetIndex = normalizedIndex,
-            windowSize = targetWindowSize,
-        )
-        val loadedNodes = conversationRepo.loadConversationNodesRange(
-            conversationId = _conversationId,
-            startIndex = startIndex,
-            limit = targetWindowSize,
-        )
-        _messageWindowState.value = current.copy(
-            totalStableCount = totalCount,
-            loadedStartIndex = startIndex,
-            loadedStableNodes = loadedNodes,
-            hasOlder = startIndex > 0,
-            isLoadingOlder = false,
-            initialized = true,
-        )
-        return normalizedIndex - startIndex
-    }
-
-    suspend fun ensureNodeVisible(nodeId: Uuid): Int? {
-        val globalIndex = conversationRepo.findNodeIndex(_conversationId, nodeId) ?: return null
-        return ensureMessageIndexVisible(globalIndex)
-    }
 
     fun searchPreviewMessages(query: String) {
         previewSearchJob?.cancel()
@@ -336,23 +356,23 @@ class ChatVM(
         )
     }
 
-    // 鐢熸垚瀹屾垚
+    // 生成完成
     val generationDoneFlow: SharedFlow<Uuid> = chatService.generationDoneFlow
 
-    // MCP绠＄悊鍣?
+    // MCP 管理器
     val mcpManager = chatService.mcpManager
 
-    // 鏇存柊璁剧疆
+    // 更新设置
     fun updateSettings(newSettings: Settings) {
         viewModelScope.launch {
             val oldSettings = settings.value
-            // 妫€鏌ョ敤鎴峰ご鍍忔槸鍚︽湁鍙樺寲锛屽鏋滄湁鍒欏垹闄ゆ棫澶村儚
+            // 检查用户头像是否有变化，如果有则删除旧头像
             checkUserAvatarDelete(oldSettings, newSettings)
             settingsStore.update(newSettings)
         }
     }
 
-    // 妫€鏌ョ敤鎴峰ご鍍忓垹闄?
+    // 检查是否需要删除旧用户头像
     private fun checkUserAvatarDelete(oldSettings: Settings, newSettings: Settings) {
         val oldAvatar = oldSettings.displaySetting.userAvatar
         val newAvatar = newSettings.displaySetting.userAvatar
@@ -362,7 +382,7 @@ class ChatVM(
         }
     }
 
-    // 璁剧疆鑱婂ぉ妯″瀷
+    // 设置聊天模型
     fun setChatModel(assistant: Assistant, model: Model) {
         viewModelScope.launch {
             settingsStore.update { settings ->
@@ -385,10 +405,10 @@ class ChatVM(
         updateChecker.checkUpdate().stateIn(viewModelScope, SharingStarted.Eagerly, UiState.Loading)
 
     /**
-     * 澶勭悊娑堟伅鍙戦€?
+     * 处理消息发送
      *
-     * @param content 娑堟伅鍐呭
-     * @param answer 鏄惁瑙﹀彂娑堟伅鐢熸垚锛屽鏋滀负false锛屽垯浠呮坊鍔犳秷鎭埌娑堟伅鍒楄〃涓?
+     * @param content 消息内容
+     * @param answer 是否触发消息生成；为 false 时只把消息加入消息列表
      */
     fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
@@ -407,11 +427,11 @@ class ChatVM(
     fun handleMessageTruncate() {
         viewModelScope.launch {
 
-            // 濡傛灉鎴柇鍦ㄦ渶鍚庝竴涓储寮曪紝鍒欏彇娑堟埅鏂紝鍚﹀垯鏇存柊 truncateIndex 鍒版渶鍚庝竴涓埅鏂綅缃?
+            // 清空截断后的标题和建议
             val newConversation = conversation.value.copy(
 
                 title = "",
-                chatSuggestions = emptyList(), // 娓呯┖寤鸿
+                chatSuggestions = emptyList(), // 清空建议
             )
             chatService.saveConversation(conversationId = _conversationId, conversation = newConversation)
         }
@@ -494,6 +514,10 @@ class ChatVM(
         toolCallId: String,
         answer: String,
     ) {        chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
+    }
+
+    fun cancelGeneration() {
+        chatService.cancelGeneration(_conversationId)
     }
 
     fun saveConversationAsync() {
@@ -591,6 +615,21 @@ class ChatVM(
         }
     }
 
+    fun updateMessageNode(newNode: MessageNode) {
+        chatService.updateConversationState(_conversationId) { currentConversation ->
+            currentConversation.copy(
+                messageNodes = currentConversation.messageNodes.map { existingNode ->
+                    if (existingNode.id == newNode.id) {
+                        newNode
+                    } else {
+                        existingNode
+                    }
+                }
+            )
+        }
+        saveConversationAsync()
+    }
+
     fun toggleMessageFavorite(node: MessageNode) {
         viewModelScope.launch {
             val currentlyFavorited = favoriteRepository.isNodeFavorited(_conversationId, node.id)
@@ -675,5 +714,3 @@ private fun ConversationMessageSearchResult.toPreviewSearchResult(): Conversatio
         snippet = snippet,
     )
 }
-
-

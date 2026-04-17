@@ -62,6 +62,7 @@ Run:
 
 ```bash
 git fetch upstream --prune --tags
+OLD_BASE="$(git merge-base master main)"
 git switch main
 git merge --ff-only upstream/master
 git push origin main
@@ -73,6 +74,22 @@ Record upstream version from tag or commit:
 git describe --tags --abbrev=0 upstream/master
 git rev-parse --short upstream/master
 ```
+
+Generate an audit report before you start porting anything:
+
+```bash
+python3 scripts/upstream_sync.py report --base "$OLD_BASE" --output "docs/upstream-audits/$(date +%Y%m%d)-$(git describe --tags --abbrev=0 main).md"
+```
+
+Rules for the audit:
+
+- Treat `git merge-base master main` as the source of truth for the previous synced upstream base.
+- Do not infer the sync point from commit author alone.
+- Use the generated report to review upstream commits one by one before porting fork changes back in.
+- Treat dynamic fork-overlap as the primary risk signal:
+  upstream commits that touch files changed by `master` since `OLD_BASE` must be reviewed first.
+- Use the static hotspot list only as a secondary accelerator, not as the main conflict detector.
+- Start with fork-overlap commits, then perf/static-hotspot commits, then bug fixes, then no-overlap commits.
 
 ## Step 2: Create Port Branch from Master
 
@@ -135,6 +152,13 @@ Inspect high-risk files every merge:
 - `app/src/main/java/me/rerere/rikkahub/service/WebServerService.kt`
 - `app/src/main/java/me/rerere/rikkahub/web/WebServerManager.kt`
 
+But do not treat this list as exhaustive. The real merge surface is:
+
+- every file changed by `master` since `OLD_BASE`
+- plus the static hotspot list above
+
+If the audit report shows upstream touching a fork-owned file outside this list, that file still gets priority review.
+
 Confirm no conflict markers remain:
 
 ```bash
@@ -190,7 +214,17 @@ rg -n "TODO|FIXME|TEMP|兼容|回退|fallback" app search web ai
 Commit on `port-*`:
 
 ```bash
-git commit -m "merge: sync upstream <version> into master line"
+git commit
+# commit body must include the output of:
+python3 scripts/upstream_sync.py trailers --base "$OLD_BASE"
+```
+
+Also create a sync anchor tag on the finished master commit:
+
+```bash
+python3 scripts/upstream_sync.py trailers --base "$OLD_BASE"
+# use the printed Sync-Anchor-Tag value
+git tag -a "<sync-anchor-tag>" -m "master synced through $(git rev-parse --short main)"
 ```
 
 Fast-forward master:
@@ -199,6 +233,7 @@ Fast-forward master:
 git switch master
 git merge --ff-only port-upstream-<yyyymmdd>-<version>
 git push origin master
+git push origin "<sync-anchor-tag>"
 ```
 
 Delete the finished port branch after master is updated:

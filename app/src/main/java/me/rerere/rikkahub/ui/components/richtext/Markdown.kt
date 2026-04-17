@@ -32,8 +32,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -102,6 +102,45 @@ private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MAT
 val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_MATCHES_ALL)
 private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
+private const val MARKDOWN_PARSE_CACHE_LIMIT = 96
+
+private data class MarkdownParseResult(
+    val preprocessed: String,
+    val astTree: ASTNode,
+    val hasHtmlBlocks: Boolean,
+)
+
+private object MarkdownParseCache {
+    private val cache = object : LinkedHashMap<String, MarkdownParseResult>(MARKDOWN_PARSE_CACHE_LIMIT, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MarkdownParseResult>): Boolean {
+            return size > MARKDOWN_PARSE_CACHE_LIMIT
+        }
+    }
+
+    fun get(content: String): MarkdownParseResult? = synchronized(cache) {
+        cache[content]
+    }
+
+    fun getOrParse(content: String): MarkdownParseResult {
+        get(content)?.let { return it }
+        val parsed = parseMarkdownContent(content)
+        synchronized(cache) {
+            cache[content] = parsed
+        }
+        return parsed
+    }
+}
+
+private fun ASTNode.containsHtmlBlocks(): Boolean {
+    if (type == MarkdownElementTypes.HTML_BLOCK) return true
+    return children.any { it.containsHtmlBlocks() }
+}
+
+private fun parseMarkdownContent(content: String): MarkdownParseResult {
+    val preprocessed = preProcess(content)
+    val astTree = parser.buildMarkdownTreeFromString(preprocessed)
+    return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
+}
 
 // 预处理markdown内容
 private fun preProcess(content: String): String {
@@ -192,10 +231,8 @@ fun MarkdownBlock(
     onClickCitation: (String) -> Unit = {}
 ) {
     var (data, setData) = remember {
-        val preprocessed = preProcess(content)
-        val astTree = parser.buildMarkdownTreeFromString(preprocessed)
         mutableStateOf(
-            value = preprocessed to astTree,
+            value = MarkdownParseCache.getOrParse(content),
             policy = referentialEqualityPolicy(),
         )
     }
@@ -205,24 +242,30 @@ fun MarkdownBlock(
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }.distinctUntilChanged().mapLatest {
-            val preprocessed = preProcess(it)
-            val astTree = parser.buildMarkdownTreeFromString(preprocessed)
-            preprocessed to astTree
+            MarkdownParseCache.getOrParse(it)
         }.catch { exception -> exception.printStackTrace() }.flowOn(Dispatchers.Default) // 在后台线程解析AST树
             .collect {
                 setData(it)
             }
     }
 
-    val (preprocessed, astTree) = data
-    ProvideTextStyle(style) {
-        Column(
-            modifier = modifier.padding(start = 4.dp)
-        ) {
-            astTree.children.fastForEach { child ->
-                MarkdownNode(
-                    node = child, content = preprocessed, onClickCitation = onClickCitation
-                )
+    if (data.hasHtmlBlocks) {
+        MarkdownNew(
+            content = content,
+            modifier = modifier,
+            style = style,
+            onClickCitation = onClickCitation,
+        )
+    } else {
+        ProvideTextStyle(style) {
+            Column(
+                modifier = modifier.padding(start = 4.dp)
+            ) {
+                data.astTree.children.fastForEach { child ->
+                    MarkdownNode(
+                        node = child, content = data.preprocessed, onClickCitation = onClickCitation
+                    )
+                }
             }
         }
     }
