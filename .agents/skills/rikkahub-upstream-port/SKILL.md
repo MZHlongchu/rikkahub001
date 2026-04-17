@@ -86,7 +86,10 @@ Rules for the audit:
 - Treat `git merge-base master main` as the source of truth for the previous synced upstream base.
 - Do not infer the sync point from commit author alone.
 - Use the generated report to review upstream commits one by one before porting fork changes back in.
-- Start with commits flagged as perf/hotspot first, then bug fixes, then neutral refactors.
+- Treat dynamic fork-overlap as the primary risk signal:
+  upstream commits that touch files changed by `master` since `OLD_BASE` must be reviewed first.
+- Use the static hotspot list only as a secondary accelerator, not as the main conflict detector.
+- Start with fork-overlap commits, then perf/static-hotspot commits, then bug fixes, then no-overlap commits.
 
 ## Step 2: Create Port Branch from Master
 
@@ -148,6 +151,13 @@ Inspect high-risk files every merge:
 - `search/src/main/java/me/rerere/search/TavilySearchService.kt`
 - `app/src/main/java/me/rerere/rikkahub/service/WebServerService.kt`
 - `app/src/main/java/me/rerere/rikkahub/web/WebServerManager.kt`
+
+But do not treat this list as exhaustive. The real merge surface is:
+
+- every file changed by `master` since `OLD_BASE`
+- plus the static hotspot list above
+
+If the audit report shows upstream touching a fork-owned file outside this list, that file still gets priority review.
 
 Confirm no conflict markers remain:
 

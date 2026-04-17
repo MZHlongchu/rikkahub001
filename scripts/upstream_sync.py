@@ -147,6 +147,7 @@ class CommitInfo:
     is_fix: bool
     is_refactor: bool
     hotspot_hits: list[str]
+    fork_overlap: list[str]
 
 
 def find_last_sync_marker(branch: str) -> SyncMarker | None:
@@ -174,7 +175,33 @@ def find_last_sync_marker(branch: str) -> SyncMarker | None:
     return None
 
 
-def list_commits(base: str, head: str) -> list[CommitInfo]:
+def list_changed_files(rev_range: str) -> list[str]:
+    return [
+        entry.strip()
+        for entry in git("diff", "--name-only", rev_range).splitlines()
+        if entry.strip()
+    ]
+
+
+def infer_areas(files: list[str]) -> list[str]:
+    areas: Counter[str] = Counter()
+    for path in files:
+        parts = path.split("/")
+        if len(parts) >= 4 and parts[0] == "app" and parts[1] == "src" and parts[2] == "main":
+            if parts[3] == "java" and len(parts) >= 9:
+                areas["/".join(parts[7:9])] += 1
+            elif parts[3] == "res" and len(parts) >= 5:
+                areas[f"res/{parts[4]}"] += 1
+            else:
+                areas["/".join(parts[:4])] += 1
+        elif len(parts) >= 2:
+            areas["/".join(parts[:2])] += 1
+        else:
+            areas[path] += 1
+    return [area for area, _ in areas.most_common(12)]
+
+
+def list_commits(base: str, head: str, fork_owned_files: set[str]) -> list[CommitInfo]:
     log_output = git("log", "--reverse", "--format=%H%x1f%an%x1f%s", f"{base}..{head}")
     commits: list[CommitInfo] = []
     for line in log_output.splitlines():
@@ -189,6 +216,7 @@ def list_commits(base: str, head: str) -> list[CommitInfo]:
         categories = classify_categories(files)
         lower_subject = subject.lower()
         hotspot_hits = [path for path in files if path in HOTSPOT_PATHS]
+        fork_overlap = [path for path in files if path in fork_owned_files]
         commits.append(
             CommitInfo(
                 commit=commit,
@@ -200,6 +228,7 @@ def list_commits(base: str, head: str) -> list[CommitInfo]:
                 is_fix=any(keyword in lower_subject for keyword in FIX_KEYWORDS),
                 is_refactor=any(keyword in lower_subject for keyword in REFACTOR_KEYWORDS),
                 hotspot_hits=hotspot_hits,
+                fork_overlap=fork_overlap,
             )
         )
     return commits
@@ -221,6 +250,8 @@ def describe_commit(commit: str) -> str:
 
 
 def choose_review_bucket(commit: CommitInfo) -> str:
+    if commit.fork_overlap:
+        return "mod-overlap"
     if commit.hotspot_hits or commit.is_perf:
         return "priority"
     if commit.is_fix:
@@ -235,6 +266,7 @@ def render_report(
     head: str,
     commits: list[CommitInfo],
     marker: SyncMarker | None,
+    fork_owned_files: list[str],
 ) -> str:
     lines: list[str] = []
     lines.append("# Upstream Audit")
@@ -252,6 +284,7 @@ def render_report(
     else:
         lines.append("- Last recorded sync marker: none")
     lines.append(f"- Upstream commits since base: `{len(commits)}`")
+    lines.append(f"- Fork-owned files since base: `{len(fork_owned_files)}`")
     lines.append("")
 
     if not commits:
@@ -260,6 +293,7 @@ def render_report(
 
     category_counter = Counter()
     hotspot_counter = Counter()
+    overlap_counter = Counter()
     perf_commits = 0
     fix_commits = 0
     refactor_commits = 0
@@ -267,35 +301,50 @@ def render_report(
     for commit in commits:
         category_counter.update(commit.categories)
         hotspot_counter.update(commit.hotspot_hits)
+        overlap_counter.update(commit.fork_overlap)
         perf_commits += int(commit.is_perf)
         fix_commits += int(commit.is_fix)
         refactor_commits += int(commit.is_refactor)
+
+    fork_owned_areas = infer_areas(fork_owned_files)
 
     lines.append("## Review Summary")
     lines.append("")
     lines.append(f"- Perf-like subjects: `{perf_commits}`")
     lines.append(f"- Fix-like subjects: `{fix_commits}`")
     lines.append(f"- Refactor-like subjects: `{refactor_commits}`")
+    lines.append(f"- Upstream commits overlapping fork-owned files: `{sum(1 for commit in commits if commit.fork_overlap)}`")
+    if fork_owned_areas:
+        lines.append("- Fork-owned areas:")
+        for area in fork_owned_areas[:8]:
+            lines.append(f"  - `{area}`")
     if category_counter:
         lines.append("- Category hits:")
         for category, count in category_counter.most_common():
             lines.append(f"  - `{category}`: {count}")
+    if overlap_counter:
+        lines.append("- Fork-owned files touched by upstream:")
+        for path, count in overlap_counter.most_common(12):
+            lines.append(f"  - `{path}`: {count}")
     if hotspot_counter:
-        lines.append("- Hotspot files touched:")
+        lines.append("- Static hotspot files touched:")
         for path, count in hotspot_counter.most_common(8):
             lines.append(f"  - `{path}`: {count}")
     lines.append("")
 
+    overlap_commits = [commit for commit in commits if choose_review_bucket(commit) == "mod-overlap"]
     priority_commits = [commit for commit in commits if choose_review_bucket(commit) == "priority"]
     important_commits = [commit for commit in commits if choose_review_bucket(commit) == "important"]
     normal_commits = [commit for commit in commits if choose_review_bucket(commit) == "normal"]
 
     lines.append("## Suggested Review Order")
     lines.append("")
-    lines.append(f"- Priority commits first: `{len(priority_commits)}`")
-    lines.append("  These either look like perf work or touch fork hotspots.")
+    lines.append(f"- Fork-overlap commits first: `{len(overlap_commits)}`")
+    lines.append("  These touch files that the fork has modified since the last upstream base.")
+    lines.append(f"- Priority commits next: `{len(priority_commits)}`")
+    lines.append("  These either look like perf work or hit the static hotspot list.")
     lines.append(f"- Important fixes next: `{len(important_commits)}`")
-    lines.append(f"- Neutral/other upstream commits last: `{len(normal_commits)}`")
+    lines.append(f"- Safe/no-overlap commits last: `{len(normal_commits)}`")
     lines.append("")
 
     lines.append("## Commit Checklist")
@@ -309,11 +358,15 @@ def render_report(
             keyword_flags.append("fix")
         if commit.is_refactor:
             keyword_flags.append("refactor")
+        if commit.fork_overlap:
+            keyword_flags.append("fork-overlap")
         if commit.hotspot_hits:
             keyword_flags.append("hotspot")
         flag_suffix = f" ({', '.join(keyword_flags)})" if keyword_flags else ""
         lines.append(f"{index}. `{short_sha(commit.commit)}` {commit.subject}{category_suffix}{flag_suffix}")
         lines.append(f"   Author: {commit.author}")
+        if commit.fork_overlap:
+            lines.append(f"   Fork overlap: {', '.join(f'`{path}`' for path in commit.fork_overlap[:5])}")
         if commit.hotspot_hits:
             lines.append(f"   Hotspots: {', '.join(f'`{path}`' for path in commit.hotspot_hits[:5])}")
         if commit.files:
@@ -330,8 +383,9 @@ def cmd_report(args: argparse.Namespace) -> int:
     base = args.base or git("merge-base", args.fork, args.upstream)
     head = git("rev-parse", args.upstream)
     marker = find_last_sync_marker(args.fork)
-    commits = list_commits(base, head)
-    report = render_report(args.fork, args.upstream, base, head, commits, marker)
+    fork_owned_files = list_changed_files(f"{base}..{args.fork}")
+    commits = list_commits(base, head, set(fork_owned_files))
+    report = render_report(args.fork, args.upstream, base, head, commits, marker, fork_owned_files)
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
