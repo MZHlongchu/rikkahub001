@@ -512,13 +512,6 @@ fun ChatInput(
                                 )
                             }
 
-                            if (workflowEnabled) {
-                                WorkflowButton(
-                                    active = workflowActive,
-                                    onToggle = onToggleWorkflow,
-                                )
-                            }
-
                             // MCP
                             if (settings.mcpServers.isNotEmpty()) {
                                 McpPickerButton(
@@ -1221,33 +1214,6 @@ private fun FilesPicker(
         )
     }
 
-}
-
-@Composable
-private fun WorkflowButton(
-    active: Boolean,
-    onToggle: () -> Unit,
-) {
-    ToggleSurface(
-        checked = active,
-        onClick = onToggle,
-    ) {
-        Row(
-            modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier.size(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Zap,
-                    contentDescription = "Workflow",
-                )
-            }
-        }
-    }
 }
 
 @Composable

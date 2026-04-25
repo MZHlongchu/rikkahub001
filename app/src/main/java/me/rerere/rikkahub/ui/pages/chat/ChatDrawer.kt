@@ -85,12 +85,12 @@ fun ChatDrawerContent(
     navController: Navigator,
     vm: ChatVM,
     settings: Settings,
-    current: Conversation,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val isPlayStore = rememberIsPlayStoreVersion()
     val repo = koinInject<ConversationRepository>()
+    val current by vm.conversation.collectAsStateWithLifecycle()
 
     val conversations = vm.conversations.collectAsLazyPagingItems()
     val conversationListState = rememberLazyListState()

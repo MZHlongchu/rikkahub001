@@ -71,10 +71,28 @@ fun ColumnScope.ChatMessageActionButtons(
     onUpdate: (MessageNode) -> Unit,
     onRegenerate: () -> Unit,
     onOpenActionSheet: () -> Unit,
+    ttsAvailable: Boolean? = null,
+    ttsSpeaking: Boolean? = null,
+    onSpeakMessage: ((UIMessage) -> Unit)? = null,
+    onStopSpeaking: (() -> Unit)? = null,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val settings = LocalSettings.current
+    val tts = LocalTTSState.current
+    val needsLocalTtsState = message.role == MessageRole.ASSISTANT &&
+        (ttsAvailable == null || ttsSpeaking == null || onSpeakMessage == null || onStopSpeaking == null)
+    val fallbackIsSpeaking by if (needsLocalTtsState) {
+        tts.isSpeaking.collectAsState()
+    } else {
+        remember { mutableStateOf(false) }
+    }
+    val fallbackIsAvailable by if (needsLocalTtsState) {
+        tts.isAvailable.collectAsState()
+    } else {
+        remember { mutableStateOf(true) }
+    }
     var isPendingDelete by remember { mutableStateOf(false) }
     var showTranslateDialog by remember { mutableStateOf(false) }
     var showRegenerateConfirm by remember { mutableStateOf(false) }
@@ -117,10 +135,20 @@ fun ColumnScope.ChatMessageActionButtons(
         )
 
         if (message.role == MessageRole.ASSISTANT) {
-            val tts = LocalTTSState.current
-            val settings = LocalSettings.current
-            val isSpeaking by tts.isSpeaking.collectAsState()
-            val isAvailable by tts.isAvailable.collectAsState()
+            val isSpeaking = ttsSpeaking ?: fallbackIsSpeaking
+            val isAvailable = ttsAvailable ?: fallbackIsAvailable
+            val speakMessage = onSpeakMessage ?: { target: UIMessage ->
+                val text = target.toText()
+                val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
+                    text.extractQuotedContentAsText() ?: text
+                } else {
+                    text
+                }
+                if (textToSpeak.isNotBlank()) {
+                    tts.speak(textToSpeak)
+                }
+            }
+            val stopSpeaking = onStopSpeaking ?: tts::stop
             Icon(
                 imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
                 contentDescription = stringResource(R.string.tts),
@@ -132,15 +160,9 @@ fun ColumnScope.ChatMessageActionButtons(
                         indication = LocalIndication.current,
                         onClick = {
                             if (!isSpeaking) {
-                                val text = message.toText()
-                                val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
-                                    text.extractQuotedContentAsText() ?: text
-                                } else {
-                                    text
-                                }
-                                tts.speak(textToSpeak)
+                                speakMessage(message)
                             } else {
-                                tts.stop()
+                                stopSpeaking()
                             }
                         }
                     )

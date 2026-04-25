@@ -39,10 +39,6 @@ class ConversationRuntimeService(
         return getOrCreateSession(conversationId).state
     }
 
-    fun getConversationStableFlow(conversationId: Uuid): StateFlow<Conversation> {
-        return getOrCreateSession(conversationId).stableConversationState
-    }
-
     fun getMessageNodesFlow(conversationId: Uuid): StateFlow<List<MessageNode>> {
         return getOrCreateSession(conversationId).messageNodesState
     }

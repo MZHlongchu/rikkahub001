@@ -63,6 +63,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -117,8 +118,10 @@ import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
+import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
+import me.rerere.rikkahub.utils.extractQuotedContentAsText
 import me.rerere.rikkahub.utils.toLocalDateTime
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
@@ -244,12 +247,28 @@ private fun ChatListNormal(
 ) {
     val scope = rememberCoroutineScope()
     var isRecentScroll by remember { mutableStateOf(false) }
+    val tts = LocalTTSState.current
+    val ttsIsSpeaking by tts.isSpeaking.collectAsState()
+    val ttsIsAvailable by tts.isAvailable.collectAsState()
     val stableMessageItems = timelineState.messageItems
     val allMessageItems = remember(stableMessageItems, streamingTailItem) {
         if (streamingTailItem == null) {
             stableMessageItems
         } else {
             stableMessageItems + streamingTailItem
+        }
+    }
+    val speakAssistantMessage = remember(tts, settings.displaySetting.ttsOnlyReadQuoted) {
+        { message: UIMessage ->
+            val text = message.toText()
+            val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
+                text.extractQuotedContentAsText() ?: text
+            } else {
+                text
+            }
+            if (textToSpeak.isNotBlank()) {
+                tts.speak(textToSpeak)
+            }
         }
     }
     val compressionItemsByBoundary = remember(timelineState.compressionItems) {
@@ -437,6 +456,10 @@ private fun ChatListNormal(
                         onClearTranslation = onClearTranslation,
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
+                        ttsIsSpeaking = ttsIsSpeaking,
+                        ttsIsAvailable = ttsIsAvailable,
+                        onSpeakAssistantMessage = speakAssistantMessage,
+                        onStopSpeaking = tts::stop,
                         lastMessage = item.isLastMessage && streamingTailItem == null,
                     )
                 }
@@ -512,6 +535,10 @@ private fun ChatListNormal(
                             onClearTranslation = onClearTranslation,
                             onToolApproval = onToolApproval,
                             onToolAnswer = onToolAnswer,
+                            ttsIsSpeaking = ttsIsSpeaking,
+                            ttsIsAvailable = ttsIsAvailable,
+                            onSpeakAssistantMessage = speakAssistantMessage,
+                            onStopSpeaking = tts::stop,
                             lastMessage = messageItem.isLastMessage && streamingTailItem == null,
                         )
                     }
@@ -590,6 +617,10 @@ private fun ChatListNormal(
                         onClearTranslation = onClearTranslation,
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
+                        ttsIsSpeaking = ttsIsSpeaking,
+                        ttsIsAvailable = ttsIsAvailable,
+                        onSpeakAssistantMessage = speakAssistantMessage,
+                        onStopSpeaking = tts::stop,
                         lastMessage = true,
                     )
                 }
@@ -749,6 +780,10 @@ private fun ChatListMessageRow(
     onClearTranslation: (UIMessage) -> Unit,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)?,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
+    ttsIsSpeaking: Boolean,
+    ttsIsAvailable: Boolean,
+    onSpeakAssistantMessage: (UIMessage) -> Unit,
+    onStopSpeaking: () -> Unit,
     lastMessage: Boolean,
 ) {
     ListSelectableItem(
@@ -792,6 +827,10 @@ private fun ChatListMessageRow(
             onClearTranslation = onClearTranslation,
             onToolApproval = onToolApproval,
             onToolAnswer = onToolAnswer,
+            ttsSpeaking = ttsIsSpeaking,
+            ttsAvailable = ttsIsAvailable,
+            onSpeakMessage = onSpeakAssistantMessage,
+            onStopSpeaking = onStopSpeaking,
             lastMessage = lastMessage,
         )
     }

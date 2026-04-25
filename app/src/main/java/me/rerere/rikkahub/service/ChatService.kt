@@ -508,10 +508,6 @@ class ChatService(
         return runtimeService.getConversationFlow(conversationId)
     }
 
-    fun getConversationStableFlow(conversationId: Uuid): StateFlow<Conversation> {
-        return runtimeService.getConversationStableFlow(conversationId)
-    }
-
     fun getMessageNodesFlow(conversationId: Uuid): StateFlow<List<me.rerere.rikkahub.data.model.MessageNode>> {
         return runtimeService.getMessageNodesFlow(conversationId)
     }

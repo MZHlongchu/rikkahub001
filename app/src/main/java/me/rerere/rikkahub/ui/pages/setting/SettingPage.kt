@@ -210,7 +210,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingAdvanced) },
                         leadingContent = { Icon(HugeIcons.Settings03, null) },
-                        supportingContent = { Text("工作流控制、定时任务与后续 AI Code 流程入口") },
+                        supportingContent = { Text("工作流控制、定时任务与后续 AI Work 流程入口") },
                         headlineContent = { Text("高级") },
                     )
                 }

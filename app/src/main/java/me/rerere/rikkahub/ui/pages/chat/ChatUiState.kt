@@ -12,9 +12,9 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.CompressionEvent
-import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.WorkflowPhase
+import me.rerere.rikkahub.data.model.WorkflowState
 import me.rerere.rikkahub.data.model.compressionEventOrder
 import me.rerere.rikkahub.service.CompressionUiState
 import me.rerere.rikkahub.service.StreamingTailState
@@ -103,12 +103,15 @@ data class ChatPreviewMessageItem(
 )
 
 internal fun buildChatChromeUiState(
-    conversation: Conversation,
+    title: String,
+    assistantId: Uuid,
+    hasMessages: Boolean,
+    workflowState: WorkflowState?,
     settings: Settings,
     workflowEnabled: Boolean,
     defaultAssistantLabel: String,
 ): ChatChromeUiState {
-    val assistant = settings.getAssistantById(conversation.assistantId) ?: settings.getCurrentAssistant()
+    val assistant = settings.getAssistantById(assistantId) ?: settings.getCurrentAssistant()
     val model = assistant.chatModelId?.let(settings::findModelById) ?: settings.getCurrentChatModel()
     val provider = model?.findProvider(providers = settings.providers, checkOverwrite = false)
     val subtitle = if (model != null && provider != null) {
@@ -118,18 +121,19 @@ internal fun buildChatChromeUiState(
     }
 
     return ChatChromeUiState(
-        title = conversation.title,
+        title = title,
         subtitle = subtitle,
-        hasMessages = conversation.messageNodes.isNotEmpty(),
+        hasMessages = hasMessages,
         workflowEnabled = workflowEnabled,
-        workflowActive = conversation.workflowState != null,
-        workflowPhase = conversation.workflowState?.phase,
+        workflowActive = workflowState != null,
+        workflowPhase = workflowState?.phase,
     )
 }
 
 internal fun buildChatInputUiState(
-    conversation: Conversation,
+    messageCount: Int,
     workflowEnabled: Boolean,
+    workflowActive: Boolean,
     currentChatModel: Model?,
     loading: Boolean,
     enableWebSearch: Boolean,
@@ -138,11 +142,11 @@ internal fun buildChatInputUiState(
 ): ChatInputUiState {
     return ChatInputUiState(
         loading = loading,
-        messageCount = conversation.messageNodes.size,
+        messageCount = messageCount,
         currentChatModel = currentChatModel,
         enableWebSearch = enableWebSearch,
         workflowEnabled = workflowEnabled,
-        workflowActive = conversation.workflowState != null,
+        workflowActive = workflowActive,
         compressionUiState = compressionUiState,
         showLedgerGenerationDialog = showLedgerGenerationDialog,
     )

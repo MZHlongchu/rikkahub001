@@ -67,7 +67,6 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.CompressionRegenerationTarget
@@ -102,12 +101,14 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val scope = rememberCoroutineScope()
 
     val setting by vm.settings.collectAsStateWithLifecycle()
-    val conversation by vm.stableConversation.collectAsStateWithLifecycle()
     val chatTimelineUiState by vm.chatTimelineUiState.collectAsStateWithLifecycle()
     val chatPreviewUiState by vm.chatPreviewUiState.collectAsStateWithLifecycle()
     val chatStreamingTailUiState by vm.chatStreamingTailUiState.collectAsStateWithLifecycle()
     val chatChromeState by vm.chatChromeState.collectAsStateWithLifecycle()
     val chatInputUiState by vm.chatInputUiState.collectAsStateWithLifecycle()
+    val chatSuggestions by vm.chatSuggestions.collectAsStateWithLifecycle()
+    val lastAssistantInputTokens by vm.lastAssistantInputTokens.collectAsStateWithLifecycle()
+    val latestAssistantMessageTextForTts by vm.latestAssistantMessageTextForTts.collectAsStateWithLifecycle()
     val streamingUiTick by vm.streamingUiTick.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
@@ -220,22 +221,24 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                 drawerContent = {
                     ChatDrawerContent(
                         navController = navController,
-                        current = conversation,
                         vm = vm,
                         settings = setting
                     )
                 }
             ) {
                 ChatPageContent(
+                    chatId = id,
                     inputState = inputState,
                     loadingJob = loadingJob,
                     setting = setting,
-                    conversation = conversation,
                     chatTimelineUiState = chatTimelineUiState,
                     chatPreviewUiState = chatPreviewUiState,
                     chatStreamingTailUiState = chatStreamingTailUiState,
                     chatChromeState = chatChromeState,
                     chatInputUiState = chatInputUiState,
+                    chatSuggestions = chatSuggestions,
+                    lastAssistantInputTokens = lastAssistantInputTokens,
+                    latestAssistantMessageTextForTts = latestAssistantMessageTextForTts,
                     streamingUiTick = streamingUiTick,
                     drawerState = drawerState,
                     navController = navController,
@@ -255,22 +258,24 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                 drawerContent = {
                     ChatDrawerContent(
                         navController = navController,
-                        current = conversation,
                         vm = vm,
                         settings = setting
                     )
                 }
             ) {
                 ChatPageContent(
+                    chatId = id,
                     inputState = inputState,
                     loadingJob = loadingJob,
                     setting = setting,
-                    conversation = conversation,
                     chatTimelineUiState = chatTimelineUiState,
                     chatPreviewUiState = chatPreviewUiState,
                     chatStreamingTailUiState = chatStreamingTailUiState,
                     chatChromeState = chatChromeState,
                     chatInputUiState = chatInputUiState,
+                    chatSuggestions = chatSuggestions,
+                    lastAssistantInputTokens = lastAssistantInputTokens,
+                    latestAssistantMessageTextForTts = latestAssistantMessageTextForTts,
                     streamingUiTick = streamingUiTick,
                     drawerState = drawerState,
                     navController = navController,
@@ -401,16 +406,19 @@ private fun StreamingChatListAutoScrollEffect(
 
 @Composable
 private fun ChatPageContent(
+    chatId: Uuid,
     inputState: ChatInputState,
     loadingJob: Job?,
     setting: Settings,
     bigScreen: Boolean,
-    conversation: Conversation,
     chatTimelineUiState: ChatTimelineUiState,
     chatPreviewUiState: ChatPreviewUiState,
     chatStreamingTailUiState: ChatStreamingTailUiState,
     chatChromeState: ChatChromeUiState,
     chatInputUiState: ChatInputUiState,
+    chatSuggestions: List<String>,
+    lastAssistantInputTokens: Int,
+    latestAssistantMessageTextForTts: String?,
     streamingUiTick: Long,
     drawerState: DrawerState,
     navController: Navigator,
@@ -422,20 +430,28 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
-    var previewMode by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var previewMode by rememberSaveable(chatId) { mutableStateOf(false) }
     val hazeState = rememberHazeState()
 
-    TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
-    val assistant = setting.assistants.find { it.id == conversation.assistantId }
-        ?: setting.getCurrentAssistant()
+    TTSAutoPlay(
+        vm = vm,
+        setting = setting,
+        chatId = chatId,
+        latestAssistantText = latestAssistantMessageTextForTts,
+    )
     val workflowEnabled = chatChromeState.workflowEnabled
     val workflowActive = chatChromeState.workflowActive
-    var showWorkflowPanel by rememberSaveable(conversation.id) { mutableStateOf(false) }
-    var showSandboxFileManager by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var showWorkflowPanel by rememberSaveable(chatId) { mutableStateOf(false) }
+    var showSandboxFileManager by rememberSaveable(chatId) { mutableStateOf(false) }
 
     LaunchedEffect(workflowEnabled, workflowActive) {
-        if (!workflowEnabled || !workflowActive) {
+        if (!workflowEnabled) {
             showWorkflowPanel = false
+            return@LaunchedEffect
+        }
+        if (!workflowActive) {
+            showWorkflowPanel = true
+            vm.initializeWorkflowState()
         }
     }
 
@@ -496,7 +512,7 @@ private fun ChatPageContent(
                     workflowEnabled = chatInputUiState.workflowEnabled,
                     workflowActive = chatInputUiState.workflowActive,
                     onToggleWorkflow = {
-                        if (conversation.workflowState == null) {
+                        if (!chatChromeState.workflowActive) {
                             vm.initializeWorkflowState()
                         } else {
                             vm.disableWorkflowState()
@@ -584,9 +600,9 @@ private fun ChatPageContent(
                 chatPreviewUiState = chatPreviewUiState,
                 chatStreamingTailUiState = chatStreamingTailUiState,
                 streamingUiTick = streamingUiTick,
-                conversationTitle = conversation.title,
-                chatSuggestions = conversation.chatSuggestions,
-                lastAssistantInputTokens = conversation.messageNodes.lastAssistantInputTokens(),
+                conversationTitle = chatChromeState.title,
+                chatSuggestions = chatSuggestions,
+                lastAssistantInputTokens = lastAssistantInputTokens,
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
@@ -656,7 +672,7 @@ private fun ChatPageContent(
             )
         }
 
-        if (workflowEnabled && workflowActive) {
+        if (workflowEnabled) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -682,7 +698,7 @@ private fun ChatPageContent(
 
         if (showSandboxFileManager) {
             SandboxFileManagerDialog(
-                sandboxId = conversation.id.toString(),
+                sandboxId = chatId.toString(),
                 onDismiss = { showSandboxFileManager = false }
             )
         }

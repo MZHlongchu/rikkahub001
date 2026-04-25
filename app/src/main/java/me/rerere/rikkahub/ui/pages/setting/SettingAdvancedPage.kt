@@ -48,7 +48,7 @@ fun SettingAdvancedPage() {
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text("AI Code") },
+                    title = { Text("AI Work") },
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingWorkflowControl) },
