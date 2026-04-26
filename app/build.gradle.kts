@@ -17,6 +17,10 @@ android {
     namespace = "me.rerere.rikkahub"
     compileSdk = 37
 
+    lint {
+        disable += "ExpiredTargetSdkVersion"
+    }
+
     defaultConfig {
         applicationId = "me.rerere.rikkahub.dev"
         minSdk = 26
