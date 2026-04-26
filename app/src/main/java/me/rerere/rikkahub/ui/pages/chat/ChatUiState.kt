@@ -12,9 +12,9 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.CompressionEvent
-import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.WorkflowPhase
+import me.rerere.rikkahub.data.model.WorkflowState
 import me.rerere.rikkahub.data.model.compressionEventOrder
 import me.rerere.rikkahub.service.CompressionUiState
 import me.rerere.rikkahub.service.StreamingTailState
@@ -46,13 +46,9 @@ data class ChatInputUiState(
 @Immutable
 data class ChatTimelineUiState(
     val conversationId: Uuid? = null,
-    val conversationTitle: String = "",
     val messageItems: List<ChatMessageItemModel> = emptyList(),
     val compressionItems: List<ChatCompressionBoundaryItem> = emptyList(),
-    val chatSuggestions: List<String> = emptyList(),
     val totalStableCount: Int = 0,
-    val latestCompressionEventId: Long? = null,
-    val lastAssistantInputTokens: Int = 0,
 )
 
 @Immutable
@@ -107,12 +103,15 @@ data class ChatPreviewMessageItem(
 )
 
 internal fun buildChatChromeUiState(
-    conversation: Conversation,
+    title: String,
+    assistantId: Uuid,
+    hasMessages: Boolean,
+    workflowState: WorkflowState?,
     settings: Settings,
     workflowEnabled: Boolean,
     defaultAssistantLabel: String,
 ): ChatChromeUiState {
-    val assistant = settings.getAssistantById(conversation.assistantId) ?: settings.getCurrentAssistant()
+    val assistant = settings.getAssistantById(assistantId) ?: settings.getCurrentAssistant()
     val model = assistant.chatModelId?.let(settings::findModelById) ?: settings.getCurrentChatModel()
     val provider = model?.findProvider(providers = settings.providers, checkOverwrite = false)
     val subtitle = if (model != null && provider != null) {
@@ -122,18 +121,19 @@ internal fun buildChatChromeUiState(
     }
 
     return ChatChromeUiState(
-        title = conversation.title,
+        title = title,
         subtitle = subtitle,
-        hasMessages = conversation.messageNodes.isNotEmpty(),
+        hasMessages = hasMessages,
         workflowEnabled = workflowEnabled,
-        workflowActive = conversation.workflowState != null,
-        workflowPhase = conversation.workflowState?.phase,
+        workflowActive = workflowState != null,
+        workflowPhase = workflowState?.phase,
     )
 }
 
 internal fun buildChatInputUiState(
-    conversation: Conversation,
+    messageCount: Int,
     workflowEnabled: Boolean,
+    workflowActive: Boolean,
     currentChatModel: Model?,
     loading: Boolean,
     enableWebSearch: Boolean,
@@ -142,39 +142,34 @@ internal fun buildChatInputUiState(
 ): ChatInputUiState {
     return ChatInputUiState(
         loading = loading,
-        messageCount = conversation.messageNodes.size,
+        messageCount = messageCount,
         currentChatModel = currentChatModel,
         enableWebSearch = enableWebSearch,
         workflowEnabled = workflowEnabled,
-        workflowActive = conversation.workflowState != null,
+        workflowActive = workflowActive,
         compressionUiState = compressionUiState,
         showLedgerGenerationDialog = showLedgerGenerationDialog,
     )
 }
 
 internal fun buildChatTimelineUiState(
-    conversation: Conversation,
+    conversationId: Uuid,
+    assistantId: Uuid,
+    compressionState: me.rerere.rikkahub.data.model.ConversationCompressionState,
+    compressionEvents: List<CompressionEvent>,
     settings: Settings,
     stableNodes: List<MessageNode>,
 ): ChatTimelineUiState {
     val displayedNodes = stableNodes
     val normalizedCompressionEvents = localizeCompressionEvents(
-        events = conversation.compressionEvents,
+        events = compressionEvents,
         totalStableCount = displayedNodes.size,
     ).sortedWith(compressionEventOrder)
     val latestCompressionEventId = normalizedCompressionEvents.lastOrNull()?.id
-    val assistant = settings.getAssistantById(conversation.assistantId)
-    val lastAssistantInputTokens = conversation.messageNodes
-        .asReversed()
-        .firstOrNull { it.currentMessage.role == MessageRole.ASSISTANT }
-        ?.currentMessage
-        ?.usage
-        ?.promptTokens
-        ?: 0
+    val assistant = settings.getAssistantById(assistantId)
 
     return ChatTimelineUiState(
-        conversationId = conversation.id,
-        conversationTitle = conversation.title,
+        conversationId = conversationId,
         messageItems = displayedNodes.mapIndexed { index, node ->
             ChatMessageItemModel(
                 renderModel = ChatMessageRenderModel(
@@ -194,22 +189,19 @@ internal fun buildChatTimelineUiState(
                     event = event,
                     isLatest = event.id == latestCompressionEventId,
                     ledgerStatus = if (event.id == latestCompressionEventId) {
-                        conversation.compressionState.memoryLedgerStatus
+                        compressionState.memoryLedgerStatus
                     } else {
                         null
                     },
                     ledgerError = if (event.id == latestCompressionEventId) {
-                        conversation.compressionState.memoryLedgerError
+                        compressionState.memoryLedgerError
                     } else {
                         null
                     },
                 ),
             )
         },
-        chatSuggestions = conversation.chatSuggestions,
         totalStableCount = displayedNodes.size,
-        latestCompressionEventId = latestCompressionEventId,
-        lastAssistantInputTokens = lastAssistantInputTokens,
     )
 }
 
@@ -230,7 +222,7 @@ internal fun buildChatPreviewUiState(
 }
 
 internal fun buildChatStreamingTailUiState(
-    conversation: Conversation,
+    assistantId: Uuid,
     settings: Settings,
     stableNodeCount: Int,
     streamingTail: StreamingTailState?,
@@ -242,7 +234,7 @@ internal fun buildChatStreamingTailUiState(
         return ChatStreamingTailUiState()
     }
 
-    val assistant = settings.getAssistantById(conversation.assistantId)
+    val assistant = settings.getAssistantById(assistantId)
     return ChatStreamingTailUiState(
         item = ChatMessageItemModel(
             renderModel = ChatMessageRenderModel(
@@ -296,4 +288,13 @@ internal fun ChatTimelineUiState.listIndexForCompressionEvent(eventId: Long): In
         }
     }
     return null
+}
+
+internal fun List<MessageNode>.lastAssistantInputTokens(): Int {
+    return asReversed()
+        .firstOrNull { it.currentMessage.role == MessageRole.ASSISTANT }
+        ?.currentMessage
+        ?.usage
+        ?.promptTokens
+        ?: 0
 }

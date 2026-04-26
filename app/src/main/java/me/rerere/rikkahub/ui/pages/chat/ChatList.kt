@@ -63,6 +63,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -117,8 +118,10 @@ import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
+import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
+import me.rerere.rikkahub.utils.extractQuotedContentAsText
 import me.rerere.rikkahub.utils.toLocalDateTime
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
@@ -141,6 +144,9 @@ fun ChatList(
     state: LazyListState,
     loading: Boolean,
     previewMode: Boolean,
+    conversationTitle: String,
+    chatSuggestions: List<String>,
+    lastAssistantInputTokens: Int,
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError> = emptyList(),
@@ -184,6 +190,9 @@ fun ChatList(
                 streamingTailItem = streamingTailItem,
                 state = state,
                 loading = loading,
+                conversationTitle = conversationTitle,
+                chatSuggestions = chatSuggestions,
+                lastAssistantInputTokens = lastAssistantInputTokens,
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
@@ -214,6 +223,9 @@ private fun ChatListNormal(
     streamingTailItem: ChatMessageItemModel?,
     state: LazyListState,
     loading: Boolean,
+    conversationTitle: String,
+    chatSuggestions: List<String>,
+    lastAssistantInputTokens: Int,
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
@@ -235,12 +247,28 @@ private fun ChatListNormal(
 ) {
     val scope = rememberCoroutineScope()
     var isRecentScroll by remember { mutableStateOf(false) }
+    val tts = LocalTTSState.current
+    val ttsIsSpeaking by tts.isSpeaking.collectAsState()
+    val ttsIsAvailable by tts.isAvailable.collectAsState()
     val stableMessageItems = timelineState.messageItems
     val allMessageItems = remember(stableMessageItems, streamingTailItem) {
         if (streamingTailItem == null) {
             stableMessageItems
         } else {
             stableMessageItems + streamingTailItem
+        }
+    }
+    val speakAssistantMessage = remember(tts, settings.displaySetting.ttsOnlyReadQuoted) {
+        { message: UIMessage ->
+            val text = message.toText()
+            val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
+                text.extractQuotedContentAsText() ?: text
+            } else {
+                text
+            }
+            if (textToSpeak.isNotBlank()) {
+                tts.speak(textToSpeak)
+            }
         }
     }
     val compressionItemsByBoundary = remember(timelineState.compressionItems) {
@@ -280,7 +308,7 @@ private fun ChatListNormal(
     // 对话大小警告对话框
     val sizeInfo = rememberConversationSizeInfo(
         nodeCount = timelineState.totalStableCount + if (streamingTailItem != null) 1 else 0,
-        lastAssistantInputTokens = timelineState.lastAssistantInputTokens,
+        lastAssistantInputTokens = lastAssistantInputTokens,
     )
     var showSizeWarningDialog by rememberSaveable(conversationStateKey) { mutableStateOf(true) }
     if (sizeInfo.showWarning && showSizeWarningDialog) {
@@ -290,7 +318,11 @@ private fun ChatListNormal(
         )
     }
 
-    val latestCompressionEventId = timelineState.latestCompressionEventId
+    val latestCompressionEventId = timelineState.compressionItems
+        .lastOrNull { it.model.isLatest }
+        ?.model
+        ?.event
+        ?.id
     var expandedCompressionEventId by rememberSaveable(conversationStateKey) { mutableStateOf(latestCompressionEventId) }
     var showRegenerateConfirm by rememberSaveable(conversationStateKey) { mutableStateOf(false) }
     var regenerateTarget by rememberSaveable(conversationStateKey) {
@@ -405,8 +437,15 @@ private fun ChatListNormal(
                         loading = loading && item.isLastMessage && streamingTailItem == null,
                         selecting = selecting,
                         selectedItems = selectedItems,
-                        allMessageItems = allMessageItems,
-                        onSelectingChange = { selecting = it },
+                        onShareUpTo = { globalIndex ->
+                            selecting = true
+                            selectedItems.clear()
+                            selectedItems.addAll(
+                                allMessageItems
+                                    .filter { candidate -> candidate.globalIndex <= globalIndex }
+                                    .map { candidate -> candidate.node.id }
+                            )
+                        },
                         onRegenerate = onRegenerate,
                         onEdit = onEdit,
                         onForkMessage = onForkMessage,
@@ -417,6 +456,10 @@ private fun ChatListNormal(
                         onClearTranslation = onClearTranslation,
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
+                        ttsIsSpeaking = ttsIsSpeaking,
+                        ttsIsAvailable = ttsIsAvailable,
+                        onSpeakAssistantMessage = speakAssistantMessage,
+                        onStopSpeaking = tts::stop,
                         lastMessage = item.isLastMessage && streamingTailItem == null,
                     )
                 }
@@ -473,8 +516,15 @@ private fun ChatListNormal(
                             loading = loading && messageItem.isLastMessage && streamingTailItem == null,
                             selecting = selecting,
                             selectedItems = selectedItems,
-                            allMessageItems = allMessageItems,
-                            onSelectingChange = { selecting = it },
+                            onShareUpTo = { globalIndex ->
+                                selecting = true
+                                selectedItems.clear()
+                                selectedItems.addAll(
+                                    allMessageItems
+                                        .filter { candidate -> candidate.globalIndex <= globalIndex }
+                                        .map { candidate -> candidate.node.id }
+                                )
+                            },
                             onRegenerate = onRegenerate,
                             onEdit = onEdit,
                             onForkMessage = onForkMessage,
@@ -485,6 +535,10 @@ private fun ChatListNormal(
                             onClearTranslation = onClearTranslation,
                             onToolApproval = onToolApproval,
                             onToolAnswer = onToolAnswer,
+                            ttsIsSpeaking = ttsIsSpeaking,
+                            ttsIsAvailable = ttsIsAvailable,
+                            onSpeakAssistantMessage = speakAssistantMessage,
+                            onStopSpeaking = tts::stop,
                             lastMessage = messageItem.isLastMessage && streamingTailItem == null,
                         )
                     }
@@ -544,8 +598,15 @@ private fun ChatListNormal(
                         loading = loading,
                         selecting = selecting,
                         selectedItems = selectedItems,
-                        allMessageItems = allMessageItems,
-                        onSelectingChange = { selecting = it },
+                        onShareUpTo = { globalIndex ->
+                            selecting = true
+                            selectedItems.clear()
+                            selectedItems.addAll(
+                                allMessageItems
+                                    .filter { candidate -> candidate.globalIndex <= globalIndex }
+                                    .map { candidate -> candidate.node.id }
+                            )
+                        },
                         onRegenerate = onRegenerate,
                         onEdit = onEdit,
                         onForkMessage = onForkMessage,
@@ -556,6 +617,10 @@ private fun ChatListNormal(
                         onClearTranslation = onClearTranslation,
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
+                        ttsIsSpeaking = ttsIsSpeaking,
+                        ttsIsAvailable = ttsIsAvailable,
+                        onSpeakAssistantMessage = speakAssistantMessage,
+                        onStopSpeaking = tts::stop,
                         lastMessage = true,
                     )
                 }
@@ -670,7 +735,7 @@ private fun ChatListNormal(
                     showExportSheet = false
                     selectedItems.clear()
                 },
-                conversationTitle = timelineState.conversationTitle,
+                conversationTitle = conversationTitle,
                 selectedMessages = allMessageItems
                     .filter { it.node.id in selectedItems }
                     .map { it.message }
@@ -687,9 +752,9 @@ private fun ChatListNormal(
             )
 
             // Suggestion
-            if (timelineState.chatSuggestions.isNotEmpty() && !captureProgress) {
+            if (chatSuggestions.isNotEmpty() && !captureProgress) {
                 ChatSuggestionsRow(
-                    suggestions = timelineState.chatSuggestions,
+                    suggestions = chatSuggestions,
                     onClickSuggestion = onClickSuggestion,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -704,8 +769,7 @@ private fun ChatListMessageRow(
     loading: Boolean,
     selecting: Boolean,
     selectedItems: MutableList<Uuid>,
-    allMessageItems: List<ChatMessageItemModel>,
-    onSelectingChange: (Boolean) -> Unit,
+    onShareUpTo: (Int) -> Unit,
     onRegenerate: (UIMessage) -> Unit,
     onEdit: (UIMessage) -> Unit,
     onForkMessage: (UIMessage) -> Unit,
@@ -716,6 +780,10 @@ private fun ChatListMessageRow(
     onClearTranslation: (UIMessage) -> Unit,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)?,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
+    ttsIsSpeaking: Boolean,
+    ttsIsAvailable: Boolean,
+    onSpeakAssistantMessage: (UIMessage) -> Unit,
+    onStopSpeaking: () -> Unit,
     lastMessage: Boolean,
 ) {
     ListSelectableItem(
@@ -746,13 +814,7 @@ private fun ChatListMessageRow(
                 onDelete(item.message)
             },
             onShare = {
-                onSelectingChange(true)
-                selectedItems.clear()
-                selectedItems.addAll(
-                    allMessageItems
-                        .filter { candidate -> candidate.globalIndex <= item.globalIndex }
-                        .map { candidate -> candidate.node.id }
-                )
+                onShareUpTo(item.globalIndex)
             },
             onUpdate = {
                 onUpdateMessage(it)
@@ -765,6 +827,10 @@ private fun ChatListMessageRow(
             onClearTranslation = onClearTranslation,
             onToolApproval = onToolApproval,
             onToolAnswer = onToolAnswer,
+            ttsSpeaking = ttsIsSpeaking,
+            ttsAvailable = ttsIsAvailable,
+            onSpeakMessage = onSpeakAssistantMessage,
+            onStopSpeaking = onStopSpeaking,
             lastMessage = lastMessage,
         )
     }

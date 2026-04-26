@@ -33,6 +33,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
+import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.datastore.Settings
@@ -93,7 +94,6 @@ class ChatVM(
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
-    val stableConversation: StateFlow<Conversation> = chatService.getConversationStableFlow(_conversationId)
     val stableMessageNodes: StateFlow<List<MessageNode>> = chatService.getMessageNodesFlow(_conversationId)
     val streamingTail: StateFlow<StreamingTailState?> = chatService.getStreamingTailFlow(_conversationId)
     val streamingUiTick: StateFlow<Long> = chatService.getStreamingUiTickFlow(_conversationId)
@@ -223,21 +223,71 @@ class ChatVM(
         chatService.getLedgerGenerationUiStateFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val compressionScrollEvents: SharedFlow<Pair<Uuid, Long>> = chatService.compressionScrollEvents
-    private val workflowEnabledState: StateFlow<Boolean> = combine(stableConversation, settings) { conversation, settings ->
-        val assistant = settings.getAssistantById(conversation.assistantId) ?: settings.getCurrentAssistant()
+    private val conversationAssistantId: StateFlow<Uuid> = conversation.map { it.assistantId }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, conversation.value.assistantId)
+    private val conversationTitle: StateFlow<String> = conversation.map { it.title }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, conversation.value.title)
+    val chatSuggestions: StateFlow<List<String>> = conversation.map { it.chatSuggestions }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, conversation.value.chatSuggestions)
+    private val workflowState: StateFlow<me.rerere.rikkahub.data.model.WorkflowState?> =
+        conversation.map { it.workflowState }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, conversation.value.workflowState)
+    private val compressionState = conversation.map { it.compressionState }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, conversation.value.compressionState)
+    private val compressionEvents = conversation.map { it.compressionEvents }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, conversation.value.compressionEvents)
+    private val hasMessagesState: StateFlow<Boolean> = stableMessageNodes.map(List<MessageNode>::isNotEmpty)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, stableMessageNodes.value.isNotEmpty())
+    val lastAssistantInputTokens: StateFlow<Int> = stableMessageNodes.map(List<MessageNode>::lastAssistantInputTokens)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, stableMessageNodes.value.lastAssistantInputTokens())
+    val latestAssistantMessageTextForTts: StateFlow<String?> = stableMessageNodes.map { nodes ->
+        nodes.asReversed()
+            .firstOrNull { it.currentMessage.role == MessageRole.ASSISTANT }
+            ?.currentMessage
+            ?.toText()
+    }.distinctUntilChanged()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            stableMessageNodes.value.asReversed()
+                .firstOrNull { it.currentMessage.role == MessageRole.ASSISTANT }
+                ?.currentMessage
+                ?.toText()
+        )
+    private val workflowEnabledState: StateFlow<Boolean> = combine(conversationAssistantId, settings) { assistantId, settings ->
+        val assistant = settings.getAssistantById(assistantId) ?: settings.getCurrentAssistant()
         assistant.localTools.contains(LocalToolOption.WorkflowControl)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val chatChromeState: StateFlow<ChatChromeUiState> = combine(
-        stableConversation,
+    private val chatChromeBaseState: StateFlow<ChatChromeUiState> = combine(
+        conversationTitle,
+        conversationAssistantId,
+        hasMessagesState,
+        workflowState,
         settings,
-        workflowEnabledState,
-    ) { conversation, settings, workflowEnabled ->
+    ) { title, assistantId, hasMessages, workflowState, settings ->
         buildChatChromeUiState(
-            conversation = conversation,
+            title = title,
+            assistantId = assistantId,
+            hasMessages = hasMessages,
+            workflowState = workflowState,
             settings = settings,
-            workflowEnabled = workflowEnabled,
+            workflowEnabled = false,
             defaultAssistantLabel = context.getString(R.string.assistant_page_default_assistant),
         )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatChromeUiState())
+    val chatChromeState: StateFlow<ChatChromeUiState> = combine(
+        chatChromeBaseState,
+        workflowEnabledState,
+    ) { baseState, workflowEnabled ->
+        baseState.copy(workflowEnabled = workflowEnabled)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatChromeUiState())
     private val chatInputMetaState: StateFlow<ChatInputMetaState> = combine(
         workflowEnabledState,
@@ -278,13 +328,15 @@ class ChatVM(
         )
     )
     val chatInputUiState: StateFlow<ChatInputUiState> = combine(
-        stableConversation,
+        stableMessageNodes,
+        workflowState,
         chatInputMetaState,
         chatInputRuntimeState,
-    ) { conversation, metaState, runtimeState ->
+    ) { stableMessageNodes, workflowState, metaState, runtimeState ->
         buildChatInputUiState(
-            conversation = conversation,
+            messageCount = stableMessageNodes.size,
             workflowEnabled = metaState.workflowEnabled,
+            workflowActive = workflowState != null,
             currentChatModel = metaState.currentChatModel,
             loading = runtimeState.loading,
             enableWebSearch = metaState.enableWebSearch,
@@ -293,12 +345,17 @@ class ChatVM(
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatInputUiState())
     val chatTimelineUiState: StateFlow<ChatTimelineUiState> = combine(
-        stableConversation,
+        conversationAssistantId,
+        compressionState,
+        compressionEvents,
         settings,
         stableMessageNodes,
-    ) { conversation, settings, stableMessageNodes ->
+    ) { assistantId, compressionState, compressionEvents, settings, stableMessageNodes ->
         buildChatTimelineUiState(
-            conversation = conversation,
+            conversationId = _conversationId,
+            assistantId = assistantId,
+            compressionState = compressionState,
+            compressionEvents = compressionEvents,
             settings = settings,
             stableNodes = stableMessageNodes,
         )
@@ -313,13 +370,13 @@ class ChatVM(
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatPreviewUiState())
     val chatStreamingTailUiState: StateFlow<ChatStreamingTailUiState> = combine(
-        stableConversation,
+        conversationAssistantId,
         settings,
         stableMessageNodes,
         streamingTail,
-    ) { conversation, settings, stableMessageNodes, streamingTail ->
+    ) { assistantId, settings, stableMessageNodes, streamingTail ->
         buildChatStreamingTailUiState(
-            conversation = conversation,
+            assistantId = assistantId,
             settings = settings,
             stableNodeCount = stableMessageNodes.size,
             streamingTail = streamingTail,

@@ -117,6 +117,10 @@ fun ChatMessage(
     onUpdate: (MessageNode) -> Unit,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    ttsAvailable: Boolean? = null,
+    ttsSpeaking: Boolean? = null,
+    onSpeakMessage: ((UIMessage) -> Unit)? = null,
+    onStopSpeaking: (() -> Unit)? = null,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
@@ -211,6 +215,10 @@ fun ChatMessage(
                     onOpenActionSheet = {
                         showActionsSheet = true
                     },
+                    ttsAvailable = ttsAvailable,
+                    ttsSpeaking = ttsSpeaking,
+                    onSpeakMessage = onSpeakMessage,
+                    onStopSpeaking = onStopSpeaking,
                     onTranslate = onTranslate,
                     onClearTranslation = onClearTranslation
                 )
@@ -280,6 +288,10 @@ fun ChatMessage(
     onUpdate: (MessageNode) -> Unit,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    ttsAvailable: Boolean? = null,
+    ttsSpeaking: Boolean? = null,
+    onSpeakMessage: ((UIMessage) -> Unit)? = null,
+    onStopSpeaking: (() -> Unit)? = null,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
@@ -303,6 +315,10 @@ fun ChatMessage(
         onUpdate = onUpdate,
         isFavorite = isFavorite,
         onToggleFavorite = onToggleFavorite,
+        ttsAvailable = ttsAvailable,
+        ttsSpeaking = ttsSpeaking,
+        onSpeakMessage = onSpeakMessage,
+        onStopSpeaking = onStopSpeaking,
         onTranslate = onTranslate,
         onClearTranslation = onClearTranslation,
         onToolApproval = onToolApproval,
@@ -330,6 +346,7 @@ private fun MessagePartsBlock(
     val hapticFeedback = LocalHapticFeedback.current
     val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
+    val enableGenerationHaptics = loading && settings.displaySetting.enableMessageGenerationHapticEffect
 
     val handleClickCitation: (String) -> Unit = remember {
         handler@{ citationId ->
@@ -351,11 +368,12 @@ private fun MessagePartsBlock(
             }
         }
     }
-    LaunchedEffect(settings.displaySetting) {
+    LaunchedEffect(enableGenerationHaptics) {
+        if (!enableGenerationHaptics) return@LaunchedEffect
         snapshotFlow { partsState }
             .debounce(50.milliseconds)
             .collect { parts ->
-                if (parts.isNotEmpty() && loading && settings.displaySetting.enableMessageGenerationHapticEffect) {
+                if (parts.isNotEmpty()) {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 }
             }
@@ -403,6 +421,18 @@ private fun MessagePartsBlock(
             is MessagePartBlock.ContentBlock -> key(block.index) {
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
+                        val affectScope = if (role == MessageRole.USER) {
+                            AssistantAffectScope.USER
+                        } else {
+                            AssistantAffectScope.ASSISTANT
+                        }
+                        val visualText = remember(part.text, assistant, affectScope) {
+                            part.text.replaceRegexes(
+                                assistant = assistant,
+                                scope = affectScope,
+                                visual = true,
+                            )
+                        }
                         SelectionContainer {
                             if (role == MessageRole.USER) {
                                 Surface(
@@ -412,11 +442,7 @@ private fun MessagePartsBlock(
                                 ) {
                                     Column(modifier = Modifier.padding(8.dp)) {
                                         MarkdownBlock(
-                                            content = part.text.replaceRegexes(
-                                                assistant = assistant,
-                                                scope = AssistantAffectScope.USER,
-                                                visual = true,
-                                            ),
+                                            content = visualText,
                                             onClickCitation = handleClickCitation
                                         )
                                     }
@@ -429,22 +455,14 @@ private fun MessagePartsBlock(
                                     ) {
                                         Column(modifier = Modifier.padding(8.dp)) {
                                             MarkdownBlock(
-                                                content = part.text.replaceRegexes(
-                                                    assistant = assistant,
-                                                    scope = AssistantAffectScope.ASSISTANT,
-                                                    visual = true,
-                                                ),
+                                                content = visualText,
                                                 onClickCitation = handleClickCitation,
                                             )
                                         }
                                     }
                                 } else {
                                     MarkdownBlock(
-                                        content = part.text.replaceRegexes(
-                                            assistant = assistant,
-                                            scope = AssistantAffectScope.ASSISTANT,
-                                            visual = true,
-                                        ),
+                                        content = visualText,
                                         onClickCitation = handleClickCitation,
                                     )
                                 }

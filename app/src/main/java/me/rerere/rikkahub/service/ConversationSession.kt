@@ -33,8 +33,6 @@ class ConversationSession(
 
     // 会话状态
     val state = MutableStateFlow(initial)
-    private val _stableConversationState = MutableStateFlow(initial)
-    val stableConversationState: StateFlow<Conversation> = _stableConversationState.asStateFlow()
     private val _messageNodesState = MutableStateFlow(initial.messageNodes)
     val messageNodesState: StateFlow<List<MessageNode>> = _messageNodesState.asStateFlow()
     private val _streamingTailState = MutableStateFlow<StreamingTailState?>(null)
@@ -103,7 +101,6 @@ class ConversationSession(
 
     fun replaceConversation(conversation: Conversation) {
         currentConversation = conversation
-        _stableConversationState.value = conversation
         _messageNodesState.value = conversation.messageNodes
         _streamingTailState.value = null
         state.value = conversation
@@ -122,7 +119,6 @@ class ConversationSession(
         }
 
         val committedNodes = nodes.dropLast(1)
-        _stableConversationState.value = conversation.copy(messageNodes = committedNodes)
         _messageNodesState.value = committedNodes
 
         val nextVersion = _streamingUiTickState.value + 1L

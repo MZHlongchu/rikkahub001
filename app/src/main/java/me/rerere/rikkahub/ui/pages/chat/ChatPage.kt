@@ -67,7 +67,6 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.CompressionRegenerationTarget
@@ -102,11 +101,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val scope = rememberCoroutineScope()
 
     val setting by vm.settings.collectAsStateWithLifecycle()
-    val conversation by vm.stableConversation.collectAsStateWithLifecycle()
     val chatTimelineUiState by vm.chatTimelineUiState.collectAsStateWithLifecycle()
     val chatPreviewUiState by vm.chatPreviewUiState.collectAsStateWithLifecycle()
+    val chatStreamingTailUiState by vm.chatStreamingTailUiState.collectAsStateWithLifecycle()
     val chatChromeState by vm.chatChromeState.collectAsStateWithLifecycle()
     val chatInputUiState by vm.chatInputUiState.collectAsStateWithLifecycle()
+    val chatSuggestions by vm.chatSuggestions.collectAsStateWithLifecycle()
+    val lastAssistantInputTokens by vm.lastAssistantInputTokens.collectAsStateWithLifecycle()
+    val latestAssistantMessageTextForTts by vm.latestAssistantMessageTextForTts.collectAsStateWithLifecycle()
+    val streamingUiTick by vm.streamingUiTick.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
 
@@ -218,21 +221,25 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                 drawerContent = {
                     ChatDrawerContent(
                         navController = navController,
-                        current = conversation,
                         vm = vm,
                         settings = setting
                     )
                 }
             ) {
                 ChatPageContent(
+                    chatId = id,
                     inputState = inputState,
                     loadingJob = loadingJob,
                     setting = setting,
-                    conversation = conversation,
                     chatTimelineUiState = chatTimelineUiState,
                     chatPreviewUiState = chatPreviewUiState,
+                    chatStreamingTailUiState = chatStreamingTailUiState,
                     chatChromeState = chatChromeState,
                     chatInputUiState = chatInputUiState,
+                    chatSuggestions = chatSuggestions,
+                    lastAssistantInputTokens = lastAssistantInputTokens,
+                    latestAssistantMessageTextForTts = latestAssistantMessageTextForTts,
+                    streamingUiTick = streamingUiTick,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -251,21 +258,25 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                 drawerContent = {
                     ChatDrawerContent(
                         navController = navController,
-                        current = conversation,
                         vm = vm,
                         settings = setting
                     )
                 }
             ) {
                 ChatPageContent(
+                    chatId = id,
                     inputState = inputState,
                     loadingJob = loadingJob,
                     setting = setting,
-                    conversation = conversation,
                     chatTimelineUiState = chatTimelineUiState,
                     chatPreviewUiState = chatPreviewUiState,
+                    chatStreamingTailUiState = chatStreamingTailUiState,
                     chatChromeState = chatChromeState,
                     chatInputUiState = chatInputUiState,
+                    chatSuggestions = chatSuggestions,
+                    lastAssistantInputTokens = lastAssistantInputTokens,
+                    latestAssistantMessageTextForTts = latestAssistantMessageTextForTts,
+                    streamingUiTick = streamingUiTick,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -284,23 +295,20 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 }
 
 @Composable
-private fun TTSAutoPlayConversationBridge(
-    vm: ChatVM,
-    setting: Settings,
-) {
-    val conversation by vm.conversation.collectAsStateWithLifecycle()
-    TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
-}
-
-@Composable
 private fun StreamingChatList(
-    vm: ChatVM,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     state: LazyListState,
     loading: Boolean,
     previewMode: Boolean,
     settings: Settings,
     hazeState: dev.chrisbanes.haze.HazeState,
+    chatTimelineUiState: ChatTimelineUiState,
+    chatPreviewUiState: ChatPreviewUiState,
+    chatStreamingTailUiState: ChatStreamingTailUiState,
+    streamingUiTick: Long,
+    conversationTitle: String,
+    chatSuggestions: List<String>,
+    lastAssistantInputTokens: Int,
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
@@ -318,12 +326,9 @@ private fun StreamingChatList(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)?,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
     onToggleFavorite: ((MessageNode) -> Unit)?,
+    onSearchPreviewMessages: (String) -> Unit,
     onAutoScrollCheck: (String) -> Unit,
 ) {
-    val chatTimelineUiState by vm.chatTimelineUiState.collectAsStateWithLifecycle()
-    val chatPreviewUiState by vm.chatPreviewUiState.collectAsStateWithLifecycle()
-    val chatStreamingTailUiState by vm.chatStreamingTailUiState.collectAsStateWithLifecycle()
-    val streamingUiTick by vm.streamingUiTick.collectAsStateWithLifecycle()
     val autoScrollTargetIndex = chatTimelineUiState.totalListItemCount(
         includeStreamingTail = chatStreamingTailUiState.item != null,
         includeLoadingIndicator = loading,
@@ -347,6 +352,9 @@ private fun StreamingChatList(
         state = state,
         loading = loading,
         previewMode = previewMode,
+        conversationTitle = conversationTitle,
+        chatSuggestions = chatSuggestions,
+        lastAssistantInputTokens = lastAssistantInputTokens,
         settings = settings,
         hazeState = hazeState,
         errors = errors,
@@ -366,7 +374,7 @@ private fun StreamingChatList(
         onToolApproval = onToolApproval,
         onToolAnswer = onToolAnswer,
         onToggleFavorite = onToggleFavorite,
-        onSearchPreviewMessages = vm::searchPreviewMessages,
+        onSearchPreviewMessages = onSearchPreviewMessages,
     )
 }
 
@@ -398,15 +406,20 @@ private fun StreamingChatListAutoScrollEffect(
 
 @Composable
 private fun ChatPageContent(
+    chatId: Uuid,
     inputState: ChatInputState,
     loadingJob: Job?,
     setting: Settings,
     bigScreen: Boolean,
-    conversation: Conversation,
     chatTimelineUiState: ChatTimelineUiState,
     chatPreviewUiState: ChatPreviewUiState,
+    chatStreamingTailUiState: ChatStreamingTailUiState,
     chatChromeState: ChatChromeUiState,
     chatInputUiState: ChatInputUiState,
+    chatSuggestions: List<String>,
+    lastAssistantInputTokens: Int,
+    latestAssistantMessageTextForTts: String?,
+    streamingUiTick: Long,
     drawerState: DrawerState,
     navController: Navigator,
     vm: ChatVM,
@@ -417,20 +430,28 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
-    var previewMode by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var previewMode by rememberSaveable(chatId) { mutableStateOf(false) }
     val hazeState = rememberHazeState()
 
-    TTSAutoPlayConversationBridge(vm = vm, setting = setting)
-    val assistant = setting.assistants.find { it.id == conversation.assistantId }
-        ?: setting.getCurrentAssistant()
+    TTSAutoPlay(
+        vm = vm,
+        setting = setting,
+        chatId = chatId,
+        latestAssistantText = latestAssistantMessageTextForTts,
+    )
     val workflowEnabled = chatChromeState.workflowEnabled
     val workflowActive = chatChromeState.workflowActive
-    var showWorkflowPanel by rememberSaveable(conversation.id) { mutableStateOf(false) }
-    var showSandboxFileManager by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var showWorkflowPanel by rememberSaveable(chatId) { mutableStateOf(false) }
+    var showSandboxFileManager by rememberSaveable(chatId) { mutableStateOf(false) }
 
     LaunchedEffect(workflowEnabled, workflowActive) {
-        if (!workflowEnabled || !workflowActive) {
+        if (!workflowEnabled) {
             showWorkflowPanel = false
+            return@LaunchedEffect
+        }
+        if (!workflowActive) {
+            showWorkflowPanel = true
+            vm.initializeWorkflowState()
         }
     }
 
@@ -491,7 +512,7 @@ private fun ChatPageContent(
                     workflowEnabled = chatInputUiState.workflowEnabled,
                     workflowActive = chatInputUiState.workflowActive,
                     onToggleWorkflow = {
-                        if (conversation.workflowState == null) {
+                        if (!chatChromeState.workflowActive) {
                             vm.initializeWorkflowState()
                         } else {
                             vm.disableWorkflowState()
@@ -569,13 +590,19 @@ private fun ChatPageContent(
             containerColor = Color.Transparent,
         ) { innerPadding ->
             StreamingChatList(
-                vm = vm,
                 innerPadding = innerPadding,
                 state = chatListState,
                 loading = chatInputUiState.loading,
                 previewMode = previewMode,
                 settings = setting,
                 hazeState = hazeState,
+                chatTimelineUiState = chatTimelineUiState,
+                chatPreviewUiState = chatPreviewUiState,
+                chatStreamingTailUiState = chatStreamingTailUiState,
+                streamingUiTick = streamingUiTick,
+                conversationTitle = chatChromeState.title,
+                chatSuggestions = chatSuggestions,
+                lastAssistantInputTokens = lastAssistantInputTokens,
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
@@ -634,6 +661,7 @@ private fun ChatPageContent(
                 onToggleFavorite = { node ->
                     vm.toggleMessageFavorite(node)
                 },
+                onSearchPreviewMessages = vm::searchPreviewMessages,
                 onAutoScrollCheck = { detail ->
                     vm.recordUiDiagnostic(
                         category = "auto-scroll-check",
@@ -644,7 +672,7 @@ private fun ChatPageContent(
             )
         }
 
-        if (workflowEnabled && workflowActive) {
+        if (workflowEnabled) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -670,7 +698,7 @@ private fun ChatPageContent(
 
         if (showSandboxFileManager) {
             SandboxFileManagerDialog(
-                sandboxId = conversation.id.toString(),
+                sandboxId = chatId.toString(),
                 onDismiss = { showSandboxFileManager = false }
             )
         }
